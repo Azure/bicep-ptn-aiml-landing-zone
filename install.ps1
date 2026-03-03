@@ -1,5 +1,5 @@
 <#
-    GPT-RAG Jumpbox Setup Script – Updated for Custom Script Extension (CSE)
+    Jumpbox Setup Script – Updated for Custom Script Extension (CSE)
 
     Fixes included:
       • Correct AZD installation path
@@ -162,12 +162,12 @@ choco install docker-desktop -y --ignoredetectedreboot --force
 
 
 # ------------------------------
-# Clone GPT-RAG repo
+# Clone Bicep PTN AIML Landing Zone repo
 # ------------------------------
-write-host "Cloning GPT-RAG repo"
+write-host "Cloning Bicep PTN AIML Landing Zone repo"
 mkdir C:\github -ea SilentlyContinue
 cd C:\github
-git clone https://github.com/azure/gpt-rag -b $release --depth 1
+git clone https://github.com/azure/bicep-ptn-aiml-landing-zone -b $release --depth 1 ai-lz
 
 
 # ------------------------------
@@ -183,7 +183,7 @@ write-host "Logging into AZD"
 # ------------------------------
 # AZD initialization
 # ------------------------------
-cd C:\github\gpt-rag\
+cd C:\github\ai-lz\
 write-host "Initializing AZD environment"
 
 & $azdExe init -e $AzdEnvName --subscription $azureSubscriptionID --location $azureLocation
@@ -203,7 +203,7 @@ write-host "Initializing AZD environment"
 # ------------------------------
 # Clone dependent repos
 # ------------------------------
-$manifest = Get-Content "C:\github\gpt-rag\infra\manifest.json" | ConvertFrom-Json
+$manifest = Get-Content "C:\github\ai-lz\manifest.json" | ConvertFrom-Json
 
 foreach ($repo in $manifest.components) {
     $repoName = $repo.name
@@ -219,7 +219,7 @@ foreach ($repo in $manifest.components) {
     else {
         write-host "Cloning repository: $repoName ($tag)"
         git clone -b $tag --depth 1 $repoUrl "C:\github\$repoName"
-        copy-item C:\github\gpt-rag\.azure C:\github\$repoName -recurse -force
+        copy-item C:\github\ai-lz\.azure C:\github\$repoName -recurse -force
     }
 
     git config --global --add safe.directory "C:/github/$repoName"

@@ -4,5 +4,5 @@ metadata:
   template: azure-ai-lz
 infra:
   provider: bicep
-  path: infra
+  path: .
   module: main
