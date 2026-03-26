@@ -5,7 +5,7 @@
 
 Describe the intention of the proposed changes. What problem does it solve or what functionality does it add?
 
-## Type of change
+## Type of change 
 
 - [ ] Bugfix
 - [ ] Feature
