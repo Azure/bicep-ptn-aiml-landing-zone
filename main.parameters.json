@@ -137,7 +137,6 @@
           "name": "conversations",
           "canonical_name": "CONVERSATIONS_DATABASE_CONTAINER",
           "partitionKey": "/principal_id",
-          "throughput": 400,
           "indexingPolicy": {
             "compositeIndexes": [
               [
@@ -150,7 +149,7 @@
                 { "path": "/_ts", "order": "Descending" }
               ]
             ]
-          }          
+          }
         }
       ]
     },

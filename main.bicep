@@ -317,7 +317,10 @@ param acrDnsSuffix string = (environment().name == 'AzureUSGovernment' ? 'azurec
 // Cosmos DB Database params
 // ----------------------------------------------------------------------
 
-@description('Name of the Cosmos DB account to create')
+@description('Optional throughput (RU/s) for the Cosmos DB database. Omit or set to null for serverless accounts.')
+param dbDatabaseThroughput int?
+
+@description('List of Cosmos DB containers to create. Each entry supports optional throughput and indexingPolicy via safe access.')
 param databaseContainersList array
 
 // ----------------------------------------------------------------------
@@ -2035,13 +2038,13 @@ module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' =
     sqlDatabases: [
       {
         name: dbDatabaseName
-        throughput: 400
+        throughput: dbDatabaseThroughput
         containers: [
           for container in databaseContainersList: {
             name: container.name
             paths: [container.partitionKey]
             defaultTtl: -1
-            throughput: container.throughput
+            throughput: container.?throughput
             indexingPolicy: container.?indexingPolicy
           }
         ]

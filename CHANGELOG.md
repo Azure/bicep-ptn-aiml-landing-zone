@@ -5,8 +5,10 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [v1.0.4] - 2026-03-29
 ### Changed
-- Made Cosmos DB container throughput parameterizable per container entry instead of hardcoded to 400 RU/s.
-- Used Bicep safe access operator (`container.?indexingPolicy`) replacing verbose `contains()` pattern.
+- Made Cosmos DB throughput fully optional at both database and container levels using nullable types and safe access operators.
+- Added `dbDatabaseThroughput` parameter (`int?`) for optional database-level throughput configuration.
+- Container-level throughput and indexing policy are now optional via safe access (`container.?throughput`, `container.?indexingPolicy`).
+- Default parameters no longer set throughput, aligning with the serverless Cosmos DB account configuration.
 
 ## [v1.0.3] - 2026-03-24
 ### Changed
