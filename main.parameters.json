@@ -164,6 +164,8 @@
           "profile_name": "main",
           "min_replicas": 1,
           "max_replicas": 1,
+          "cpu": "1.0",
+          "memory": "2.0Gi",          
           "canonical_name": "ORCHESTRATOR_APP",
           "roles": [
             "AppConfigurationDataReader",

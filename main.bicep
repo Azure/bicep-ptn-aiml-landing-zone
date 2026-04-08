@@ -1953,8 +1953,8 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
           name: app.service_name
           image: _containerDummyImageName
           resources: {
-            cpu: '0.5'
-            memory: '1.0Gi'
+            cpu: app.?cpu ?? '0.5'
+            memory: app.?memory ?? '1.0Gi'
           }
           env: [
             {

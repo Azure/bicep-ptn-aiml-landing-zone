@@ -1,6 +1,6 @@
 {
-  "tag": "v1.0.5",
+  "tag": "v1.0.6",
   "repo": "https://github.com/azure/bicep-ptn-aiml-landing-zone.git",
-  "ailz_tag": "v1.0.5",
+  "ailz_tag": "v1.0.6",
   "components": []
 }
