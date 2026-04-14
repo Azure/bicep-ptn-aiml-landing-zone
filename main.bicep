@@ -81,6 +81,14 @@ param appConfigLabel string = 'ai-lz'
 @description('Enable network isolation for the deployment. This will restrict public access to resources and require private endpoints where applicable.')
 param networkIsolation bool = false
 
+@description('''When set to true, Private DNS Zones and DNS zone groups will NOT be created by this module.
+Use this option in environments where Azure Policy automatically manages Private DNS Zone linking for private endpoints
+(e.g., CAF Enterprise-Scale Platform Landing Zone). Creating DNS zones in those environments causes conflicts with
+policy-driven DNS management and results in deployment failures.
+When false (default), the module creates and manages all Private DNS Zones and links them to the VNet.
+Requires networkIsolation to be true to have any effect.''')
+param policyManagedPrivateDns bool = false
+
 @description('Use an existing Virtual Network. When false, a new VNet will be created.')
 param useExistingVNet bool = false
 
@@ -379,6 +387,7 @@ var _manifest = loadJsonContent('./manifest.json')
 var _azdTags = { 'azd-env-name': environmentName }
 var _tags = union(_azdTags, deploymentTags)
 var _networkIsolation = empty(string(networkIsolation)) ? false : bool(networkIsolation)
+var _deployPrivateDnsZones = _networkIsolation && !policyManagedPrivateDns
 
 
 // ----------------------------------------------------------------------
@@ -1009,7 +1018,7 @@ resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (dep
 ///////////////////////////////////////////////////////////////////////////
 
 // AI Foundry Account
-module privateDnsZoneCogSvcs 'modules/networking/private-dns.bicep' = if(_networkIsolation) {
+module privateDnsZoneCogSvcs 'modules/networking/private-dns.bicep' = if(_deployPrivateDnsZones) {
   name: 'dep-cogsvcs-private-dns-zone'
   params: {
     dnsName: 'privatelink.cognitiveservices.azure.com'
@@ -1022,7 +1031,7 @@ module privateDnsZoneCogSvcs 'modules/networking/private-dns.bicep' = if(_networ
 }
 
 // Open AI
-module privateDnsZoneOpenAi 'modules/networking/private-dns.bicep' = if(_networkIsolation) {
+module privateDnsZoneOpenAi 'modules/networking/private-dns.bicep' = if(_deployPrivateDnsZones) {
   name: 'dep-openai-private-dns-zone'
   params: {
     dnsName: 'privatelink.openai.azure.com'
@@ -1035,7 +1044,7 @@ module privateDnsZoneOpenAi 'modules/networking/private-dns.bicep' = if(_network
 }
 
 // AI Services
-module privateDnsZoneAiServices 'modules/networking/private-dns.bicep' = if (_networkIsolation) {
+module privateDnsZoneAiServices 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones) {
   name: 'dep-aiservices-private-dns-zone'
   params: {
     dnsName: 'privatelink.services.ai.azure.com'
@@ -1048,7 +1057,7 @@ module privateDnsZoneAiServices 'modules/networking/private-dns.bicep' = if (_ne
 }
 
 // AI Search
-module privateDnsZoneSearch 'modules/networking/private-dns.bicep' = if (_networkIsolation){
+module privateDnsZoneSearch 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones){
   name: 'dep-search-std-private-dns-zone'
   params: {
     dnsName: 'privatelink.search.windows.net'
@@ -1061,7 +1070,7 @@ module privateDnsZoneSearch 'modules/networking/private-dns.bicep' = if (_networ
 }
 
 // Cosmos DB
-module privateDnsZoneCosmos 'modules/networking/private-dns.bicep' = if (_networkIsolation) {
+module privateDnsZoneCosmos 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones) {
   name: 'dep-cosmos-std-private-dns-zone'
   params: {
     dnsName: 'privatelink.documents.azure.com'
@@ -1074,7 +1083,7 @@ module privateDnsZoneCosmos 'modules/networking/private-dns.bicep' = if (_networ
 }
 
 // Storage Account
-module privateDnsZoneBlob 'modules/networking/private-dns.bicep' = if (_networkIsolation) {
+module privateDnsZoneBlob 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones) {
   name: 'dep-blob-std-private-dns-zone'
   params: {
     dnsName: 'privatelink.blob.${environment().suffixes.storage}'
@@ -1087,7 +1096,7 @@ module privateDnsZoneBlob 'modules/networking/private-dns.bicep' = if (_networkI
 }
 
 // Key Vault
-module privateDnsZoneKeyVault 'modules/networking/private-dns.bicep' = if (_networkIsolation) {
+module privateDnsZoneKeyVault 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones) {
   name: 'dep-kv-std-private-dns-zone'
   params: {
     dnsName: 'privatelink.vaultcore.azure.net'
@@ -1101,7 +1110,7 @@ module privateDnsZoneKeyVault 'modules/networking/private-dns.bicep' = if (_netw
 
 
 // Application Configuration
-module privateDnsZoneAppConfig 'modules/networking/private-dns.bicep' = if (_networkIsolation){
+module privateDnsZoneAppConfig 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones){
   name: 'appconfig-private-dns-zone'
   params: {
     dnsName: 'privatelink.azconfig.io'
@@ -1115,7 +1124,7 @@ module privateDnsZoneAppConfig 'modules/networking/private-dns.bicep' = if (_net
 
 
 // Application Insights
-module privateDnsZoneInsights 'modules/networking/private-dns.bicep' = if (_networkIsolation){
+module privateDnsZoneInsights 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones){
   name: 'appinsights-private-dns-zone'
   params: {
     dnsName: 'privatelink.applicationinsights.io'
@@ -1128,7 +1137,7 @@ module privateDnsZoneInsights 'modules/networking/private-dns.bicep' = if (_netw
 }
 
 // Container Apps
-module privateDnsZoneContainerApps 'modules/networking/private-dns.bicep' = if (_networkIsolation && deployContainerApps)  {
+module privateDnsZoneContainerApps 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerApps)  {
   name: 'containerapps-private-dns-zone'
   params: {
     dnsName: 'privatelink.${location}.azurecontainerapps.io'
@@ -1142,7 +1151,7 @@ module privateDnsZoneContainerApps 'modules/networking/private-dns.bicep' = if (
 
 
 // Container Registry 
-module privateDnsZoneAcr 'modules/networking/private-dns.bicep' = if (_networkIsolation && deployContainerRegistry) {
+module privateDnsZoneAcr 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerRegistry) {
   name: 'containerregistry-private-dns-zone'
   params: {
     dnsName: 'privatelink.${acrDnsSuffix}'
@@ -1181,20 +1190,19 @@ module privateEndpointStorageBlob 'modules/networking/private-endpoint.bicep' = 
         }
       }
     ]
-    privateDnsZoneGroup: {
+    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
       name: 'blobDnsZoneGroup'
       privateDnsZoneGroupConfigs: [
         {
           name: 'blobARecord'
           #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneBlob.outputs.resourceId
+          privateDnsZoneResourceId: privateDnsZoneBlob!.outputs.resourceId
         }
       ]
     }
   }
   dependsOn: [
     storageAccount!
-    privateDnsZoneBlob!
   ]
 }
 
@@ -1217,20 +1225,19 @@ module privateEndpointCosmos 'modules/networking/private-endpoint.bicep' = if (_
         }
       }
     ]
-    privateDnsZoneGroup: {
+    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
       name: 'cosmosDnsZoneGroup'
       privateDnsZoneGroupConfigs: [
         {
           name: 'cosmosARecord'
           #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneCosmos.outputs.resourceId
+          privateDnsZoneResourceId: privateDnsZoneCosmos!.outputs.resourceId
         }
       ]
     }
   }
   dependsOn: [
     cosmosDBAccount!
-    privateDnsZoneCosmos!
     privateEndpointStorageBlob // Serialize PE operations to avoid conflicts
   ]
 }
@@ -1254,20 +1261,19 @@ module privateEndpointSearch 'modules/networking/private-endpoint.bicep' = if (_
         }
       }
     ]
-    privateDnsZoneGroup: {
+    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
       name: 'searchDnsZoneGroup'
       privateDnsZoneGroupConfigs: [
         {
           name: 'searchARecord'
           #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneSearch.outputs.resourceId
+          privateDnsZoneResourceId: privateDnsZoneSearch!.outputs.resourceId
         }
       ]
     }
   }
   dependsOn: [
     searchService!
-    privateDnsZoneSearch!
     privateEndpointCosmos // Serialize PE operations to avoid conflicts
   ]
 }
@@ -1291,20 +1297,19 @@ module privateEndpointKeyVault 'modules/networking/private-endpoint.bicep' = if 
         }
       }
     ]
-    privateDnsZoneGroup: {
+    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
       name: 'kvDnsZoneGroup'
       privateDnsZoneGroupConfigs: [
         {
           name: 'kvARecord'
           #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneKeyVault.outputs.resourceId
+          privateDnsZoneResourceId: privateDnsZoneKeyVault!.outputs.resourceId
         }
       ]
     }
   }
   dependsOn: [
     keyVault!
-    privateDnsZoneKeyVault!
     privateEndpointSearch // Serialize PE operations to avoid conflicts
   ]
 }
@@ -1328,20 +1333,19 @@ module privateEndpointAppConfig 'modules/networking/private-endpoint.bicep' = if
         }
       }
     ]
-    privateDnsZoneGroup: {
+    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
       name: 'appConfigDnsZoneGroup'
       privateDnsZoneGroupConfigs: [
         {
           name: 'appConfigARecord'
           #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneAppConfig.outputs.resourceId
+          privateDnsZoneResourceId: privateDnsZoneAppConfig!.outputs.resourceId
         }
       ]
     }
   }
   dependsOn: [
     appConfig!
-    privateDnsZoneAppConfig!
     privateEndpointKeyVault // Serialize PE operations to avoid conflicts
   ]
 }
@@ -1365,20 +1369,19 @@ module privateEndpointContainerAppsEnv 'modules/networking/private-endpoint.bice
         }
       }
     ]
-    privateDnsZoneGroup: {
+    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
       name: 'ccaDnsZoneGroup'
       privateDnsZoneGroupConfigs: [
         {
           name: 'ccaARecord'
           #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneContainerApps.outputs.resourceId
+          privateDnsZoneResourceId: privateDnsZoneContainerApps!.outputs.resourceId
         }
       ]
     }
   }
   dependsOn: [
     containerEnv!
-    privateDnsZoneContainerApps!
     privateEndpointAppConfig // Serialize PE operations to avoid conflicts
   ]
 }
@@ -1400,7 +1403,7 @@ module privateEndpointAcr 'modules/networking/private-endpoint.bicep' = if (_net
         }
       }
     ]
-    privateDnsZoneGroup: {
+    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
       name: 'acrDnsZoneGroup'
       privateDnsZoneGroupConfigs: [
         {
@@ -1695,7 +1698,7 @@ resource privateLinkScope 'microsoft.insights/privatelinkscopes@2021-07-01-previ
   ]
 }
 
-module privateDnsZoneAzureMonitor 'modules/networking/private-dns.bicep' = if (_networkIsolation && deployContainerRegistry)  {
+module privateDnsZoneAzureMonitor 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerRegistry)  {
   name: 'azure-monitor-private-dns-zone'
   params: {
     dnsName: 'privatelink.monitor.azure.com'
@@ -1707,7 +1710,7 @@ module privateDnsZoneAzureMonitor 'modules/networking/private-dns.bicep' = if (_
   }
 }
 
-module privateDnsZoneOmsOpsInsights 'modules/networking/private-dns.bicep' = if (_networkIsolation && deployContainerRegistry)  {
+module privateDnsZoneOmsOpsInsights 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerRegistry)  {
   name: 'oms-opinsights-private-dns-zone'
   params: {
     dnsName: 'privatelink.oms.opinsights.azure.com'
@@ -1719,7 +1722,7 @@ module privateDnsZoneOmsOpsInsights 'modules/networking/private-dns.bicep' = if 
   }
 }
 
-module privateDnsZoneOdsOpsInsights 'modules/networking/private-dns.bicep' = if (_networkIsolation && deployContainerRegistry)  {
+module privateDnsZoneOdsOpsInsights 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerRegistry)  {
   name: 'ods-opinsights-private-dns-zone'
   params: {
     dnsName: 'privatelink.ods.opinsights.azure.com'
@@ -1731,7 +1734,7 @@ module privateDnsZoneOdsOpsInsights 'modules/networking/private-dns.bicep' = if 
   }
 }
 
-module privateDnsZoneAzureAutomation 'modules/networking/private-dns.bicep' = if (_networkIsolation && deployContainerRegistry)  {
+module privateDnsZoneAzureAutomation 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerRegistry)  {
   name: 'azure-automation-private-dns-zone'
   params: {
     dnsName: 'privatelink.agentsvc.azure.automation.net'
@@ -1760,28 +1763,28 @@ module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bice
         }
       }
     ]
-    privateDnsZoneGroup: {
+    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
       name: 'privateLinkDnsZoneGroup'
       privateDnsZoneGroupConfigs: [
         {
           name: 'azuremonitorARecord'
           #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneAzureMonitor.outputs.resourceId
+          privateDnsZoneResourceId: privateDnsZoneAzureMonitor!.outputs.resourceId
         }
         {
           name: 'omsinsightsARecord'
           #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneOmsOpsInsights.outputs.resourceId
+          privateDnsZoneResourceId: privateDnsZoneOmsOpsInsights!.outputs.resourceId
         }
         {
           name: 'odsinsightsARecord'
           #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneOdsOpsInsights.outputs.resourceId
+          privateDnsZoneResourceId: privateDnsZoneOdsOpsInsights!.outputs.resourceId
         }
         {
           name: 'automationARecord'
           #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneAzureAutomation.outputs.resourceId
+          privateDnsZoneResourceId: privateDnsZoneAzureAutomation!.outputs.resourceId
         }
       ]
     }
