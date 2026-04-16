@@ -89,6 +89,12 @@ When false (default), the module creates and manages all Private DNS Zones and l
 Requires networkIsolation to be true to have any effect.''')
 param policyManagedPrivateDns bool = false
 
+@description('The Azure region where private endpoints will be created. Defaults to the main deployment location. Use this when your VNet is in a different region than the resources.')
+param privateEndpointLocation string = ''
+
+@description('The name of the resource group where private endpoints will be created. When empty, private endpoints are placed in the VNet resource group (for existing VNets with sideBySideDeploy disabled) or the deployment resource group.')
+param privateEndpointResourceGroupName string = ''
+
 @description('Use an existing Virtual Network. When false, a new VNet will be created.')
 param useExistingVNet bool = false
 
@@ -416,6 +422,10 @@ var _caEnvSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${
 var _jumpbxSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${jumpboxSubnetName}' : ''
 #disable-next-line BCP318
 var _agentSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${agentSubnetName}' : ''
+
+var _peLocation = !empty(privateEndpointLocation) ? privateEndpointLocation : location
+var _defaultPeResourceGroupName = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
+var _peResourceGroupName = !empty(privateEndpointResourceGroupName) ? privateEndpointResourceGroupName : _defaultPeResourceGroupName
 
 // ----------------------------------------------------------------------
 // VM vars
@@ -1176,8 +1186,8 @@ module privateEndpointStorageBlob 'modules/networking/private-endpoint.bicep' = 
   name: 'blob-private-endpoint'
   params: {
     name: '${const.abbrs.networking.privateEndpoint}${storageAccountName}'
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    location: location
+    resourceGroupName: _peResourceGroupName
+    location: _peLocation
     tags: _tags
     subnetResourceId: _peSubnetId
     privateLinkServiceConnections: [
@@ -1211,8 +1221,8 @@ module privateEndpointCosmos 'modules/networking/private-endpoint.bicep' = if (_
   name: 'cosmos-private-endpoint'
   params: {
     name: '${const.abbrs.networking.privateEndpoint}${dbAccountName}'
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    location: location
+    resourceGroupName: _peResourceGroupName
+    location: _peLocation
     tags: _tags
     subnetResourceId: _peSubnetId
     privateLinkServiceConnections: [
@@ -1247,8 +1257,8 @@ module privateEndpointSearch 'modules/networking/private-endpoint.bicep' = if (_
   name: 'search-private-endpoint'
   params: {
     name: '${const.abbrs.networking.privateEndpoint}${searchServiceName}'
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    location: location
+    resourceGroupName: _peResourceGroupName
+    location: _peLocation
     tags: _tags
     subnetResourceId: _peSubnetId
     privateLinkServiceConnections: [
@@ -1283,8 +1293,8 @@ module privateEndpointKeyVault 'modules/networking/private-endpoint.bicep' = if 
   name: 'kv-private-endpoint'
   params: {
     name: '${const.abbrs.networking.privateEndpoint}${keyVaultName}'
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    location: location
+    resourceGroupName: _peResourceGroupName
+    location: _peLocation
     tags: _tags
     subnetResourceId: _peSubnetId
     privateLinkServiceConnections: [
@@ -1319,8 +1329,8 @@ module privateEndpointAppConfig 'modules/networking/private-endpoint.bicep' = if
   name: 'appconfig-private-endpoint'
   params: {
     name: '${const.abbrs.networking.privateEndpoint}${appConfigName}'
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    location: location
+    resourceGroupName: _peResourceGroupName
+    location: _peLocation
     tags: _tags
     subnetResourceId: _peSubnetId
     privateLinkServiceConnections: [
@@ -1355,8 +1365,8 @@ module privateEndpointContainerAppsEnv 'modules/networking/private-endpoint.bice
   name: 'dep-containerapps-env-private-endpoint'
   params: {
     name: '${const.abbrs.networking.privateEndpoint}${containerEnvName}'
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    location: location
+    resourceGroupName: _peResourceGroupName
+    location: _peLocation
     tags: _tags
     subnetResourceId: _peSubnetId
     privateLinkServiceConnections: [
@@ -1390,8 +1400,8 @@ module privateEndpointAcr 'modules/networking/private-endpoint.bicep' = if (_net
   name: 'dep-acr-private-endpoint'
   params: {
     name: '${const.abbrs.networking.privateEndpoint}${containerRegistryName}'
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    location: location
+    resourceGroupName: _peResourceGroupName
+    location: _peLocation
     tags: _tags
     subnetResourceId: _peSubnetId
     privateLinkServiceConnections: [
@@ -1750,8 +1760,8 @@ module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bice
   name: 'privatelink-scope-private-endpoint'
   params: {
     name: '${const.abbrs.networking.privateEndpoint}${const.abbrs.networking.privateLinkScope}${resourceToken}'
-    location: location
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
+    location: _peLocation
+    resourceGroupName: _peResourceGroupName
     tags: _tags
     subnetResourceId: _peSubnetId
     privateLinkServiceConnections: [

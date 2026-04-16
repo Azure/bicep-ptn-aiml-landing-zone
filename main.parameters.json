@@ -12,6 +12,8 @@
     "principalId":                         { "value": "${AZURE_PRINCIPAL_ID}" },
 
     "networkIsolation":                    { "value": "${NETWORK_ISOLATION}" },
+    "privateEndpointLocation":             { "value": "${AZURE_PE_LOCATION}" },
+    "privateEndpointResourceGroupName":    { "value": "${AZURE_PE_RESOURCE_GROUP_NAME}" },
     "useUAI":                              { "value": "${USE_UAI}" },
     "useCAppAPIKey":                       { "value": "${USE_CAPP_API_KEY}" },    
     "useZoneRedundancy":                   { "value": "false" },    
