@@ -3,6 +3,7 @@ param addressPrefix string
 param delegations array = []
 param serviceEndpoints array = []
 param networkSecurityGroupId string = ''
+param routeTableId string = ''
 
 resource subnetsM 'Microsoft.Network/virtualNetworks/subnets@2024-07-01' = {
       name: name
@@ -12,6 +13,9 @@ resource subnetsM 'Microsoft.Network/virtualNetworks/subnets@2024-07-01' = {
         serviceEndpoints: serviceEndpoints
         networkSecurityGroup: empty(networkSecurityGroupId) ? null : {
           id: networkSecurityGroupId
+        }
+        routeTable: empty(routeTableId) ? null : {
+          id: routeTableId
         }
     }
   }

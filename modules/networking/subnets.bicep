@@ -36,7 +36,7 @@ module nsgsM 'network-security-group.bicep' = [
   }
 ]
 
-var invalidNsgSubnets = ['AzureBastionSubnet', 'AzureFirewallSubnet','AppGatewaySubnet']
+var invalidNsgSubnets = ['AzureFirewallSubnet','AppGatewaySubnet']
 
 @batchSize(1)
 module subnetsM 'subnet.bicep' = [
@@ -59,7 +59,10 @@ module subnetsM 'subnet.bicep' = [
             service : subnets[i].serviceEndpoints[0]
           }
         ]
-        networkSecurityGroupId: deployNsgs && !contains(invalidNsgSubnets, subnets[i].name) ? nsgsM[i].outputs.id : null
+        networkSecurityGroupId: !empty(subnets[i].?networkSecurityGroupResourceId ?? '')
+          ? string(subnets[i].networkSecurityGroupResourceId)
+          : (deployNsgs && !contains(invalidNsgSubnets, subnets[i].name) ? nsgsM[i]!.outputs.id : '')
+        routeTableId: string(subnets[i].?routeTableResourceId ?? '')
     }
   }
 ]
