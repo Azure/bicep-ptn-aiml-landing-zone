@@ -803,7 +803,7 @@ resource firewallDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-p
   scope: azureFirewall
   properties: {
     #disable-next-line BCP318
-    workspaceId: logAnalytics.outputs.resourceId
+    workspaceId: logAnalytics.id
     logs: [
       {
         categoryGroup: 'allLogs'
@@ -819,15 +819,10 @@ resource firewallDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-p
   }
 }
 
-//AI Foundry Search User Managed Identity
-module testVmUAI 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1' = if (_useUAI) {
+//Test VM User Managed Identity
+resource testVmUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI) {
   name: '${const.abbrs.security.managedIdentity}${_vmName}'
-  params: {
-    // Required parameters
-    name: '${const.abbrs.security.managedIdentity}${_vmName}'
-    // Non-required parameters
-    location: location
-  }
+  location: location
 }
 
 // Test VM
@@ -841,7 +836,7 @@ module testVm 'br/public:avm/res/compute/virtual-machine:0.15.0' = if (deployVM 
     managedIdentities: {
       systemAssigned: _useUAI ? false : true
       #disable-next-line BCP318
-      userAssignedResourceIds: _useUAI ? [testVmUAI.outputs.resourceId] : []
+      userAssignedResourceIds: _useUAI ? [testVmUAI.id] : []
     }
     imageReference: {
       publisher: vmImagePublisher
@@ -917,274 +912,131 @@ resource natGateway 'Microsoft.Network/natGateways@2024-10-01' = if (deployVM &&
   }
 }
 
-// Container Apps
-// Container Apps Contributor
-// -> TestVm
-module assignContainerAppsTestVm 'modules/security/resource-role-assignment.bicep' = if (deployVM && deployAppConfig && deployContainerRegistry && _networkIsolation) {
-  name: 'assignContainerAppsTestVm'
+// ---------------------------------------------------------------------------
+// TestVM role assignments (consolidated into a single array-driven module call
+// to keep the compiled ARM template under the 4 MB deployment limit).
+// ---------------------------------------------------------------------------
+var _testVmPrincipalId = (deployVM && _networkIsolation)
+  #disable-next-line BCP318
+  ? (_useUAI ? testVmUAI.properties.principalId : testVm.outputs.systemAssignedMIPrincipalId!)
+  : ''
+
+var _testVmRoles = (deployVM && _networkIsolation) ? concat(
+  (deployAppConfig && deployContainerRegistry) ? [
+    {
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.ContainerAppsContributor.guid)
+      principalId: _testVmPrincipalId
+      resourceId: ''
+      principalType: 'ServicePrincipal'
+    }
+    {
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.ManagedIdentityOperator.guid)
+      principalId: _testVmPrincipalId
+      resourceId: ''
+      principalType: 'ServicePrincipal'
+    }
+    {
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.ContainerRegistryRepositoryWriter.guid)
+      principalId: _testVmPrincipalId
+      #disable-next-line BCP318
+      resourceId: containerRegistry.id
+      principalType: 'ServicePrincipal'
+    }
+    {
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.ContainerRegistryContributorDataAccessConfigurationAdministrator.guid)
+      principalId: _testVmPrincipalId
+      #disable-next-line BCP318
+      resourceId: containerRegistry.id
+      principalType: 'ServicePrincipal'
+    }
+    {
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.ContainerRegistryTasksContributor.guid)
+      principalId: _testVmPrincipalId
+      #disable-next-line BCP318
+      resourceId: containerRegistry.id
+      principalType: 'ServicePrincipal'
+    }
+  ] : [],
+  deployAppConfig ? [
+    {
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AppConfigurationDataOwner.guid)
+      principalId: _testVmPrincipalId
+      #disable-next-line BCP318
+      resourceId: appConfig.id
+      principalType: 'ServicePrincipal'
+    }
+  ] : [],
+  deployContainerRegistry ? [
+    {
+      principalId: _testVmPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPush.guid)
+      #disable-next-line BCP318
+      resourceId: containerRegistry.id
+      principalType: 'ServicePrincipal'
+    }
+  ] : [],
+  deployKeyVault ? [
+    {
+      principalId: _testVmPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultContributor.guid)
+      #disable-next-line BCP318
+      resourceId: keyVault.id
+      principalType: 'ServicePrincipal'
+    }
+    {
+      principalId: _testVmPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultSecretsOfficer.guid)
+      #disable-next-line BCP318
+      resourceId: keyVault.id
+      principalType: 'ServicePrincipal'
+    }
+  ] : [],
+  deploySearchService ? [
+    {
+      principalId: _testVmPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.SearchServiceContributor.guid)
+      #disable-next-line BCP318
+      resourceId: searchService.outputs.resourceId
+      principalType: 'ServicePrincipal'
+    }
+    {
+      principalId: _testVmPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.SearchIndexDataContributor.guid)
+      #disable-next-line BCP318
+      resourceId: searchService.outputs.resourceId
+      principalType: 'ServicePrincipal'
+    }
+  ] : [],
+  deployAiFoundry ? [
+    {
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesContributor.guid)
+      principalId: _testVmPrincipalId
+      resourceId: aiFoundryAccountResourceId
+      principalType: 'ServicePrincipal'
+    }
+    {
+      principalId: _testVmPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesOpenAIUser.guid)
+      resourceId: aiFoundryAccountResourceId
+      principalType: 'ServicePrincipal'
+    }
+  ] : [],
+  deployStorageAccount ? [
+    {
+      principalId: _testVmPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.StorageBlobDataContributor.guid)
+      #disable-next-line BCP318
+      resourceId: storageAccount.outputs.resourceId
+      principalType: 'ServicePrincipal'
+    }
+  ] : []
+) : []
+
+module assignTestVmRoles 'modules/security/resource-role-assignment.bicep' = if (deployVM && _networkIsolation) {
+  name: 'assignTestVmRoles'
   params: {
-    name: 'assignContainerAppsTestVm'
-    roleAssignments: [
-      {
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.ContainerAppsContributor.guid
-        )
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        #disable-next-line BCP318
-        resourceId: ''
-        principalType: 'ServicePrincipal'
-      }
-      
-    ]
-  }
-}
-
-// Managed Identity Operator -> TestVm
-module assignManagedIdentityOperatorTestVm 'modules/security/resource-role-assignment.bicep' = if (deployVM && deployAppConfig && deployContainerRegistry && _networkIsolation) {
-  name: 'assignManagedIdentityOperatorTestVm'
-  params: {
-    name: 'assignManagedIdentityOperatorTestVm'
-    roleAssignments: [
-      {
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.ManagedIdentityOperator.guid
-        )
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        #disable-next-line BCP318
-        resourceId: ''
-        principalType: 'ServicePrincipal'
-      }
-      
-    ]
-  }
-}
-
-// Container Registry
-// Container Registry Repository Writer, Container Registry Tasks Contributor, Container Registry Contributor and Data Access Configuration Administrator
-// -> TestVm
-
-// AppConfig -> AppConfig Data Reader -> TestVm
-module assignContainerRegistryTestVm 'modules/security/resource-role-assignment.bicep' = if (deployVM && deployAppConfig && deployContainerRegistry && _networkIsolation) {
-  name: 'assignContainerRegistryTestVm'
-  params: {
-    name: 'assignContainerRegistryTestVm'
-    roleAssignments: [
-      {
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.ContainerRegistryRepositoryWriter.guid
-        )
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        #disable-next-line BCP318
-        resourceId: containerRegistry.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-      {
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.ContainerRegistryContributorDataAccessConfigurationAdministrator.guid
-        )
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        #disable-next-line BCP318
-        resourceId: containerRegistry.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-      {
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.ContainerRegistryTasksContributor.guid
-        )
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        #disable-next-line BCP318
-        resourceId: containerRegistry.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-    ]
-  }
-}
-
-// AppConfig -> AppConfig Data Reader -> TestVm
-module assignAppConfigAppConfigurationDataReaderTestVm 'modules/security/resource-role-assignment.bicep' = if (deployVM && deployAppConfig && _networkIsolation) {
-  name: 'assignAppConfigAppConfigurationDataReaderTestVm'
-  params: {
-    name: 'assignAppConfigAppConfigurationDataReaderTestVm'
-    roleAssignments: [
-      {
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.AppConfigurationDataOwner.guid
-        )
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        #disable-next-line BCP318
-        resourceId: appConfig.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-    ]
-  }
-}
-
-// Azure Container Registry Service - AcrPush -> TestVm
-module assignCrAcrPushTestVm 'modules/security/resource-role-assignment.bicep' = if (deployVM && deployContainerRegistry && _networkIsolation) {
-  name: 'assignCrAcrPushTestVm'
-  params: {
-    name: 'assignCrAcrPushTestVm'
-    roleAssignments: concat([
-      {
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPush.guid)
-        #disable-next-line BCP318
-        resourceId: containerRegistry.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-    ])
-  }
-}
-
-// Key Vault Service - Key Vault Contributor -> TestVm
-// Key Vault Service - Key Vault Secrets Officer -> TestVm
-module assignKeyVaultContributorAndSecretsOfficerTestVm 'modules/security/resource-role-assignment.bicep' = if (deployVM && deployKeyVault && _networkIsolation) {
-  name: 'assignKeyVaultContributorAndSecretsOfficerTestVm'
-  params: {
-    name: 'assignKeyVaultContributorAndSecretsOfficerTestVm'
-    roleAssignments: concat([
-      {
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.KeyVaultContributor.guid
-        )
-        #disable-next-line BCP318
-        resourceId: keyVault.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-      {
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.KeyVaultSecretsOfficer.guid
-        )
-        #disable-next-line BCP318
-        resourceId: keyVault.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-    ])
-  }
-}
-
-// Search Service - Search Service Contributor -> TestVm
-module assignSearchSearchServiceContributorTestVm 'modules/security/resource-role-assignment.bicep' = if (deployVM && deploySearchService && _networkIsolation) {
-  name: 'assignSearchSearchServiceContributorTestVm'
-  params: {
-    name: 'assignSearchSearchServiceContributorTestVm'
-    roleAssignments: [
-      {
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.SearchServiceContributor.guid
-        )
-        #disable-next-line BCP318
-        resourceId: searchService.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-    ]
-  }
-}
-
-// Search Service - Search Index Data Contributor -> TestVm
-module assignSearchSearchIndexDataContributorTestVm 'modules/security/resource-role-assignment.bicep' = if (deployVM && deploySearchService && _networkIsolation) {
-  name: 'assignSearchSearchIndexDataContributorTestVm'
-  params: {
-    name: 'assignSearchSearchIndexDataContributorTestVm'
-    roleAssignments: [
-      {
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.SearchIndexDataContributor.guid
-        )
-        #disable-next-line BCP318
-        resourceId: searchService.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-    ]
-  }
-}
-
-// Cognitive Services Contributor -> TestVm (for RAI Blocklists)
-module assignCognitiveServicesContributorTestVm 'modules/security/resource-role-assignment.bicep' = if (deployVM && deployAiFoundry && _networkIsolation) {
-  name: 'assignCognitiveServicesContributorTestVm'
-  params: {
-    name: 'assignCognitiveServicesContributorTestVm'
-    roleAssignments: [
-      {
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.CognitiveServicesContributor.guid
-        )
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        #disable-next-line BCP318
-        resourceId: aiFoundryAccountResourceId
-        principalType: 'ServicePrincipal'
-      }
-    ]
-  }
-}
-
-
-// AI Foundry Account - Cognitive Services OpenAI User -> TestVm (for app testing)
-module assignAIFoundryCogServOAIUserTestVm  'modules/security/resource-role-assignment.bicep' = if (deployAiFoundry && deployVM && _networkIsolation) {
-  name: 'assignAIFoundryCogServOAIUserTestVm'
-  params: {
-    name: 'assignAIFoundryCogServOAIUserTestVm'
-    roleAssignments: [
-      {
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.CognitiveServicesOpenAIUser.guid
-        )
-        #disable-next-line BCP318
-        resourceId: aiFoundryAccountResourceId
-        principalType: 'ServicePrincipal'
-      }
-    ]
-  }
-}
-
-// Storage Account - Storage Blob Data Contributor -> TestVm
-module assignStorageStorageBlobDataContributorTestVm 'modules/security/resource-role-assignment.bicep' = if (deployVM && deployStorageAccount && _networkIsolation) {
-  name: 'assignStorageStorageBlobDataContributorTestVm'
-  params: {
-    name: 'assignStorageStorageBlobDataContributorTestVm'
-    roleAssignments: [
-      {
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.StorageBlobDataContributor.guid
-        )
-        #disable-next-line BCP318
-        resourceId: storageAccount.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-    ]
+    name: 'assignTestVmRoles'
+    roleAssignments: _testVmRoles
   }
 }
 
@@ -1194,8 +1046,7 @@ module assignCosmosDBCosmosDbBuiltInDataContributorTestVm 'modules/security/cosm
   params: {
     #disable-next-line BCP318
     cosmosDbAccountName: cosmosDBAccount.outputs.name
-    #disable-next-line BCP318
-    principalId: (_useUAI) ? testVmUAI.outputs.principalId : testVm.outputs.systemAssignedMIPrincipalId!
+    principalId: _testVmPrincipalId
     roleDefinitionGuid: const.roles.CosmosDBBuiltInDataContributor.guid
     scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${dbAccountName}/dbs/${dbDatabaseName}'
   }
@@ -1225,165 +1076,49 @@ resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (dep
   dependsOn: [
     testVm
     appConfigPopulate
-    assignContainerAppsTestVm
-    assignManagedIdentityOperatorTestVm
-    assignContainerRegistryTestVm
-    assignAppConfigAppConfigurationDataReaderTestVm
-    assignSearchSearchServiceContributorTestVm
-    assignSearchSearchIndexDataContributorTestVm
-    assignCognitiveServicesContributorTestVm
-    assignStorageStorageBlobDataContributorTestVm
+    assignTestVmRoles
     assignCosmosDBCosmosDbBuiltInDataContributorTestVm
     azureFirewall
     firewallPolicyDefaultRuleCollectionGroup
   ]
 }
 
-// Private DNS Zones.
+// Private DNS Zones (consolidated into a single for-loop module to keep compiled ARM template under 4 MB).
 ///////////////////////////////////////////////////////////////////////////
 
-// AI Foundry Account
-module privateDnsZoneCogSvcs 'modules/networking/private-dns.bicep' = if(_deployPrivateDnsZones) {
-  name: 'dep-cogsvcs-private-dns-zone'
+var _dnsZonesTargetRg = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
+var _dnsZonesLinkSuffix = useExistingVNet ? '-byon' : ''
+
+var _dnsZonesList = _deployPrivateDnsZones ? concat(
+  [
+    { dnsName: 'privatelink.cognitiveservices.azure.com', virtualNetworkLinkName: '${vnetName}-cogsvcs-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.openai.azure.com',            virtualNetworkLinkName: '${vnetName}-openai-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.services.ai.azure.com',       virtualNetworkLinkName: '${vnetName}-aiservices-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.search.windows.net',          virtualNetworkLinkName: '${vnetName}-search-std-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.documents.azure.com',         virtualNetworkLinkName: '${vnetName}-cosmos-std-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${vnetName}-blob-std-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${vnetName}-kv-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${vnetName}-appcfg-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' }
+  ],
+  deployContainerApps ? [
+    { dnsName: 'privatelink.${location}.azurecontainerapps.io', virtualNetworkLinkName: '${vnetName}-containerapps-link${_dnsZonesLinkSuffix}' }
+  ] : [],
+  deployContainerRegistry ? [
+    { dnsName: 'privatelink.${acrDnsSuffix}',                         virtualNetworkLinkName: '${vnetName}-containerregistry-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.monitor.azure.com',                       virtualNetworkLinkName: '${vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.oms.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.ods.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.agentsvc.azure.automation.net',           virtualNetworkLinkName: '${vnetName}-azure-automation-link${_dnsZonesLinkSuffix}' }
+  ] : []
+) : []
+
+module privateDnsZones 'modules/networking/private-dns-zones.bicep' = if (_deployPrivateDnsZones) {
+  name: 'dep-private-dns-zones'
   params: {
-    dnsName: 'privatelink.cognitiveservices.azure.com'
-    location: 'global'
+    zones: _dnsZonesList
     tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-cogsvcs-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-// Open AI
-module privateDnsZoneOpenAi 'modules/networking/private-dns.bicep' = if(_deployPrivateDnsZones) {
-  name: 'dep-openai-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.openai.azure.com'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-openai-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-// AI Services
-module privateDnsZoneAiServices 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones) {
-  name: 'dep-aiservices-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.services.ai.azure.com'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-aiservices-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-// AI Search
-module privateDnsZoneSearch 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones){
-  name: 'dep-search-std-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.search.windows.net'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-search-std-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-// Cosmos DB
-module privateDnsZoneCosmos 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones) {
-  name: 'dep-cosmos-std-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.documents.azure.com'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-cosmos-std-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-// Storage Account
-module privateDnsZoneBlob 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones) {
-  name: 'dep-blob-std-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.blob.${environment().suffixes.storage}'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-blob-std-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-// Key Vault
-module privateDnsZoneKeyVault 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones) {
-  name: 'dep-kv-std-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.vaultcore.azure.net'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-kv-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-
-// Application Configuration
-module privateDnsZoneAppConfig 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones){
-  name: 'appconfig-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.azconfig.io'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-appcfg-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-
-// Application Insights
-module privateDnsZoneInsights 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones){
-  name: 'appinsights-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.applicationinsights.io'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-appi-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-// Container Apps
-module privateDnsZoneContainerApps 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerApps)  {
-  name: 'containerapps-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.${location}.azurecontainerapps.io'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-containerapps-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-
-// Container Registry 
-module privateDnsZoneAcr 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerRegistry) {
-  name: 'containerregistry-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.${acrDnsSuffix}'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName: '${vnetName}-containerregistry-link${useExistingVNet?'-byon':''}'
+    resourceGroupName: _dnsZonesTargetRg
     virtualNetworkResourceId: virtualNetworkResourceId
   }
   dependsOn: [
@@ -1392,292 +1127,178 @@ module privateDnsZoneAcr 'modules/networking/private-dns.bicep' = if (_deployPri
   ]
 }
 
-// Private Endpoints.
+// Private Endpoints (consolidated into a single for-loop module with @batchSize(1) to keep compiled ARM template under 4 MB while preserving serialized PE creation).
 ///////////////////////////////////////////////////////////////////////////
 
+var _peDnsZoneGroupBlob = policyManagedPrivateDns ? {} : {
+  name: 'blobDnsZoneGroup'
+  privateDnsZoneGroupConfigs: [
+    { name: 'blobARecord', privateDnsZoneResourceId: _dnsZoneBlobId }
+  ]
+}
+var _peDnsZoneGroupCosmos = policyManagedPrivateDns ? {} : {
+  name: 'cosmosDnsZoneGroup'
+  privateDnsZoneGroupConfigs: [
+    { name: 'cosmosARecord', privateDnsZoneResourceId: _dnsZoneCosmosId }
+  ]
+}
+var _peDnsZoneGroupSearch = policyManagedPrivateDns ? {} : {
+  name: 'searchDnsZoneGroup'
+  privateDnsZoneGroupConfigs: [
+    { name: 'searchARecord', privateDnsZoneResourceId: _dnsZoneSearchId }
+  ]
+}
+var _peDnsZoneGroupKeyVault = policyManagedPrivateDns ? {} : {
+  name: 'kvDnsZoneGroup'
+  privateDnsZoneGroupConfigs: [
+    { name: 'kvARecord', privateDnsZoneResourceId: _dnsZoneKeyVaultId }
+  ]
+}
+var _peDnsZoneGroupAppConfig = policyManagedPrivateDns ? {} : {
+  name: 'appConfigDnsZoneGroup'
+  privateDnsZoneGroupConfigs: [
+    { name: 'appConfigARecord', privateDnsZoneResourceId: _dnsZoneAppConfigId }
+  ]
+}
+var _peDnsZoneGroupContainerApps = policyManagedPrivateDns ? {} : {
+  name: 'ccaDnsZoneGroup'
+  privateDnsZoneGroupConfigs: [
+    { name: 'ccaARecord', privateDnsZoneResourceId: _dnsZoneContainerAppsId }
+  ]
+}
+var _peDnsZoneGroupAcr = policyManagedPrivateDns ? {} : {
+  name: 'acrDnsZoneGroup'
+  privateDnsZoneGroupConfigs: [
+    { name: 'acr', privateDnsZoneResourceId: _dnsZoneAcrId }
+  ]
+}
 
-// Storage Account
-module privateEndpointStorageBlob 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deployStorageAccount) {
-  name: 'blob-private-endpoint'
-  params: {
-    name: '${const.abbrs.networking.privateEndpoint}${storageAccountName}'
-    resourceGroupName: _peResourceGroupName
-    location: _peLocation
-    tags: _tags
-    subnetResourceId: _peSubnetId
-    privateLinkServiceConnections: [
-      {
-        name: 'blobConnection${useExistingVNet?'-byon':''}'
-        properties: {
-          #disable-next-line BCP318
-          privateLinkServiceId: storageAccount.outputs.resourceId
-          groupIds: ['blob']
-        }
-      }
-    ]
-    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
-      name: 'blobDnsZoneGroup'
-      privateDnsZoneGroupConfigs: [
+var _peList = concat(
+  (_networkIsolation && deployStorageAccount) ? [
+    {
+      name: '${const.abbrs.networking.privateEndpoint}${storageAccountName}'
+      privateLinkServiceConnections: [
         {
-          name: 'blobARecord'
+          name: 'blobConnection${useExistingVNet?'-byon':''}'
           #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneBlob!.outputs.resourceId
+          properties: { privateLinkServiceId: storageAccount.outputs.resourceId, groupIds: ['blob'] }
         }
       ]
+      privateDnsZoneGroup: _peDnsZoneGroupBlob
     }
+  ] : [],
+  (_networkIsolation && deployCosmosDb) ? [
+    {
+      name: '${const.abbrs.networking.privateEndpoint}${dbAccountName}'
+      privateLinkServiceConnections: [
+        {
+          name: 'cosmosConnection${useExistingVNet?'-byon':''}'
+          #disable-next-line BCP318
+          properties: { privateLinkServiceId: cosmosDBAccount.outputs.resourceId, groupIds: ['Sql'] }
+        }
+      ]
+      privateDnsZoneGroup: _peDnsZoneGroupCosmos
+    }
+  ] : [],
+  (_networkIsolation && deploySearchService) ? [
+    {
+      name: '${const.abbrs.networking.privateEndpoint}${searchServiceName}'
+      privateLinkServiceConnections: [
+        {
+          name: 'searchConnection${useExistingVNet?'-byon':''}'
+          #disable-next-line BCP318
+          properties: { privateLinkServiceId: searchService.outputs.resourceId, groupIds: ['searchService'] }
+        }
+      ]
+      privateDnsZoneGroup: _peDnsZoneGroupSearch
+    }
+  ] : [],
+  (_networkIsolation && deployAiFoundry && aiSearchResourceId == '') ? [
+    {
+      name: '${const.abbrs.networking.privateEndpoint}${aiFoundrySearchServiceName}'
+      privateLinkServiceConnections: [
+        {
+          name: 'searchAIFConnection${useExistingVNet?'-byon':''}'
+          #disable-next-line BCP318
+          properties: { privateLinkServiceId: searchServiceAIFoundry.outputs.resourceId, groupIds: ['searchService'] }
+        }
+      ]
+      privateDnsZoneGroup: _peDnsZoneGroupSearch
+    }
+  ] : [],
+  (_networkIsolation && deployKeyVault) ? [
+    {
+      name: '${const.abbrs.networking.privateEndpoint}${keyVaultName}'
+      privateLinkServiceConnections: [
+        {
+          name: 'kvConnection${useExistingVNet?'-byon':''}'
+          #disable-next-line BCP318
+          properties: { privateLinkServiceId: keyVault.id, groupIds: ['vault'] }
+        }
+      ]
+      privateDnsZoneGroup: _peDnsZoneGroupKeyVault
+    }
+  ] : [],
+  (_networkIsolation && deployAppConfig) ? [
+    {
+      name: '${const.abbrs.networking.privateEndpoint}${appConfigName}'
+      privateLinkServiceConnections: [
+        {
+          name: 'appConfigConnection${useExistingVNet?'-byon':''}'
+          #disable-next-line BCP318
+          properties: { privateLinkServiceId: appConfig.id, groupIds: ['configurationStores'] }
+        }
+      ]
+      privateDnsZoneGroup: _peDnsZoneGroupAppConfig
+    }
+  ] : [],
+  (_networkIsolation && deployContainerEnv) ? [
+    {
+      name: '${const.abbrs.networking.privateEndpoint}${containerEnvName}'
+      privateLinkServiceConnections: [
+        {
+          name: 'ccaConnection'
+          #disable-next-line BCP318
+          properties: { privateLinkServiceId: containerEnv.id, groupIds: ['managedEnvironments'] }
+        }
+      ]
+      privateDnsZoneGroup: _peDnsZoneGroupContainerApps
+    }
+  ] : [],
+  (_networkIsolation && deployContainerRegistry) ? [
+    {
+      name: '${const.abbrs.networking.privateEndpoint}${containerRegistryName}'
+      privateLinkServiceConnections: [
+        {
+          name: '${containerRegistryName}-registry-connection'
+          #disable-next-line BCP318
+          properties: { privateLinkServiceId: containerRegistry.id, groupIds: ['registry'] }
+        }
+      ]
+      privateDnsZoneGroup: _peDnsZoneGroupAcr
+    }
+  ] : []
+)
+
+module privateEndpoints 'modules/networking/private-endpoints.bicep' = if (_networkIsolation) {
+  name: 'dep-private-endpoints'
+  params: {
+    endpoints: _peList
+    location: _peLocation
+    resourceGroupName: _peResourceGroupName
+    tags: _tags
+    subnetResourceId: _peSubnetId
   }
   dependsOn: [
+    privateDnsZones
     storageAccount!
-  ]
-}
-
-// Cosmos DB
-module privateEndpointCosmos 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deployCosmosDb) {
-  name: 'cosmos-private-endpoint'
-  params: {
-    name: '${const.abbrs.networking.privateEndpoint}${dbAccountName}'
-    resourceGroupName: _peResourceGroupName
-    location: _peLocation
-    tags: _tags
-    subnetResourceId: _peSubnetId
-    privateLinkServiceConnections: [
-      {
-        name: 'cosmosConnection${useExistingVNet?'-byon':''}'
-        properties: {
-          #disable-next-line BCP318
-          privateLinkServiceId: cosmosDBAccount.outputs.resourceId
-          groupIds: ['Sql']
-        }
-      }
-    ]
-    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
-      name: 'cosmosDnsZoneGroup'
-      privateDnsZoneGroupConfigs: [
-        {
-          name: 'cosmosARecord'
-          #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneCosmos!.outputs.resourceId
-        }
-      ]
-    }
-  }
-  dependsOn: [
     cosmosDBAccount!
-    privateEndpointStorageBlob // Serialize PE operations to avoid conflicts
-  ]
-}
-
-// AI Search (application)
-module privateEndpointSearch 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deploySearchService) {
-  name: 'search-private-endpoint'
-  params: {
-    name: '${const.abbrs.networking.privateEndpoint}${searchServiceName}'
-    resourceGroupName: _peResourceGroupName
-    location: _peLocation
-    tags: _tags
-    subnetResourceId: _peSubnetId
-    privateLinkServiceConnections: [
-      {
-        name: 'searchConnection${useExistingVNet?'-byon':''}'
-        properties: {
-          #disable-next-line BCP318
-          privateLinkServiceId: searchService.outputs.resourceId
-          groupIds: ['searchService']
-        }
-      }
-    ]
-    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
-      name: 'searchDnsZoneGroup'
-      privateDnsZoneGroupConfigs: [
-        {
-          name: 'searchARecord'
-          #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneSearch!.outputs.resourceId
-        }
-      ]
-    }
-  }
-  dependsOn: [
     searchService!
-    privateEndpointCosmos // Serialize PE operations to avoid conflicts
-  ]
-}
-
-// AI Search (AI Foundry dedicated)
-module privateEndpointSearchAIFoundry 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deployAiFoundry && aiSearchResourceId == '') {
-  name: 'search-aif-private-endpoint'
-  params: {
-    name: '${const.abbrs.networking.privateEndpoint}${aiFoundrySearchServiceName}'
-    resourceGroupName: _peResourceGroupName
-    location: _peLocation
-    tags: _tags
-    subnetResourceId: _peSubnetId
-    privateLinkServiceConnections: [
-      {
-        name: 'searchAIFConnection${useExistingVNet?'-byon':''}'
-        properties: {
-          #disable-next-line BCP318
-          privateLinkServiceId: searchServiceAIFoundry.outputs.resourceId
-          groupIds: ['searchService']
-        }
-      }
-    ]
-    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
-      name: 'searchDnsZoneGroup'
-      privateDnsZoneGroupConfigs: [
-        {
-          name: 'searchARecord'
-          #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneSearch!.outputs.resourceId
-        }
-      ]
-    }
-  }
-  dependsOn: [
     searchServiceAIFoundry!
-    privateEndpointSearch // Serialize PE operations to avoid conflicts
-  ]
-}
-
-// Key Vault
-module privateEndpointKeyVault 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deployKeyVault) {
-  name: 'kv-private-endpoint'
-  params: {
-    name: '${const.abbrs.networking.privateEndpoint}${keyVaultName}'
-    resourceGroupName: _peResourceGroupName
-    location: _peLocation
-    tags: _tags
-    subnetResourceId: _peSubnetId
-    privateLinkServiceConnections: [
-      {
-        name: 'kvConnection${useExistingVNet?'-byon':''}'
-        properties: {
-          #disable-next-line BCP318
-          privateLinkServiceId: keyVault.outputs.resourceId
-          groupIds: ['vault']
-        }
-      }
-    ]
-    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
-      name: 'kvDnsZoneGroup'
-      privateDnsZoneGroupConfigs: [
-        {
-          name: 'kvARecord'
-          #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneKeyVault!.outputs.resourceId
-        }
-      ]
-    }
-  }
-  dependsOn: [
     keyVault!
-    privateEndpointSearch // Serialize PE operations to avoid conflicts
-  ]
-}
-
-// Application Configuration
-module privateEndpointAppConfig 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deployAppConfig) {
-  name: 'appconfig-private-endpoint'
-  params: {
-    name: '${const.abbrs.networking.privateEndpoint}${appConfigName}'
-    resourceGroupName: _peResourceGroupName
-    location: _peLocation
-    tags: _tags
-    subnetResourceId: _peSubnetId
-    privateLinkServiceConnections: [
-      {
-        name: 'appConfigConnection${useExistingVNet?'-byon':''}'
-        properties: {
-          #disable-next-line BCP318
-          privateLinkServiceId: appConfig.outputs.resourceId
-          groupIds: ['configurationStores']
-        }
-      }
-    ]
-    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
-      name: 'appConfigDnsZoneGroup'
-      privateDnsZoneGroupConfigs: [
-        {
-          name: 'appConfigARecord'
-          #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneAppConfig!.outputs.resourceId
-        }
-      ]
-    }
-  }
-  dependsOn: [
     appConfig!
-    privateEndpointKeyVault // Serialize PE operations to avoid conflicts
-  ]
-}
-
-// Container Apps Environment
-module privateEndpointContainerAppsEnv 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deployContainerEnv) {
-  name: 'dep-containerapps-env-private-endpoint'
-  params: {
-    name: '${const.abbrs.networking.privateEndpoint}${containerEnvName}'
-    resourceGroupName: _peResourceGroupName
-    location: _peLocation
-    tags: _tags
-    subnetResourceId: _peSubnetId
-    privateLinkServiceConnections: [
-      {
-        name: 'ccaConnection'
-        properties: {
-          #disable-next-line BCP318
-          privateLinkServiceId: containerEnv.outputs.resourceId
-          groupIds: ['managedEnvironments']
-        }
-      }
-    ]
-    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
-      name: 'ccaDnsZoneGroup'
-      privateDnsZoneGroupConfigs: [
-        {
-          name: 'ccaARecord'
-          #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneContainerApps!.outputs.resourceId
-        }
-      ]
-    }
-  }
-  dependsOn: [
     containerEnv!
-    privateEndpointAppConfig // Serialize PE operations to avoid conflicts
-  ]
-}
-
-module privateEndpointAcr 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deployContainerRegistry) {
-  name: 'dep-acr-private-endpoint'
-  params: {
-    name: '${const.abbrs.networking.privateEndpoint}${containerRegistryName}'
-    resourceGroupName: _peResourceGroupName
-    location: _peLocation
-    tags: _tags
-    subnetResourceId: _peSubnetId
-    privateLinkServiceConnections: [
-      {
-        name: '${containerRegistryName}-registry-connection'
-        properties: {
-          privateLinkServiceId: containerRegistry!.outputs.resourceId
-          groupIds: ['registry'] 
-        }
-      }
-    ]
-    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
-      name: 'acrDnsZoneGroup'
-      privateDnsZoneGroupConfigs: [
-        {
-          name: 'acr'
-          privateDnsZoneResourceId: privateDnsZoneAcr!.outputs.resourceId // privatelink.azurecr.io
-        }
-      ]
-    }
-  }
-  dependsOn: [
     containerRegistry!
-    privateDnsZoneAcr!
-    privateEndpointContainerAppsEnv
   ]
 }
 
@@ -1703,16 +1324,18 @@ var _dnsZoneSearchId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGrou
 var _dnsZoneCosmosId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.documents.azure.com')
 var _dnsZoneBlobId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.blob.${environment().suffixes.storage}')
 var _dnsZoneKeyVaultId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')
+var _dnsZoneAppConfigId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.azconfig.io')
+var _dnsZoneContainerAppsId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.${location}.azurecontainerapps.io')
+var _dnsZoneAcrId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.${acrDnsSuffix}')
+var _dnsZoneAzureMonitorId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.monitor.azure.com')
+var _dnsZoneOmsOpsInsightsId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.oms.opinsights.azure.com')
+var _dnsZoneOdsOpsInsightsId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.ods.opinsights.azure.com')
+var _dnsZoneAzureAutomationId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.agentsvc.azure.automation.net')
 
 //AI Foundry Account User Managed Identity
-module aiFoundryUAI 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1' = if (_useUAI) {
+resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI) {
   name: '${const.abbrs.security.managedIdentity}${aiFoundryAccountName}'
-  params: {
-    // Required parameters
-    name: '${const.abbrs.security.managedIdentity}${aiFoundryAccountName}'
-    // Non-required parameters
-    location: location
-  }
+  location: location
 }
 
 // 16.0 Pre-create AI Services account to avoid PE race condition in AVM module.
@@ -1816,19 +1439,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     #disable-next-line BCP321
     (_networkIsolation && useExistingVNet && deploySubnets) ? virtualNetworkSubnets : null
     #disable-next-line BCP321
-    _networkIsolation ? privateDnsZoneSearch : null
-    #disable-next-line BCP321
-    _networkIsolation ? privateDnsZoneCogSvcs : null
-    #disable-next-line BCP321
-    _networkIsolation ? privateDnsZoneOpenAi : null
-    #disable-next-line BCP321
-    _networkIsolation ? privateDnsZoneAiServices : null
-    #disable-next-line BCP321
-    _networkIsolation ? privateDnsZoneBlob : null
-    #disable-next-line BCP321
-    _networkIsolation ? privateDnsZoneCosmos : null
-    #disable-next-line BCP321
-    _networkIsolation ? privateDnsZoneKeyVault : null
+    _networkIsolation ? privateDnsZones : null
     aiServicesAccount
   ]
 }
@@ -1935,7 +1546,7 @@ module aiFoundryConnectionInsights 'modules/ai-foundry/connection-application-in
   name: 'connection-appinsights-${resourceToken}'
   params: {
     aiFoundryName: aiFoundry!.outputs.aiServicesName
-    connectedResourceName: appInsights!.outputs.name
+    connectedResourceName: appInsights!.name
   }
   dependsOn: [
     aiFoundry!
@@ -1960,17 +1571,17 @@ module aiFoundryConnectionStorage 'modules/ai-foundry/connection-storage-account
 //////////////////////////////////////////////////////////////////////////
 var appInsightsInvalidLocations = ['westcentralus']
 
-module appInsights 'br/public:avm/res/insights/component:0.6.0' = if (deployAppInsights && deployLogAnalytics) {
-  name: 'appInsights'
-  params: {
-    name: appInsightsName
-    location: contains(appInsightsInvalidLocations, location) ? 'eastus' : location
-    #disable-next-line BCP318
-    workspaceResourceId: logAnalytics.outputs.resourceId
-    applicationType:     'web'
-    kind:                'web'
-    disableIpMasking:    false
-    tags:                _tags
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (deployAppInsights && deployLogAnalytics) {
+  name: appInsightsName
+  location: contains(appInsightsInvalidLocations, location) ? 'eastus' : location
+  kind: 'web'
+  tags: _tags
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: logAnalytics.id
+    DisableIpMasking: false
+    publicNetworkAccessForIngestion: 'Enabled'
+    publicNetworkAccessForQuery: 'Enabled'
   }
 }
 
@@ -1987,54 +1598,6 @@ resource privateLinkScope 'microsoft.insights/privatelinkscopes@2021-07-01-previ
   dependsOn: [
     appInsights!
   ]
-}
-
-module privateDnsZoneAzureMonitor 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerRegistry)  {
-  name: 'azure-monitor-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.monitor.azure.com'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-azure-monitor-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-module privateDnsZoneOmsOpsInsights 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerRegistry)  {
-  name: 'oms-opinsights-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.oms.opinsights.azure.com'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-oms-opinsights-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-module privateDnsZoneOdsOpsInsights 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerRegistry)  {
-  name: 'ods-opinsights-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.ods.opinsights.azure.com'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-ods-opinsights-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
-}
-
-module privateDnsZoneAzureAutomation 'modules/networking/private-dns.bicep' = if (_deployPrivateDnsZones && deployContainerRegistry)  {
-  name: 'azure-automation-private-dns-zone'
-  params: {
-    dnsName: 'privatelink.agentsvc.azure.automation.net'
-    location: 'global'
-    tags: _tags
-    resourceGroupName: useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-    virtualNetworkLinkName : '${vnetName}-azure-automation-link${useExistingVNet?'-byon':''}'
-    virtualNetworkResourceId: virtualNetworkResourceId
-  }
 }
 
 module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deployAppInsights && deployLogAnalytics) {
@@ -2057,32 +1620,17 @@ module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bice
     privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
       name: 'privateLinkDnsZoneGroup'
       privateDnsZoneGroupConfigs: [
-        {
-          name: 'azuremonitorARecord'
-          #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneAzureMonitor!.outputs.resourceId
-        }
-        {
-          name: 'omsinsightsARecord'
-          #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneOmsOpsInsights!.outputs.resourceId
-        }
-        {
-          name: 'odsinsightsARecord'
-          #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneOdsOpsInsights!.outputs.resourceId
-        }
-        {
-          name: 'automationARecord'
-          #disable-next-line BCP318
-          privateDnsZoneResourceId: privateDnsZoneAzureAutomation!.outputs.resourceId
-        }
+        { name: 'azuremonitorARecord', privateDnsZoneResourceId: _dnsZoneAzureMonitorId }
+        { name: 'omsinsightsARecord',  privateDnsZoneResourceId: _dnsZoneOmsOpsInsightsId }
+        { name: 'odsinsightsARecord',  privateDnsZoneResourceId: _dnsZoneOdsOpsInsightsId }
+        { name: 'automationARecord',   privateDnsZoneResourceId: _dnsZoneAzureAutomationId }
       ]
     }
   }
   dependsOn: [
     privateLinkScope!
-    privateEndpointAcr // Serialize PE operations to avoid conflicts
+    privateDnsZones
+    privateEndpoints // Serialize PE operations to avoid conflicts
   ]
 }
 
@@ -2090,7 +1638,7 @@ resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scope
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${logAnalyticsWorkspaceName}'!
   properties :{
     #disable-next-line BCP318
-    linkedResourceId: logAnalytics.outputs.resourceId
+    linkedResourceId: logAnalytics.id
   }
   dependsOn: [
     privateLinkScope
@@ -2101,7 +1649,7 @@ resource privateLinkScopedResources2 'microsoft.insights/privatelinkscopes/scope
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${appInsightsName}'!
   properties :{
     #disable-next-line BCP318
-    linkedResourceId: appInsights.outputs.resourceId
+    linkedResourceId: appInsights.id
   }
   dependsOn: [
     privateLinkScope
@@ -2112,50 +1660,36 @@ resource privateLinkScopedResources2 'microsoft.insights/privatelinkscopes/scope
 //////////////////////////////////////////////////////////////////////////
 
 //Container Apps Env User Managed Identity
-module containerEnvUAI 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1' = if (_useUAI && deployContainerEnv) {
+resource containerEnvUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI && deployContainerEnv) {
   name: '${const.abbrs.security.managedIdentity}${containerEnvName}'
-  params: {
-    // Required parameters
-    name: '${const.abbrs.security.managedIdentity}${containerEnvName}'
-    // Non-required parameters
-    location: location
-  }
+  location: location
 }
 
 // Container Apps Environment
-module containerEnv 'br/public:avm/res/app/managed-environment:0.11.3' = if (deployContainerEnv) {
-  name: 'containerEnv'
-  params: {
-    name: containerEnvName
-    location: location
-    tags: _tags
-    // log & insights
-    #disable-next-line BCP318
+resource containerEnv 'Microsoft.App/managedEnvironments@2025-01-01' = if (deployContainerEnv) {
+  name: containerEnvName
+  location: location
+  tags: _tags
+  identity: {
+    type: _useUAI ? 'UserAssigned' : 'SystemAssigned'
+    userAssignedIdentities: _useUAI ? { '${containerEnvUAI.id}': {} } : null
+  }
+  properties: {
     appLogsConfiguration: {
-      //destination: deployAppInsights ? 'log-analytics' : 'none'
-      //logAnalyticsConfiguration: {
-      //  customerId: appInsights.outputs.applicationId
-      //  sharedKey: appInsights.outputs.instrumentationKey
-      //}
+      destination: null
     }
-    #disable-next-line BCP318
-    appInsightsConnectionString: (deployAppInsights && deployLogAnalytics) ? appInsights.outputs.connectionString : ''
+    appInsightsConfiguration: (deployAppInsights && deployLogAnalytics) ? {
+      connectionString: appInsights.properties.ConnectionString
+    } : null
     zoneRedundant: useZoneRedundancy
     workloadProfiles: workloadProfiles
-    managedIdentities: {
-      systemAssigned: _useUAI ? false : true
-      #disable-next-line BCP318
-      userAssignedResourceIds: _useUAI ? [containerEnvUAI.outputs.resourceId] : []
-    }
-    infrastructureSubnetResourceId: networkIsolation ? _caEnvSubnetId : ''
-    internal: networkIsolation ? true : false
+    vnetConfiguration: networkIsolation ? {
+      infrastructureSubnetId: _caEnvSubnetId
+      internal: true
+    } : null
     publicNetworkAccess: networkIsolation ? 'Disabled' : 'Enabled'
   }
   dependsOn: [
-    #disable-next-line BCP321
-    (deployAppInsights && deployLogAnalytics) ? appInsights : null
-    #disable-next-line BCP321
-    deployLogAnalytics ? logAnalytics : null
     #disable-next-line BCP321
     !useExistingVNet ? virtualNetwork : null
     #disable-next-line BCP321
@@ -2164,46 +1698,40 @@ module containerEnv 'br/public:avm/res/app/managed-environment:0.11.3' = if (dep
 }
 
 //Container Registry User Managed Identity
-module containerRegistryUAI 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1' = if (_useUAI && deployContainerRegistry) {
+resource containerRegistryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI && deployContainerRegistry) {
   name: '${const.abbrs.security.managedIdentity}${containerRegistryName}'
-  params: {
-    // Required parameters
-    name: '${const.abbrs.security.managedIdentity}${containerRegistryName}'
-    // Non-required parameters
-    location: location
-  }
+  location: location
 }
 
 // Container Registry
-module containerRegistry 'br/public:avm/res/container-registry/registry:0.9.3' = if (deployContainerRegistry) {
-  name: 'containerRegistry'
-  params: {
-    name: containerRegistryName
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = if (deployContainerRegistry) {
+  name: containerRegistryName
+  location: location
+  tags: _tags
+  sku: {
+    name: _networkIsolation ? 'Premium' : 'Basic'
+  }
+  identity: {
+    type: _useUAI ? 'UserAssigned' : 'SystemAssigned'
+    userAssignedIdentities: _useUAI ? { '${containerRegistryUAI.id}': {} } : null
+  }
+  properties: {
     publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
-    location: location
-    acrSku: _networkIsolation ? 'Premium' : 'Basic'
-    tags: _tags
     zoneRedundancy: useZoneRedundancy ? 'Enabled' : 'Disabled'
-    managedIdentities: {
-      systemAssigned: _useUAI ? false : true
-      #disable-next-line BCP318
-      userAssignedResourceIds: _useUAI ? [containerRegistryUAI.outputs.resourceId] : []
+    dataEndpointEnabled: _networkIsolation
+    policies: {
+      exportPolicy: {
+        status: 'enabled'
+      }
     }
-    exportPolicyStatus: 'enabled'
-    dataEndpointEnabled: _networkIsolation ? true : false    
   }
 }
 
 //Container Apps User Managed Identity
-module containerAppsUAI 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1' = [
+resource containerAppsUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = [
   for app in containerAppsList: if (_useUAI && deployContainerApps) {
-    name: '${const.abbrs.security.managedIdentity}${app.service_name}'
-    params: {
-      // Required parameters
-      name: '${const.abbrs.security.managedIdentity}${const.abbrs.containers.containerApp}${resourceToken}-${app.service_name}'
-      // Non-required parameters
-      location: location
-    }
+    name: '${const.abbrs.security.managedIdentity}${const.abbrs.containers.containerApp}${resourceToken}-${app.service_name}'
+    location: location
   }
 ]
 
@@ -2216,7 +1744,7 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
       name: empty(app.name) ? '${const.abbrs.containers.containerApp}${resourceToken}-${app.service_name}' : app.name
       location: location
       #disable-next-line BCP318
-      environmentResourceId: containerEnv.outputs.resourceId
+      environmentResourceId: containerEnv.id
       workloadProfileName: app.profile_name
 
       ingressExternal: app.external
@@ -2234,7 +1762,7 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
       managedIdentities: {
         systemAssigned: (_useUAI) ? false : true
         #disable-next-line BCP318
-        userAssignedResourceIds: (_useUAI) ? [containerAppsUAI[index].outputs.resourceId] : []
+        userAssignedResourceIds: (_useUAI) ? [containerAppsUAI[index].id] : []
       }
 
       scaleSettings: {
@@ -2262,7 +1790,7 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
             {
               name: 'AZURE_CLIENT_ID'
               #disable-next-line BCP318
-              value: _useUAI ? containerAppsUAI[index].outputs.clientId : ''
+              value: _useUAI ? containerAppsUAI[index].properties.clientId : ''
             }
           ]
         }
@@ -2274,8 +1802,8 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
     }
     dependsOn: [
       containerEnv!                   
-      privateDnsZoneContainerApps    
-      privateEndpointContainerAppsEnv  
+      privateDnsZones
+      privateEndpoints
     ]
   }
 ]
@@ -2284,14 +1812,9 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
 //////////////////////////////////////////////////////////////////////////
 
 //Cosmos User Managed Identity
-module cosmosUAI 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1' = if (_useUAI) {
+resource cosmosUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI) {
   name: '${const.abbrs.security.managedIdentity}${dbAccountName}'
-  params: {
-    // Required parameters
-    name: '${const.abbrs.security.managedIdentity}${dbAccountName}'
-    // Non-required parameters
-    location: location
-  }
+  location: location
 }
 
 module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' = if (deployCosmosDb) {
@@ -2302,7 +1825,7 @@ module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' =
     managedIdentities: {
       systemAssigned: _useUAI ? false : true
       #disable-next-line BCP318
-      userAssignedResourceIds: _useUAI ? [cosmosUAI.outputs.resourceId] : []
+      userAssignedResourceIds: _useUAI ? [cosmosUAI.id] : []
     }
     failoverLocations: [
       {
@@ -2354,15 +1877,20 @@ module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' =
 // Key Vault
 //////////////////////////////////////////////////////////////////////////
 
-module keyVault 'br/public:avm/res/key-vault/vault:0.13.3' = if (deployKeyVault) {
-  name: 'keyVault'
-  params: {
-    name: keyVaultName
-    location: location
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
-    sku: 'standard'
+resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' = if (deployKeyVault) {
+  name: keyVaultName
+  location: location
+  tags: _tags
+  properties: {
+    tenantId: subscription().tenantId
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
     enableRbacAuthorization: true
-    tags: _tags
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 90
+    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
   }
 }
 
@@ -2388,17 +1916,20 @@ resource secret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = [for (config, i
 // Log Analytics Workspace
 //////////////////////////////////////////////////////////////////////////
 
-module logAnalytics 'br/public:avm/res/operational-insights/workspace:0.12.0' = if (deployLogAnalytics) {
-  name: 'logAnalytics'
-  params: {
-    name: logAnalyticsWorkspaceName
-    location: location
-    skuName: 'PerGB2018'
-    dataRetention: 30
-    tags: _tags
-    forceCmkForQuery: false
-    managedIdentities: {
-      systemAssigned: true
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if (deployLogAnalytics) {
+  name: logAnalyticsWorkspaceName
+  location: location
+  tags: _tags
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    sku: {
+      name: 'PerGB2018'
+    }
+    retentionInDays: 30
+    features: {
+      disableLocalAuth: false
     }
   }
 }
@@ -2407,14 +1938,9 @@ module logAnalytics 'br/public:avm/res/operational-insights/workspace:0.12.0' = 
 //////////////////////////////////////////////////////////////////////////
 
 //Search Service User Managed Identity
-module searchServiceUAI 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.1' = if (_useUAI && deploySearchService) {
+resource searchServiceUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI && deploySearchService) {
   name: '${const.abbrs.security.managedIdentity}${searchServiceName}'
-  params: {
-    // Required parameters
-    name: '${const.abbrs.security.managedIdentity}${searchServiceName}'
-    // Non-required parameters
-    location: location
-  }
+  location: location
 }
 
 module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (deploySearchService) {
@@ -2435,7 +1961,7 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
     managedIdentities: {
       systemAssigned: _useUAI ? false : true
       #disable-next-line BCP318
-      userAssignedResourceIds: _useUAI ? [searchServiceUAI.outputs.resourceId] : []
+      userAssignedResourceIds: _useUAI ? [searchServiceUAI.id] : []
     }
 
     disableLocalAuth: false
@@ -2541,62 +2067,112 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = if (d
 // Role assignments are centralized in this section to make it easier to view all permissions granted in this template.
 // Custom modules are used for role assignments since no published AVM module available for this at the time we created this template.
 
-// Azure Container Registry Service - AcrPush -> Executor
-module assignCrAcrPushPullExecutor 'modules/security/resource-role-assignment.bicep' = if (deployContainerRegistry) {
-  name: 'assignCrAcrPushPullExecutor'
+// ---------------------------------------------------------------------------
+// Executor role assignments (consolidated into a single array-driven module
+// call to reduce compiled ARM template size).
+// ---------------------------------------------------------------------------
+var _executorRoles = concat(
+  deployContainerRegistry ? [
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPush.guid)
+      #disable-next-line BCP318
+      resourceId: containerRegistry.id
+      principalType: principalType
+    }
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPull.guid)
+      #disable-next-line BCP318
+      resourceId: containerRegistry.id
+      principalType: principalType
+    }
+  ] : [],
+  deployKeyVault ? [
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultContributor.guid)
+      #disable-next-line BCP318
+      resourceId: keyVault.id
+      principalType: principalType
+    }
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultSecretsOfficer.guid)
+      #disable-next-line BCP318
+      resourceId: keyVault.id
+      principalType: principalType
+    }
+  ] : [],
+  deploySearchService ? [
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.SearchServiceContributor.guid)
+      #disable-next-line BCP318
+      resourceId: searchService.outputs.resourceId
+      principalType: principalType
+    }
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.SearchIndexDataContributor.guid)
+      #disable-next-line BCP318
+      resourceId: searchService.outputs.resourceId
+      principalType: principalType
+    }
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.SearchIndexDataReader.guid)
+      #disable-next-line BCP318
+      resourceId: searchService.outputs.resourceId
+      principalType: principalType
+    }
+  ] : [],
+  deployStorageAccount ? [
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.StorageBlobDataContributor.guid)
+      #disable-next-line BCP318
+      resourceId: storageAccount.outputs.resourceId
+      principalType: principalType
+    }
+  ] : [],
+  deployAiFoundry ? [
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesOpenAIUser.guid)
+      resourceId: aiFoundryAccountResourceId
+      principalType: principalType
+    }
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
+      resourceId: aiFoundryAccountResourceId
+      principalType: principalType
+    }
+  ] : []
+)
+
+module assignExecutorRoles 'modules/security/resource-role-assignment.bicep' = if (deployContainerRegistry || deployKeyVault || deploySearchService || deployStorageAccount || deployAiFoundry) {
+  name: 'assignExecutorRoles'
   params: {
-    name: 'assignCrAcrPushPullExecutor'
-    roleAssignments: concat([
-      {
-        principalId: principalId
-        roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPush.guid)
-        #disable-next-line BCP318
-        resourceId: containerRegistry.outputs.resourceId
-        principalType: principalType
-      }
-      {
-        principalId: principalId
-        roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPull.guid)
-        #disable-next-line BCP318
-        resourceId: containerRegistry.outputs.resourceId
-        principalType: principalType
-      }
-    ])
+    name: 'assignExecutorRoles'
+    roleAssignments: _executorRoles
   }
 }
 
-// Key Vault Service - Key Vault Contributor -> Executor
-// Key Vault Service - Key Vault Secrets Officer -> Executor
-module assignKeyVaultContributorAndSecretsOfficerExecutor 'modules/security/resource-role-assignment.bicep' = if (deployKeyVault) {
-  name: 'assignKeyVaultContributorAndSecretsOfficerExecutor'
+// Cosmos DB Account - Cosmos DB Built-in Data Contributor -> Executor (data plane, separate module)
+module assignCosmosDBCosmosDbBuiltInDataContributorExecutor 'modules/security/cosmos-data-plane-role-assignment.bicep' = if (deployCosmosDb) {
+  name: 'assignCosmosDBCosmosDbBuiltInDataContributorExecutor'
   params: {
-    name: 'assignKeyVaultContributorAndSecretsOfficerExecutor'
-    roleAssignments: concat([
-      {
-        principalId: principalId
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.KeyVaultContributor.guid
-        )
-        #disable-next-line BCP318
-        resourceId: keyVault.outputs.resourceId
-        principalType: principalType
-      }
-      {
-        principalId: principalId
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.KeyVaultSecretsOfficer.guid
-        )
-        #disable-next-line BCP318
-        resourceId: keyVault.outputs.resourceId
-        principalType: principalType
-      }
-    ])
+    #disable-next-line BCP318
+    cosmosDbAccountName: cosmosDBAccount.outputs.name
+    principalId: principalId
+    roleDefinitionGuid: const.roles.CosmosDBBuiltInDataContributor.guid
+    scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${dbAccountName}/dbs/${dbDatabaseName}'
   }
 }
 
-// Key Vault Service - Key Vault Secrets User -> ContainerApp
+// Key Vault Service - Key Vault Secrets User -> ContainerApp (per-app loop preserved)
 module assignKeyVaultSecretsUserAca 'modules/security/resource-role-assignment.bicep' = [
   for (app, i) in containerAppsList: if (deployContainerApps && deployKeyVault && contains(app.roles, const.roles.KeyVaultSecretsUser.key)) {
     name: 'assignKeyVaultSecretsUserAca-${app.service_name}'
@@ -2609,147 +2185,15 @@ module assignKeyVaultSecretsUserAca 'modules/security/resource-role-assignment.b
             const.roles.KeyVaultSecretsUser.guid
           )
           #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
           #disable-next-line BCP318
-          resourceId: keyVault.outputs.resourceId
+          resourceId: keyVault.id
           principalType: 'ServicePrincipal'
         }
       ]
     }
   }
 ]
-
-// Search Service - Search Service Contributor -> Executor
-module assignSearchSearchServiceContributorExecutor 'modules/security/resource-role-assignment.bicep' = if (deploySearchService) {
-  name: 'assignSearchSearchServiceContributorExecutor'
-  params: {
-    name: 'assignSearchSearchServiceContributorExecutor'
-    roleAssignments: [
-      {
-        principalId: principalId
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.SearchServiceContributor.guid
-        )
-        #disable-next-line BCP318
-        resourceId: searchService.outputs.resourceId
-        principalType: principalType
-      }
-    ]
-  }
-}
-
-// Search Service - Search Index Data Contributor -> Executor
-module assignSearchSearchIndexDataContributorExecutor 'modules/security/resource-role-assignment.bicep' = if (deploySearchService) {
-  name: 'assignSearchSearchIndexDataContributorExecutor'
-  params: {
-    name: 'assignSearchSearchIndexDataContributorExecutor'
-    roleAssignments: [
-      {
-        principalId: principalId
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.SearchIndexDataContributor.guid
-        )
-        #disable-next-line BCP318
-        resourceId: searchService.outputs.resourceId
-        principalType: principalType
-      }
-    ]
-  }
-}
-
-// Storage Account - Storage Blob Data Contributor -> Executor
-module assignStorageStorageBlobDataContributorExecutor 'modules/security/resource-role-assignment.bicep' = if (deployStorageAccount) {
-  name: 'assignStorageStorageBlobDataContributorExecutor'
-  params: {
-    name: 'assignStorageStorageBlobDataContributorExecutor'
-    roleAssignments: [
-      {
-        principalId: principalId
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.StorageBlobDataContributor.guid
-        )
-        #disable-next-line BCP318
-        resourceId: storageAccount.outputs.resourceId
-        principalType: principalType
-      }
-    ]
-  }
-}
-
-// Cosmos DB Account - Cosmos DB Built-in Data Contributor -> Executor
-module assignCosmosDBCosmosDbBuiltInDataContributorExecutor 'modules/security/cosmos-data-plane-role-assignment.bicep' = if (deployCosmosDb) {
-  name: 'assignCosmosDBCosmosDbBuiltInDataContributorExecutor'
-  params: {
-    #disable-next-line BCP318
-    cosmosDbAccountName: cosmosDBAccount.outputs.name
-    principalId: principalId
-    roleDefinitionGuid: const.roles.CosmosDBBuiltInDataContributor.guid
-    scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${dbAccountName}/dbs/${dbDatabaseName}'
-  }
-}
-
-// Search Service - Search Index Data Reader -> Executor
-module assignSearchSearchIndexDataReaderExecutor 'modules/security/resource-role-assignment.bicep' = if (deploySearchService) {
-  name: 'assignSearchSearchIndexDataReaderExecutor'
-  params: {
-    name: 'assignSearchSearchIndexDataReaderExecutor'
-    roleAssignments: [
-      {
-        principalId: principalId
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.SearchIndexDataReader.guid
-        )
-        #disable-next-line BCP318
-        resourceId: searchService.outputs.resourceId
-        principalType: principalType
-      }
-    ]
-  }
-}
-
-// AI Foundry Account - Cognitive Services OpenAI User -> Executor
-module assignAIFoundryCogServOAIUserExecutor 'modules/security/resource-role-assignment.bicep' = if (deployAiFoundry) {
-  name: 'assignAIFoundryCogServOAIUserExecutor'
-  params: {
-    name: 'assignAIFoundryCogServOAIUserExecutor'
-    roleAssignments: [
-      {
-        principalId: principalId
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.CognitiveServicesOpenAIUser.guid
-        )
-        #disable-next-line BCP318
-        resourceId: aiFoundryAccountResourceId
-        principalType: principalType
-      }
-    ]
-  }
-}
-
-// AI Foundry Account - Cognitive Services  User -> Executor
-module assignAIFoundryCogServUserExecutor 'modules/security/resource-role-assignment.bicep' = if (deployAiFoundry) {
-  name: 'assignAIFoundryCogServUserExecutor'
-  params: {
-    name: 'assignAIFoundryCogServUserExecutor'
-    roleAssignments: [
-      {
-        principalId: principalId
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.CognitiveServicesUser.guid
-        )
-        #disable-next-line BCP318
-        resourceId: aiFoundryAccountResourceId
-        principalType: principalType
-      }
-    ]
-  }
-}
 
 // App Configuration Settings Service - App Configuration Data Reader -> ContainerApp
 module assignAppConfigAppConfigurationDataReaderContainerApps 'modules/security/resource-role-assignment.bicep' = [
@@ -2767,9 +2211,9 @@ module assignAppConfigAppConfigurationDataReaderContainerApps 'modules/security/
             const.roles.AppConfigurationDataReader.guid
           )
           #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
           #disable-next-line BCP318
-          resourceId: appConfig.outputs.resourceId
+          resourceId: appConfig.id
           principalType: 'ServicePrincipal'
         }
       ]
@@ -2793,7 +2237,7 @@ module assignAiFoundryAccountCognitiveServicesUserContainerApps 'modules/securit
             const.roles.CognitiveServicesUser.guid
           )
           #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
           resourceId: aiFoundryAccountResourceId
           principalType: 'ServicePrincipal'
         }
@@ -2818,7 +2262,7 @@ module assignAIFoundryCogServOAIUserContainerApps 'modules/security/resource-rol
             const.roles.CognitiveServicesOpenAIUser.guid
           )
           #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
           resourceId: aiFoundryAccountResourceId
           principalType: 'ServicePrincipal'
         }
@@ -2835,7 +2279,7 @@ module assignAiFoundryAccountCognitiveServicesUserSearch 'modules/security/resou
     roleAssignments: [
       {
         #disable-next-line BCP318
-        principalId: (_useUAI) ? searchServiceUAI.outputs.principalId : searchService.outputs.systemAssignedMIPrincipalId!
+        principalId: (_useUAI) ? searchServiceUAI.properties.principalId : searchService.outputs.systemAssignedMIPrincipalId!
         roleDefinitionId: subscriptionResourceId(
           'Microsoft.Authorization/roleDefinitions',
           const.roles.CognitiveServicesUser.guid
@@ -2857,9 +2301,9 @@ module assignCrAcrPullContainerApps 'modules/security/resource-role-assignment.b
         {
           roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPull.guid)
           #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
           #disable-next-line BCP318
-          resourceId: containerRegistry.outputs.resourceId
+          resourceId: containerRegistry.id
           principalType: 'ServicePrincipal'
         }
       ]
@@ -2878,7 +2322,7 @@ module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/securi
       #disable-next-line BCP318
       cosmosDbAccountName: cosmosDBAccount.outputs.name
       #disable-next-line BCP318
-      principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+      principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
       roleDefinitionGuid: const.roles.CosmosDBBuiltInDataContributor.guid
       scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${dbAccountName}/dbs/${dbDatabaseName}'
     }
@@ -2898,9 +2342,9 @@ module assignKeyVaultKeyVaultSecretsUserContainerApps 'modules/security/resource
             const.roles.KeyVaultSecretsUser.guid
           )
           #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
           #disable-next-line BCP318
-          resourceId: keyVault.outputs.resourceId
+          resourceId: keyVault.id
           principalType: 'ServicePrincipal'
         }
       ]
@@ -2924,7 +2368,7 @@ module assignSearchSearchIndexDataReaderContainerApps 'modules/security/resource
             const.roles.SearchIndexDataReader.guid
           )
           #disable-next-line BCP318
-          principalId: (_useUAI)  ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: (_useUAI)  ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
           #disable-next-line BCP318
           resourceId: searchService.outputs.resourceId
           principalType: 'ServicePrincipal'
@@ -2950,7 +2394,7 @@ module assignSearchSearchIndexDataContributorContainerApps 'modules/security/res
             const.roles.SearchIndexDataContributor.guid
           )
           #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId  : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId  : containerApps[i].outputs.systemAssignedMIPrincipalId!
           #disable-next-line BCP318
           resourceId: searchService.outputs.resourceId
           principalType: 'ServicePrincipal'
@@ -2976,7 +2420,7 @@ module assignStorageStorageBlobDataContributorAca 'modules/security/resource-rol
             const.roles.StorageBlobDataContributor.guid
           )
           #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
           #disable-next-line BCP318
           resourceId: storageAccount.outputs.resourceId
           principalType: 'ServicePrincipal'
@@ -3002,7 +2446,7 @@ module assignStorageStorageBlobDataReaderAca 'modules/security/resource-role-ass
             const.roles.StorageBlobDataReader.guid
           )
           #disable-next-line BCP318
-          principalId: (_useUAI)  ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: (_useUAI)  ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
           #disable-next-line BCP318
           resourceId: storageAccount.outputs.resourceId
           principalType: 'ServicePrincipal'
@@ -3028,7 +2472,7 @@ module assignStorageStorageBlobDataDelegatorAca 'modules/security/resource-role-
             const.roles.StorageBlobDelegator.guid
           )
           #disable-next-line BCP318
-          principalId: (_useUAI)  ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          principalId: (_useUAI)  ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
           #disable-next-line BCP318
           resourceId: storageAccount.outputs.resourceId
           principalType: 'ServicePrincipal'
@@ -3046,7 +2490,7 @@ module assignStorageStorageBlobDataReaderSearch 'modules/security/resource-role-
     roleAssignments: [
       {
         #disable-next-line BCP318
-        principalId: (_useUAI) ? searchServiceUAI.outputs.principalId : searchService.outputs.systemAssignedMIPrincipalId!
+        principalId: (_useUAI) ? searchServiceUAI.properties.principalId : searchService.outputs.systemAssignedMIPrincipalId!
         roleDefinitionId: subscriptionResourceId(
           'Microsoft.Authorization/roleDefinitions',
           const.roles.StorageBlobDataReader.guid
@@ -3112,26 +2556,34 @@ module assignStorageStorageBlobDataReaderAIFoundryProject 'modules/security/reso
 // App Configuration Store
 //////////////////////////////////////////////////////////////////////////
 
-module appConfig 'br/public:avm/res/app-configuration/configuration-store:0.9.1' = if (deployAppConfig) {
-  name: 'appConfig'
-  params: {
-    name: appConfigName
-    location: location
-    sku: 'Standard'
-    managedIdentities: {
-      systemAssigned: true
-    }
-    roleAssignments: [
-      {
-        principalId: principalId
-        roleDefinitionIdOrName: const.roles.AppConfigurationDataOwner.guid
-      }
-    ]
-    tags: _tags
+resource appConfig 'Microsoft.AppConfiguration/configurationStores@2024-05-01' = if (deployAppConfig) {
+  name: appConfigName
+  location: location
+  tags: _tags
+  sku: {
+    name: 'Standard'
+  }
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
     dataPlaneProxy: {
       authenticationMode: 'Pass-through'
       privateLinkDelegation: 'Disabled'
     }
+    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    disableLocalAuth: false
+  }
+}
+
+resource appConfigDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployAppConfig) {
+  #disable-next-line use-resource-id-functions
+  name: guid(appConfig.id, principalId, const.roles.AppConfigurationDataOwner.guid)
+  scope: appConfig
+  properties: {
+    principalId: principalId
+    principalType: principalType
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AppConfigurationDataOwner.guid)
   }
 }
 
@@ -3147,7 +2599,7 @@ module containerAppsSettings 'modules/container-apps/container-apps-list.bicep' 
         serviceName: containerAppsList[i].service_name
         canonical_name: containerAppsList[i].canonical_name
         #disable-next-line BCP318
-        principalId: (_useUAI) ? containerAppsUAI[i].outputs.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+        principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
         #disable-next-line BCP318
         fqdn: containerApps[i].outputs.fqdn
       }
@@ -3203,12 +2655,12 @@ module appConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bi
   name: 'appConfigKeyVaultPopulate'
   params: {
     #disable-next-line BCP318
-    storeName: appConfig.outputs.name
+    storeName: appConfig.name
     keyValues:  [ 
       for app in containerAppsList: {
             name: '${app.canonical_name}_APIKEY'
             #disable-next-line BCP318
-            value: '{"uri":"${keyVault.outputs.uri}secrets/${replace(app.canonical_name, '_', '-')}-APIKEY"}'
+            value: '{"uri":"${keyVault.properties.vaultUri}secrets/${replace(app.canonical_name, '_', '-')}-APIKEY"}'
             label: appConfigLabel
             contentType: 'application/vnd.microsoft.appconfig.keyvaultref+json;charset=utf-8'
       }
@@ -3220,7 +2672,7 @@ module cosmosConfigKeyVaultPopulate 'modules/app-configuration/app-configuration
   name: 'cosmosConfigKeyVaultPopulate'
   params: {
     #disable-next-line BCP318
-    storeName: appConfig.outputs.name
+    storeName: appConfig.name
     keyValues: concat(
       [
         #disable-next-line BCP318
@@ -3236,7 +2688,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
   name: 'appConfigPopulate'
   params: {
     #disable-next-line BCP318
-    storeName: appConfig.outputs.name
+    storeName: appConfig.name
     keyValues: concat(
       #disable-next-line BCP318
       deployContainerApps ? containerAppsSettings.outputs.containerAppsEndpoints : [],
@@ -3261,26 +2713,26 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'ENABLE_CONSOLE_LOGGING', value: 'true',                              label: appConfigLabel, contentType: 'text/plain' }
       { name: 'RELEASE',     value: _manifest.tag,                      label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
-      { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: (deployAppInsights && deployLogAnalytics) ? appInsights.outputs.connectionString : '',   label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: (deployAppInsights && deployLogAnalytics) ? appInsights.properties.ConnectionString : '',   label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
-      { name: 'APPLICATIONINSIGHTS__INSTRUMENTATIONKEY', value: (deployAppInsights && deployLogAnalytics) ? appInsights.outputs.instrumentationKey : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'APPLICATIONINSIGHTS__INSTRUMENTATIONKEY', value: (deployAppInsights && deployLogAnalytics) ? appInsights.properties.InstrumentationKey : '', label: appConfigLabel, contentType: 'text/plain' }
 
       //── Resource IDs ─────────────────────────────────────────────────────
       #disable-next-line BCP318
-      { name: 'KEY_VAULT_RESOURCE_ID', value: deployKeyVault ? keyVault.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'KEY_VAULT_RESOURCE_ID', value: deployKeyVault ? keyVault.id : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'STORAGE_ACCOUNT_RESOURCE_ID', value: deployStorageAccount ? storageAccount.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
-      { name: 'APP_INSIGHTS_RESOURCE_ID', value: (deployAppInsights && deployLogAnalytics) ? appInsights.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'APP_INSIGHTS_RESOURCE_ID', value: (deployAppInsights && deployLogAnalytics) ? appInsights.id : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
-      { name: 'LOG_ANALYTICS_RESOURCE_ID', value: deployLogAnalytics ? logAnalytics.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'LOG_ANALYTICS_RESOURCE_ID', value: deployLogAnalytics ? logAnalytics.id : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
-      { name: 'CONTAINER_ENV_RESOURCE_ID', value: deployContainerEnv ? containerEnv.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'CONTAINER_ENV_RESOURCE_ID', value: deployContainerEnv ? containerEnv.id : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AI_FOUNDRY_ACCOUNT_RESOURCE_ID', value: (deployAiFoundry) ? aiFoundryAccountResourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AI_FOUNDRY_PROJECT_RESOURCE_ID', value: (deployAiFoundry) ? aiFoundryProjectResourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       // { name: 'AI_FOUNDRY_PROJECT_WORKSPACE_ID', value: (deployAiFoundry) ? aiFoundryFormatProjectWorkspaceId!.outputs.projectWorkspaceIdGuid : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
-      { name: 'SEARCH_SERVICE_UAI_RESOURCE_ID', value: (deploySearchService && _useUAI) ? searchServiceUAI.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'SEARCH_SERVICE_UAI_RESOURCE_ID', value: (deploySearchService && _useUAI) ? searchServiceUAI.id : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'SEARCH_SERVICE_RESOURCE_ID', value: deploySearchService ? searchService.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       
@@ -3312,7 +2764,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
 
       // ── Endpoints / URIs ──────────────────────────────────────────────────
       #disable-next-line BCP318
-      { name: 'KEY_VAULT_URI',                   value: deployKeyVault ? keyVault.outputs.uri : '',                        label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'KEY_VAULT_URI',                   value: deployKeyVault ? keyVault.properties.vaultUri : '',                        label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'STORAGE_BLOB_ENDPOINT',           value: deployStorageAccount ? storageAccount.outputs.primaryBlobEndpoint : '',  label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AI_FOUNDRY_ACCOUNT_ENDPOINT',     value: (deployAiFoundry) ? aiFoundryAccountEndpoint : '', label: appConfigLabel, contentType: 'text/plain' }      
@@ -3328,9 +2780,9 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
 
       //── Managed Identity Principals ───────────────────────────────────────
       #disable-next-line BCP318
-      { name: 'CONTAINER_ENV_PRINCIPAL_ID', value: deployContainerEnv ? ((_useUAI) ? containerEnvUAI.outputs.principalId : containerEnv.outputs.systemAssignedMIPrincipalId!) : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'CONTAINER_ENV_PRINCIPAL_ID', value: deployContainerEnv ? ((_useUAI) ? containerEnvUAI.properties.principalId : (containerEnv.?identity.?principalId ?? '')) : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
-      { name: 'SEARCH_SERVICE_PRINCIPAL_ID', value: deploySearchService ? ((_useUAI) ? searchServiceUAI.outputs.principalId : searchService.outputs.systemAssignedMIPrincipalId!) : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'SEARCH_SERVICE_PRINCIPAL_ID', value: deploySearchService ? ((_useUAI) ? searchServiceUAI.properties.principalId : searchService.outputs.systemAssignedMIPrincipalId!) : '', label: appConfigLabel, contentType: 'text/plain' }
 
       // ── Container Apps List & Model Deployments ────────────────────────────
       #disable-next-line BCP318
@@ -3381,4 +2833,4 @@ output DEPLOY_VM_KEY_VAULT bool = deployVmKeyVault
 // Endpoints / URIs
 // ──────────────────────────────────────────────────────────────────────
 #disable-next-line BCP318
-output APP_CONFIG_ENDPOINT string = deployAppConfig ? appConfig.outputs.endpoint : ''
+output APP_CONFIG_ENDPOINT string = deployAppConfig ? appConfig.properties.endpoint : ''
