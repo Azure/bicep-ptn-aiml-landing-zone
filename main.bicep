@@ -1467,7 +1467,7 @@ module privateEndpointCosmos 'modules/networking/private-endpoint.bicep' = if (_
   ]
 }
 
-// AI Search
+// AI Search (application)
 module privateEndpointSearch 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deploySearchService) {
   name: 'search-private-endpoint'
   params: {
@@ -1500,6 +1500,42 @@ module privateEndpointSearch 'modules/networking/private-endpoint.bicep' = if (_
   dependsOn: [
     searchService!
     privateEndpointCosmos // Serialize PE operations to avoid conflicts
+  ]
+}
+
+// AI Search (AI Foundry dedicated)
+module privateEndpointSearchAIFoundry 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deployAiFoundry && aiSearchResourceId == '') {
+  name: 'search-aif-private-endpoint'
+  params: {
+    name: '${const.abbrs.networking.privateEndpoint}${aiFoundrySearchServiceName}'
+    resourceGroupName: _peResourceGroupName
+    location: _peLocation
+    tags: _tags
+    subnetResourceId: _peSubnetId
+    privateLinkServiceConnections: [
+      {
+        name: 'searchAIFConnection${useExistingVNet?'-byon':''}'
+        properties: {
+          #disable-next-line BCP318
+          privateLinkServiceId: searchServiceAIFoundry.outputs.resourceId
+          groupIds: ['searchService']
+        }
+      }
+    ]
+    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
+      name: 'searchDnsZoneGroup'
+      privateDnsZoneGroupConfigs: [
+        {
+          name: 'searchARecord'
+          #disable-next-line BCP318
+          privateDnsZoneResourceId: privateDnsZoneSearch!.outputs.resourceId
+        }
+      ]
+    }
+  }
+  dependsOn: [
+    searchServiceAIFoundry!
+    privateEndpointSearch // Serialize PE operations to avoid conflicts
   ]
 }
 
@@ -1774,7 +1810,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
   }
   dependsOn: [
     #disable-next-line BCP321
-    (aiSearchResourceId == '' && deploySearchService) ? searchService : null
+    (aiSearchResourceId == '') ? searchServiceAIFoundry : null
     #disable-next-line BCP321
     (_networkIsolation && !useExistingVNet) ? virtualNetwork : null
     #disable-next-line BCP321
@@ -1812,7 +1848,7 @@ var varAfNetworkingOverride = _networkIsolation ? {
 var varAfAiSearchCfgComplete = {
   existingResourceId: aiSearchResourceId != ''
     ? aiSearchResourceId
-    : deploySearchService ? searchService.outputs.resourceId : null
+    : deployAiFoundry ? searchServiceAIFoundry.outputs.resourceId : null
   name: aiFoundrySearchServiceName
   privateDnsZoneResourceId: _networkIsolation ? _dnsZoneSearchId : null
   roleAssignments: []
@@ -2424,6 +2460,39 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
   dependsOn: [
     containerEnv!
     storageAccount!
+  ]
+}
+
+// Dedicated AI Search service for AI Foundry (separate from the application search).
+// Skipped when the consumer brings their own AI Foundry search via `aiSearchResourceId`.
+module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' = if (deployAiFoundry && aiSearchResourceId == '') {
+  name: 'searchServiceAIFoundry'
+  params: {
+    name: aiFoundrySearchServiceName
+    location: location
+    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    tags: _tags
+
+    // SKU & capacity (aligned with application search defaults; override for heavier workloads)
+    sku: 'basic'
+    replicaCount: 2
+    partitionCount: 1
+    semanticSearch: 'disabled'
+
+    // Identity & Auth: system-assigned MI (AI Foundry project identity gets data-plane roles via AVM)
+    managedIdentities: {
+      systemAssigned: true
+    }
+
+    disableLocalAuth: false
+    authOptions: {
+      aadOrApiKey: {
+        aadAuthFailureMode: 'http401WithBearerChallenge'
+      }
+    }
+  }
+  dependsOn: [
+    containerEnv!
   ]
 }
 
