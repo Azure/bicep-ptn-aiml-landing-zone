@@ -1948,7 +1948,10 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
     tags: _tags
 
     // SKU & capacity
-    sku: 'basic'
+    // Using 'standard' rather than 'basic' because several regions (eastus2, westus3, etc.)
+    // are returning InsufficientResourcesAvailable for the basic SKU capacity pool. Standard
+    // has broader capacity availability at ~same cost tier when kept at 1 replica / 1 partition.
+    sku: 'standard'
     replicaCount: 1
     partitionCount: 1
     semanticSearch: 'disabled'
@@ -1996,7 +1999,8 @@ module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' =
     tags: _tags
 
     // SKU & capacity (aligned with application search defaults; override for heavier workloads)
-    sku: 'basic'
+    // Using 'standard' SKU for reliable regional capacity availability.
+    sku: 'standard'
     replicaCount: 1
     partitionCount: 1
     semanticSearch: 'disabled'
