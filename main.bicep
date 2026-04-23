@@ -363,14 +363,14 @@ param vmAdminPassword string
 @description('Size of the test VM')
 param vmSize string = 'Standard_D2s_v5'
 
-@description('Image SKU (e.g., win11-25h2-ent, win11-23h2-ent, 2022-datacenter).')
-param vmImageSku string = 'win11-25h2-ent'
+@description('Image SKU (e.g., 2022-datacenter-azure-edition, win11-25h2-ent).')
+param vmImageSku string = '2022-datacenter-azure-edition'
 
-@description('Image publisher (Windows 11: MicrosoftWindowsDesktop, Windows Server: MicrosoftWindowsServer).')
-param vmImagePublisher string = 'MicrosoftWindowsDesktop'
+@description('Image publisher (Windows Server: MicrosoftWindowsServer, Windows 11: MicrosoftWindowsDesktop).')
+param vmImagePublisher string = 'MicrosoftWindowsServer'
 
-@description('Image offer (Windows 11: windows-11, Windows Server: WindowsServer).')
-param vmImageOffer string = 'windows-11'
+@description('Image offer (Windows Server: WindowsServer, Windows 11: windows-11).')
+param vmImageOffer string = 'WindowsServer'
 
 @description('Image version (use latest unless you need a pinned build).')
 param vmImageVersion string = 'latest'
@@ -2019,6 +2019,14 @@ module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' =
   }
   dependsOn: [
     containerEnv!
+    // Serialize creation of the two search services to avoid a rare race
+    // condition in the Microsoft.Search resource provider where two parallel
+    // PUTs against similarly-named services in the same region/subscription
+    // can leave the second name "stuck" in the backend namespace cache,
+    // producing subsequent "already exists" / "ServiceNameUnavailable" errors
+    // even though the service is not visible in ARM and the name appears
+    // available to checkNameAvailability.
+    searchService!
   ]
 }
 

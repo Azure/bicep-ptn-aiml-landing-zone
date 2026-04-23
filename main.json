@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "7099438712957548732"
+      "templateHash": "14059857605666395235"
     }
   },
   "definitions": {
@@ -666,23 +666,23 @@
     },
     "vmImageSku": {
       "type": "string",
-      "defaultValue": "win11-25h2-ent",
+      "defaultValue": "2022-datacenter-azure-edition",
       "metadata": {
-        "description": "Image SKU (e.g., win11-25h2-ent, win11-23h2-ent, 2022-datacenter)."
+        "description": "Image SKU (e.g., 2022-datacenter-azure-edition, win11-25h2-ent)."
       }
     },
     "vmImagePublisher": {
       "type": "string",
-      "defaultValue": "MicrosoftWindowsDesktop",
+      "defaultValue": "MicrosoftWindowsServer",
       "metadata": {
-        "description": "Image publisher (Windows 11: MicrosoftWindowsDesktop, Windows Server: MicrosoftWindowsServer)."
+        "description": "Image publisher (Windows Server: MicrosoftWindowsServer, Windows 11: MicrosoftWindowsDesktop)."
       }
     },
     "vmImageOffer": {
       "type": "string",
-      "defaultValue": "windows-11",
+      "defaultValue": "WindowsServer",
       "metadata": {
-        "description": "Image offer (Windows 11: windows-11, Windows Server: WindowsServer)."
+        "description": "Image offer (Windows Server: WindowsServer, Windows 11: windows-11)."
       }
     },
     "vmImageVersion": {
