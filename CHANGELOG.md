@@ -3,6 +3,39 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v1.1.0] - 2026-04-24
+### Added
+- **Optional ACR Task agent pool for network-isolated image builds** (fixes #14): new `Microsoft.ContainerRegistry/registries/agentPools@2019-06-01-preview` child resource parented to the existing `containerRegistry`, attached to the existing `devops-build-agents-subnet` (`/27`, previously unused). Gated on `deployContainerRegistry && networkIsolation && deployAcrTaskAgentPool`. Lets `az acr build --agent-pool <name>` run builds inside the VNet and push to the private ACR over its private endpoint, removing the need for Docker on any jumpbox or client and avoiding the common workaround of re-enabling `publicNetworkAccess` for every build.
+  - New parameters in `main.bicep`:
+    - `deployAcrTaskAgentPool` (`bool`, default `true`)
+    - `acrTaskAgentPoolName` (`string`, `@maxLength(20)`, default `'build-pool'`)
+    - `acrTaskAgentPoolTier` (`@allowed(['S1','S2','S3'])`, default `'S1'`)
+    - `acrTaskAgentPoolCount` (`int`, `@minValue(0)`, default `1`)
+  - New output `ACR_TASK_AGENT_POOL`: the agent pool name when deployed, empty otherwise. Surfaced via `azd env get-values`.
+  - New firewall application rule `AllowAcrTasks` scoped to `devopsBuildAgentsSubnetPrefix`, allowing `*.azurecr.io` and `*.data.azurecr.io`. `management.azure.com` for task orchestration and `mcr.microsoft.com` for the builder base image are covered by existing shared rules.
+  - Cost note: `S1` at `count=1` is billed per hour whether idle or not. To pause billing between builds: `az acr agentpool update -r <acr> -n <pool> --count 0`.
+- **Complete Firewall allow-list for the jumpbox CSE bootstrap under network isolation** (fixes #15): replaced the monolithic `_firewallVmSetupFqdns` with four purpose-labeled sets that cover every tool `install.ps1` actually runs. All jumpbox-specific rules are now scoped to `jumpboxSubnetPrefix` (previously `*`) so the ACA/agent subnets do not inherit developer-tooling egress.
+  - New parameter `extendFirewallForJumpboxBootstrap` (`bool`, default `true`) — disable if egress is managed centrally.
+  - Shared `_firewallEssentialAuthFqdns` extended with `login.windows.net`, `management.azure.com`, and `*.applicationinsights.azure.com` (previously missing, caused `az <anything>` and telemetry calls to fail from inside the VNet).
+  - Shared `_firewallEssentialGitHubFqdns` extended with `codeload.github.com` and `objects.githubusercontent.com` (git clone blob fetches).
+  - New `_firewallVmBootstrapFqdns` (Chocolatey + Windows prerequisites): adds `packages.chocolatey.org`, `api.nuget.org`, `www.nuget.org`, `dist.nuget.org`, `download.visualstudio.microsoft.com`, `*.visualstudio.microsoft.com`, `download.microsoft.com`, `*.download.microsoft.com`. Fixes `choco install python311` failing on the `vcredist140` dependency download.
+  - New `_firewallDevRuntimeFqdns` (Python + Node): adds `www.python.org`, `pypi.org`, `files.pythonhosted.org`, `*.pythonhosted.org`, `registry.npmjs.org`, `*.npmjs.org`. Fixes `pip install` failing against `files.pythonhosted.org`.
+  - New `_firewallEditorFqdns` (VS Code): preserves the existing VS Code update endpoints but scoped to the jumpbox subnet.
+  - Three new application rules — `AllowJumpboxBootstrap`, `AllowJumpboxDevRuntimes`, `AllowJumpboxEditors` — replace the old `AllowVmSetup` rule. Sources are `[jumpboxSubnetPrefix]` instead of `*`.
+
+### Removed
+- **Jumpbox Docker / Moby install** (fixes #14): `install.ps1` no longer installs Moby Engine, `docker buildx`, Docker Desktop, WSL2 features, or the associated 6-step Docker status tracking and log file (`docker-setup-status.json`). Rationale (per issue #14): Windows Server's Moby engine cannot run privileged Linux containers required by BuildKit, so the jumpbox could never actually build Linux images; Docker Desktop is not supported on Windows Server and requires a paid subscription above ~250 employees / ~$10M revenue. Image builds move to the ACR Tasks agent pool. `install.ps1` now prints a short MOTD pointing users at `az acr build --agent-pool <pool>`.
+- **Docker Hub FQDNs** removed from the Firewall Policy allow-list: `download.docker.com` and `desktop.docker.com` are no longer required because the jumpbox no longer installs Docker.
+
+### Changed
+- **`install.ps1` reboot reason** updated from "activate Windows Containers feature" to "finalize installed tooling" (Chocolatey-installed Git/Python/VS Code/PowerShell Core may flag a pending reboot). The 120 s delay before `shutdown /r` is preserved so the Custom Script Extension agent can still report `Succeeded` to ARM before the VM goes down.
+
+### Fixed
+- **`choco install python311` fails on fresh NI jumpbox**: blocked by firewall while fetching `vcredist140` from `download.visualstudio.microsoft.com`. Addressed by the new `_firewallVmBootstrapFqdns` set.
+- **`git clone https://github.com/...` on jumpbox fails mid-fetch**: blob fetches to `codeload.github.com` / `objects.githubusercontent.com` were not matched by the prior narrow GitHub list. Addressed by extending `_firewallEssentialGitHubFqdns`.
+- **`pip install ...` on jumpbox fails**: `files.pythonhosted.org` was not matched by `*.pypi.org`. Addressed by the new `_firewallDevRuntimeFqdns` set.
+- **`az <anything>` against `management.azure.com` from jumpbox fails**: ARM endpoint was missing from `_firewallEssentialAuthFqdns`. Addressed by extending that set.
+
 ## [v1.0.9] - 2026-04-22
 ### Fixed (amended 2026-04-23, third amendment)
 - **Rare race condition between `searchService` and `searchServiceAIFoundry`**: The two Azure AI Search services introduced in v1.0.9 had no dependency wiring, so ARM attempted to create them in parallel. In some regions (observed in Sweden Central) this occasionally caused the `Microsoft.Search` resource provider to leave the second service name "stuck" in its internal namespace cache, producing `ServiceNameUnavailable` on the first deployment and then `A service with the name '…' already exists` on retry — even though `checkNameAvailability` reports the name available and `az resource list` shows no such service. Added a `dependsOn: [searchService!]` to `searchServiceAIFoundry` in `main.bicep` to serialize their creation and eliminate the race. If a name is already stuck from a previous failed deployment, the backend cache typically clears within 4–24h; alternatively, override `aiFoundrySearchServiceName` or set `aiSearchResourceId` to reuse an existing Search account.

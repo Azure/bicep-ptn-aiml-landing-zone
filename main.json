@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "14059857605666395235"
+      "templateHash": "10591441757889706460"
     }
   },
   "definitions": {
@@ -393,6 +393,48 @@
         "description": "Deploy Azure Firewall with UDR for egress traffic control. Defaults to true when networkIsolation is enabled."
       }
     },
+    "deployAcrTaskAgentPool": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Deploy an ACR Task agent pool so image builds can run inside the VNet when the registry has public access disabled. Requires a Premium container registry (auto-selected when networkIsolation is true) and is gated on both deployContainerRegistry and networkIsolation."
+      }
+    },
+    "acrTaskAgentPoolName": {
+      "type": "string",
+      "defaultValue": "build-pool",
+      "maxLength": 20,
+      "metadata": {
+        "description": "Name for the ACR Task agent pool. Max 20 characters."
+      }
+    },
+    "acrTaskAgentPoolTier": {
+      "type": "string",
+      "defaultValue": "S1",
+      "allowedValues": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "metadata": {
+        "description": "SKU tier for the ACR Task agent pool: S1 (2 vCPU), S2 (4 vCPU), S3 (8 vCPU)."
+      }
+    },
+    "acrTaskAgentPoolCount": {
+      "type": "int",
+      "defaultValue": 1,
+      "minValue": 0,
+      "metadata": {
+        "description": "Initial instance count for the ACR Task agent pool. Set to 0 after provisioning to pause billing (az acr agentpool update -r <acr> -n <pool> --count 0)."
+      }
+    },
+    "extendFirewallForJumpboxBootstrap": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "When true, extends the Azure Firewall Policy with the FQDN allow-list required by the default install.ps1 jumpbox bootstrap (Chocolatey, Python, Node, VS Code, GitHub clones, Azure CLI control plane). Disable if you manage egress centrally."
+      }
+    },
     "bastionAllowedSourceIPs": {
       "type": "array",
       "defaultValue": [],
@@ -756,9 +798,9 @@
       }
     ],
     "$fxv#0": {
-      "tag": "v1.0.9",
+      "tag": "v1.1.0",
       "repo": "https://github.com/azure/bicep-ptn-aiml-landing-zone.git",
-      "ailz_tag": "v1.0.9",
+      "ailz_tag": "v1.1.0",
       "components": []
     },
     "_manifest": "[variables('$fxv#0')]",
@@ -785,35 +827,57 @@
     "_useCAppAPIKey": "[if(empty(string(parameters('useCAppAPIKey'))), false(), bool(parameters('useCAppAPIKey')))]",
     "_firewallEssentialAuthFqdns": [
       "login.microsoftonline.com",
-      "graph.microsoft.com"
+      "login.windows.net",
+      "management.azure.com",
+      "graph.microsoft.com",
+      "*.applicationinsights.azure.com"
     ],
     "_firewallEssentialContainerFqdns": [
       "mcr.microsoft.com",
       "*.data.mcr.microsoft.com"
     ],
     "_firewallEssentialGitHubFqdns": [
-      "raw.githubusercontent.com",
       "github.com",
       "*.github.com",
+      "raw.githubusercontent.com",
+      "codeload.github.com",
+      "objects.githubusercontent.com",
       "*.githubusercontent.com"
     ],
-    "_firewallVmSetupFqdns": [
+    "_firewallVmBootstrapFqdns": [
       "community.chocolatey.org",
+      "packages.chocolatey.org",
       "*.chocolatey.org",
+      "api.nuget.org",
+      "www.nuget.org",
+      "dist.nuget.org",
+      "*.nuget.org",
+      "download.visualstudio.microsoft.com",
+      "*.visualstudio.microsoft.com",
+      "download.microsoft.com",
+      "*.download.microsoft.com",
       "aka.ms",
       "go.microsoft.com",
       "*.core.windows.net",
-      "*.azureedge.net",
-      "*.nuget.org",
+      "*.azureedge.net"
+    ],
+    "_firewallDevRuntimeFqdns": [
+      "www.python.org",
+      "*.python.org",
+      "pypi.org",
+      "*.pypi.org",
+      "files.pythonhosted.org",
+      "*.pythonhosted.org",
+      "registry.npmjs.org",
+      "*.npmjs.org"
+    ],
+    "_firewallEditorFqdns": [
       "update.code.visualstudio.com",
       "*.vo.msecnd.net",
-      "*.vscode-cdn.net",
-      "download.docker.com",
-      "desktop.docker.com",
-      "*.python.org",
-      "*.pypi.org",
-      "*.applicationinsights.azure.com"
+      "*.vscode-cdn.net"
     ],
+    "_deployAcrTaskAgentPool": "[and(and(parameters('deployContainerRegistry'), variables('_networkIsolation')), parameters('deployAcrTaskAgentPool'))]",
+    "_firewallAcrTaskFqdns": "[if(variables('_deployAcrTaskAgentPool'), createArray('*.azurecr.io', '*.data.azurecr.io'), createArray())]",
     "_fileUris": [
       "[format('https://raw.githubusercontent.com/Azure/bicep-ptn-aiml-landing-zone/refs/tags/{0}/install.ps1', variables('_manifest').ailz_tag)]"
     ],
@@ -2507,7 +2571,7 @@
               },
               {
                 "ruleType": "ApplicationRule",
-                "name": "AllowVmSetup",
+                "name": "AllowJumpboxBootstrap",
                 "protocols": [
                   {
                     "protocolType": "Https",
@@ -2518,9 +2582,51 @@
                     "port": 80
                   }
                 ],
-                "targetFqdns": "[variables('_firewallVmSetupFqdns')]",
+                "targetFqdns": "[if(parameters('extendFirewallForJumpboxBootstrap'), variables('_firewallVmBootstrapFqdns'), createArray())]",
                 "sourceAddresses": [
-                  "*"
+                  "[parameters('jumpboxSubnetPrefix')]"
+                ]
+              },
+              {
+                "ruleType": "ApplicationRule",
+                "name": "AllowJumpboxDevRuntimes",
+                "protocols": [
+                  {
+                    "protocolType": "Https",
+                    "port": 443
+                  }
+                ],
+                "targetFqdns": "[if(parameters('extendFirewallForJumpboxBootstrap'), variables('_firewallDevRuntimeFqdns'), createArray())]",
+                "sourceAddresses": [
+                  "[parameters('jumpboxSubnetPrefix')]"
+                ]
+              },
+              {
+                "ruleType": "ApplicationRule",
+                "name": "AllowJumpboxEditors",
+                "protocols": [
+                  {
+                    "protocolType": "Https",
+                    "port": 443
+                  }
+                ],
+                "targetFqdns": "[if(parameters('extendFirewallForJumpboxBootstrap'), variables('_firewallEditorFqdns'), createArray())]",
+                "sourceAddresses": [
+                  "[parameters('jumpboxSubnetPrefix')]"
+                ]
+              },
+              {
+                "ruleType": "ApplicationRule",
+                "name": "AllowAcrTasks",
+                "protocols": [
+                  {
+                    "protocolType": "Https",
+                    "port": 443
+                  }
+                ],
+                "targetFqdns": "[variables('_firewallAcrTaskFqdns')]",
+                "sourceAddresses": [
+                  "[parameters('devopsBuildAgentsSubnetPrefix')]"
                 ]
               }
             ]
@@ -2841,6 +2947,24 @@
       },
       "dependsOn": [
         "containerRegistryUAI"
+      ]
+    },
+    "acrTaskAgentPool": {
+      "condition": "[variables('_deployAcrTaskAgentPool')]",
+      "type": "Microsoft.ContainerRegistry/registries/agentPools",
+      "apiVersion": "2019-06-01-preview",
+      "name": "[format('{0}/{1}', parameters('containerRegistryName'), parameters('acrTaskAgentPoolName'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('_tags')]",
+      "properties": {
+        "count": "[parameters('acrTaskAgentPoolCount')]",
+        "tier": "[parameters('acrTaskAgentPoolTier')]",
+        "os": "Linux",
+        "virtualNetworkSubnetResourceId": "[if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('devopsBuildAgentsSubnetName')), '')]"
+      },
+      "dependsOn": [
+        "containerRegistry",
+        "virtualNetwork"
       ]
     },
     "containerAppsUAI": {
@@ -58944,7 +59068,8 @@
         }
       },
       "dependsOn": [
-        "containerEnv"
+        "containerEnv",
+        "searchService"
       ]
     },
     "storageAccount": {
@@ -68510,6 +68635,13 @@
     "DEPLOY_VM_KEY_VAULT": {
       "type": "bool",
       "value": "[parameters('deployVmKeyVault')]"
+    },
+    "ACR_TASK_AGENT_POOL": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the ACR Task agent pool when deployed. Empty when not deployed."
+      },
+      "value": "[if(variables('_deployAcrTaskAgentPool'), parameters('acrTaskAgentPoolName'), '')]"
     },
     "APP_CONFIG_ENDPOINT": {
       "type": "string",

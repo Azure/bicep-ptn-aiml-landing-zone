@@ -89,6 +89,54 @@ azd provision
 
 2. **Connect via Azure Bastion**
 
+#### Building and pushing images with network isolation
+
+When `networkIsolation=true`, the Container Registry is deployed as **Premium** with `publicNetworkAccess=Disabled` and is only reachable via its private endpoint. `az acr build` against the shared Microsoft-managed builder will fail. This landing zone therefore provisions an **ACR Tasks agent pool** attached to the `devops-build-agents-subnet` so image builds run inside the VNet and push to the registry over its private endpoint. No Docker client is required (and the jumpbox has no Docker installed by design — see issue #14).
+
+Build and push from the jumpbox (or any client that can reach ARM):
+
+```powershell
+$acr  = (azd env get-values | Select-String '^AZURE_CONTAINER_REGISTRY_ENDPOINT').Line.Split('=')[1].Trim('"').Split('.')[0]
+$pool = (azd env get-values | Select-String '^ACR_TASK_AGENT_POOL').Line.Split('=')[1].Trim('"')
+
+az acr build `
+  -r $acr `
+  --agent-pool $pool `
+  -t myapp:latest `
+  -f Dockerfile `
+  .
+```
+
+Pause billing between builds (default tier `S1` is billed per hour whether idle or not):
+
+```powershell
+az acr agentpool update -r <acr> -n <pool> --count 0
+```
+
+Resume before the next build:
+
+```powershell
+az acr agentpool update -r <acr> -n <pool> --count 1
+```
+
+The agent pool can be disabled entirely with `deployAcrTaskAgentPool=false` if builds are handled by a central CI/CD runner that already reaches the registry's private endpoint.
+
+#### Firewall egress allow-list (network isolation)
+
+When `networkIsolation=true`, egress from the jumpbox and workload subnets is forced through the default Azure Firewall. The landing zone codifies the FQDNs required by the default `install.ps1` bootstrap and by the ACR Tasks agent pool. The set is split by purpose so you can audit or trim it:
+
+| Rule | Source subnet | FQDN group | Used by |
+| --- | --- | --- | --- |
+| `AllowMicrosoftContainerRegistry` | `*` | `mcr.microsoft.com`, `*.data.mcr.microsoft.com` | ACA/agents/ACR Tasks pulling Microsoft base images |
+| `AllowEntraIdAuth` | `*` | `login.microsoftonline.com`, `login.windows.net`, `management.azure.com`, `graph.microsoft.com`, `*.applicationinsights.azure.com` | Entra ID auth, ARM control plane, App Insights telemetry |
+| `AllowGitHub` | `*` | `github.com`, `*.github.com`, `raw.githubusercontent.com`, `codeload.github.com`, `objects.githubusercontent.com`, `*.githubusercontent.com` | Repo clones, release downloads |
+| `AllowJumpboxBootstrap` | `jumpboxSubnetPrefix` | Chocolatey, NuGet, VS Installer, `download.microsoft.com`, `aka.ms`, `go.microsoft.com`, `*.core.windows.net`, `*.azureedge.net` | `choco install`, Python/VS Code/PowerShell Core MSIs |
+| `AllowJumpboxDevRuntimes` | `jumpboxSubnetPrefix` | `*.python.org`, `*.pypi.org`, `*.pythonhosted.org`, `*.npmjs.org` | `pip install`, `npm install` |
+| `AllowJumpboxEditors` | `jumpboxSubnetPrefix` | `update.code.visualstudio.com`, `*.vo.msecnd.net`, `*.vscode-cdn.net` | VS Code updates |
+| `AllowAcrTasks` | `devopsBuildAgentsSubnetPrefix` | `*.azurecr.io`, `*.data.azurecr.io` | ACR Tasks agent pool talking to its registry |
+
+Set `extendFirewallForJumpboxBootstrap=false` to skip the three jumpbox-scoped rules when egress is managed centrally by another policy.
+
 ### Permissions
 
 The following role assignments are provisioned by the template based on the **default configuration** in `main.parameters.json`. This includes the default set of container apps, their associated roles, and the services they interact with. If you customize the parameters before provisioning — such as adding or removing container apps or changing role mappings — the actual assignments will vary accordingly.

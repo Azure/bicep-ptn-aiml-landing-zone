@@ -212,6 +212,24 @@ param deployNsgs bool = true
 @description('Deploy Azure Firewall with UDR for egress traffic control. Defaults to true when networkIsolation is enabled.')
 param deployAzureFirewall bool = true
 
+@description('Deploy an ACR Task agent pool so image builds can run inside the VNet when the registry has public access disabled. Requires a Premium container registry (auto-selected when networkIsolation is true) and is gated on both deployContainerRegistry and networkIsolation.')
+param deployAcrTaskAgentPool bool = true
+
+@description('Name for the ACR Task agent pool. Max 20 characters.')
+@maxLength(20)
+param acrTaskAgentPoolName string = 'build-pool'
+
+@description('SKU tier for the ACR Task agent pool: S1 (2 vCPU), S2 (4 vCPU), S3 (8 vCPU).')
+@allowed([ 'S1', 'S2', 'S3' ])
+param acrTaskAgentPoolTier string = 'S1'
+
+@description('Initial instance count for the ACR Task agent pool. Set to 0 after provisioning to pause billing (az acr agentpool update -r <acr> -n <pool> --count 0).')
+@minValue(0)
+param acrTaskAgentPoolCount int = 1
+
+@description('When true, extends the Azure Firewall Policy with the FQDN allow-list required by the default install.ps1 jumpbox bootstrap (Chocolatey, Python, Node, VS Code, GitHub clones, Azure CLI control plane). Disable if you manage egress centrally.')
+param extendFirewallForJumpboxBootstrap bool = true
+
 @description('List of trusted source IP CIDRs allowed to connect to the Bastion public IP on port 443. When empty, all internet inbound to port 443 is denied by default.')
 param bastionAllowedSourceIPs array = []
 
@@ -496,28 +514,75 @@ module bastionNsg 'modules/networking/bastion-nsg.bicep' = if (deployVM && _netw
 }
 
 // Firewall FQDN allowlist for essential outbound connectivity
-#disable-next-line no-hardcoded-env-urls
-var _firewallEssentialAuthFqdns = ['login.microsoftonline.com', 'graph.microsoft.com']
+// Essential (shared across subnets, source = '*'): auth, container registry mirror, GitHub
+var _firewallEssentialAuthFqdns = [
+  #disable-next-line no-hardcoded-env-urls
+  'login.microsoftonline.com'
+  'login.windows.net'
+  #disable-next-line no-hardcoded-env-urls
+  'management.azure.com'
+  'graph.microsoft.com'
+  '*.applicationinsights.azure.com'
+]
 var _firewallEssentialContainerFqdns = ['mcr.microsoft.com', '*.data.mcr.microsoft.com']
-var _firewallEssentialGitHubFqdns = ['raw.githubusercontent.com', 'github.com', '*.github.com', '*.githubusercontent.com']
-#disable-next-line no-hardcoded-env-urls
-var _firewallVmSetupFqdns = [
+var _firewallEssentialGitHubFqdns = [
+  'github.com'
+  '*.github.com'
+  'raw.githubusercontent.com'
+  'codeload.github.com'
+  'objects.githubusercontent.com'
+  '*.githubusercontent.com'
+]
+
+// Jumpbox-only FQDNs — scoped to jumpboxSubnetPrefix so ACA/agent subnets do not
+// inherit developer-tooling egress. Split into purpose-labeled sets so consumers can
+// audit which tool requires which endpoint.
+// Docker / Docker Hub FQDNs intentionally removed — image builds run in the ACR
+// Tasks agent pool (see deployAcrTaskAgentPool) and the Windows Server jumpbox
+// cannot build Linux images with BuildKit anyway.
+var _firewallVmBootstrapFqdns = [
   'community.chocolatey.org'
+  'packages.chocolatey.org'
   '*.chocolatey.org'
+  'api.nuget.org'
+  'www.nuget.org'
+  'dist.nuget.org'
+  '*.nuget.org'
+  'download.visualstudio.microsoft.com'
+  '*.visualstudio.microsoft.com'
+  'download.microsoft.com'
+  '*.download.microsoft.com'
   'aka.ms'
   'go.microsoft.com'
+  #disable-next-line no-hardcoded-env-urls
   '*.core.windows.net'
   '*.azureedge.net'
-  '*.nuget.org'
+]
+#disable-next-line no-hardcoded-env-urls
+var _firewallDevRuntimeFqdns = [
+  'www.python.org'
+  '*.python.org'
+  'pypi.org'
+  '*.pypi.org'
+  'files.pythonhosted.org'
+  '*.pythonhosted.org'
+  'registry.npmjs.org'
+  '*.npmjs.org'
+]
+#disable-next-line no-hardcoded-env-urls
+var _firewallEditorFqdns = [
   'update.code.visualstudio.com'
   '*.vo.msecnd.net'
   '*.vscode-cdn.net'
-  'download.docker.com'
-  'desktop.docker.com'
-  '*.python.org'
-  '*.pypi.org'
-  '*.applicationinsights.azure.com'
 ]
+
+// ACR Tasks agent-pool FQDNs — scoped to devopsBuildAgentsSubnetPrefix. Only
+// populated when the agent pool is actually deployed.
+var _deployAcrTaskAgentPool = deployContainerRegistry && _networkIsolation && deployAcrTaskAgentPool
+var _firewallAcrTaskFqdns = _deployAcrTaskAgentPool ? [
+  '*.azurecr.io'
+  '*.data.azurecr.io'
+] : []
 
 // Route Table for egress traffic control through Azure Firewall
 resource routeTable 'Microsoft.Network/routeTables@2024-07-01' = if (_networkIsolation) {
@@ -739,13 +804,40 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
           }
           {
             ruleType: 'ApplicationRule'
-            name: 'AllowVmSetup'
+            name: 'AllowJumpboxBootstrap'
             protocols: [
               { protocolType: 'Https', port: 443 }
               { protocolType: 'Http', port: 80 }
             ]
-            targetFqdns: _firewallVmSetupFqdns
-            sourceAddresses: ['*']
+            targetFqdns: extendFirewallForJumpboxBootstrap ? _firewallVmBootstrapFqdns : []
+            sourceAddresses: [jumpboxSubnetPrefix]
+          }
+          {
+            ruleType: 'ApplicationRule'
+            name: 'AllowJumpboxDevRuntimes'
+            protocols: [
+              { protocolType: 'Https', port: 443 }
+            ]
+            targetFqdns: extendFirewallForJumpboxBootstrap ? _firewallDevRuntimeFqdns : []
+            sourceAddresses: [jumpboxSubnetPrefix]
+          }
+          {
+            ruleType: 'ApplicationRule'
+            name: 'AllowJumpboxEditors'
+            protocols: [
+              { protocolType: 'Https', port: 443 }
+            ]
+            targetFqdns: extendFirewallForJumpboxBootstrap ? _firewallEditorFqdns : []
+            sourceAddresses: [jumpboxSubnetPrefix]
+          }
+          {
+            ruleType: 'ApplicationRule'
+            name: 'AllowAcrTasks'
+            protocols: [
+              { protocolType: 'Https', port: 443 }
+            ]
+            targetFqdns: _firewallAcrTaskFqdns
+            sourceAddresses: [devopsBuildAgentsSubnetPrefix]
           }
         ]
       }
@@ -1727,6 +1819,23 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-pr
         status: 'enabled'
       }
     }
+  }
+}
+
+// ACR Task agent pool — enables `az acr build --agent-pool <name>` to run image
+// builds inside the VNet when publicNetworkAccess on the registry is Disabled.
+// Gated on networkIsolation (Premium SKU) and deployAcrTaskAgentPool.
+resource acrTaskAgentPool 'Microsoft.ContainerRegistry/registries/agentPools@2019-06-01-preview' = if (_deployAcrTaskAgentPool) {
+  parent: containerRegistry
+  name: acrTaskAgentPoolName
+  location: location
+  tags: _tags
+  properties: {
+    count: acrTaskAgentPoolCount
+    tier: acrTaskAgentPoolTier
+    os: 'Linux'
+    #disable-next-line BCP318
+    virtualNetworkSubnetResourceId: _networkIsolation ? '${virtualNetworkResourceId}/subnets/${devopsBuildAgentsSubnetName}' : ''
   }
 }
 
@@ -2836,6 +2945,9 @@ output DEPLOY_CONTAINER_APPS bool = deployContainerApps
 output DEPLOY_CONTAINER_REGISTRY bool = deployContainerRegistry
 output DEPLOY_CONTAINER_ENV bool = deployContainerEnv
 output DEPLOY_VM_KEY_VAULT bool = deployVmKeyVault
+
+@description('Name of the ACR Task agent pool when deployed. Empty when not deployed.')
+output ACR_TASK_AGENT_POOL string = _deployAcrTaskAgentPool ? acrTaskAgentPoolName : ''
 
 // ──────────────────────────────────────────────────────────────────────
 // Endpoints / URIs
