@@ -179,6 +179,9 @@ param deployVmKeyVault bool = true
 @description('Deploy an Azure Log Analytics workspace for centralized log collection and query.')
 param deployLogAnalytics bool = true
 
+@description('When network isolation is enabled, also deploy an Azure Monitor Private Link Scope (AMPLS) with private endpoints and the related monitor/opinsights/automation private DNS zones to keep Log Analytics + Application Insights traffic on the private network. Disable to opt-out and avoid sharing those Azure Monitor private DNS zones with other workloads (preventing cross-workload DNS conflicts). Has no effect when networkIsolation is false.')
+param enablePrivateLogAnalytics bool = true
+
 @description('Deploy Azure Application Insights for application performance monitoring and diagnostics.')
 param deployAppInsights bool = true
 
@@ -261,6 +264,19 @@ param aiSearchResourceId string = ''
 
 @description('The AI Storage Account full ARM resource ID. Optional; if not provided, a new resource will be created.')
 param aiFoundryStorageAccountResourceId string = ''
+
+@description('The SKU name for the AI Foundry Storage Account. Only used when a new account is created (aiFoundryStorageAccountResourceId is empty). The AVM ai-foundry module does not expose this, so we pre-create the storage account with the requested SKU. Defaults to Standard_LRS for broad regional availability (some regions, e.g. Poland Central, do not support the AVM default Standard_GRS).')
+@allowed([
+  'Standard_LRS'
+  'Standard_GRS'
+  'Standard_RAGRS'
+  'Standard_ZRS'
+  'Standard_GZRS'
+  'Standard_RAGZRS'
+  'Premium_LRS'
+  'Premium_ZRS'
+])
+param aiFoundryStorageSku string = 'Standard_LRS'
 
 @description('The Cosmos DB account full ARM resource ID. Optional; if not provided, a new resource will be created.')
 param aiFoundryCosmosDBAccountResourceId string = ''
@@ -420,6 +436,11 @@ var _manifest = loadJsonContent('./manifest.json')
 var _azdTags = { 'azd-env-name': environmentName }
 var _tags = union(_azdTags, deploymentTags)
 var _networkIsolation = empty(string(networkIsolation)) ? false : bool(networkIsolation)
+// AMPLS (Azure Monitor Private Link Scope) and the related monitor/opinsights/automation
+// private DNS zones + private endpoint are only deployed when network isolation is on AND
+// the operator explicitly opts in via enablePrivateLogAnalytics. This lets isolated
+// deployments opt-out of AMPLS to avoid cross-workload private DNS conflicts.
+var _deployAmpls = _networkIsolation && deployAppInsights && deployLogAnalytics && enablePrivateLogAnalytics
 var _deployPrivateDnsZones = _networkIsolation && !policyManagedPrivateDns
 var _searchServiceLocation = empty(searchServiceLocation) ? location : searchServiceLocation
 
@@ -578,10 +599,20 @@ var _firewallEditorFqdns = [
 
 // ACR Tasks agent-pool FQDNs — scoped to devopsBuildAgentsSubnetPrefix. Only
 // populated when the agent pool is actually deployed.
+//
+// Note: ACR Tasks agents need egress to ACR data plane (`*.azurecr.io`,
+// `*.data.azurecr.io`) AND to the Azure Storage queue/blob/table endpoints
+// the ACR Tasks control plane uses to dispatch jobs to the agent VM.
+// Without the *.core.windows.net FQDNs, builds queued via
+// `az acr build --agent-pool` hang indefinitely in `Queued` state because
+// the agent VM cannot reach the storage queue. See issue #18.
 var _deployAcrTaskAgentPool = deployContainerRegistry && _networkIsolation && deployAcrTaskAgentPool
 var _firewallAcrTaskFqdns = _deployAcrTaskAgentPool ? [
   '*.azurecr.io'
   '*.data.azurecr.io'
+  '*.blob.${environment().suffixes.storage}'
+  '*.queue.${environment().suffixes.storage}'
+  '*.table.${environment().suffixes.storage}'
 ] : []
 
 // Route Table for egress traffic control through Azure Firewall
@@ -1195,13 +1226,15 @@ var _dnsZonesList = _deployPrivateDnsZones ? concat(
     { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${vnetName}-blob-std-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${vnetName}-kv-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${vnetName}-appcfg-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' }
   ],
   deployContainerApps ? [
     { dnsName: 'privatelink.${location}.azurecontainerapps.io', virtualNetworkLinkName: '${vnetName}-containerapps-link${_dnsZonesLinkSuffix}' }
   ] : [],
   deployContainerRegistry ? [
     { dnsName: 'privatelink.${acrDnsSuffix}',                         virtualNetworkLinkName: '${vnetName}-containerregistry-link${_dnsZonesLinkSuffix}' }
+  ] : [],
+  _deployAmpls ? [
+    { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.monitor.azure.com',                       virtualNetworkLinkName: '${vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.oms.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.ods.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' }
@@ -1482,6 +1515,33 @@ resource aiServicesAccount 'Microsoft.CognitiveServices/accounts@2025-06-01' = i
   )
 }
 
+// Pre-create AI Foundry Storage Account with a region-safe SKU.
+// The AVM ai-foundry module (<= 0.6.0) creates its Storage Account with the
+// provider default `Standard_GRS`, which is not offered in every region
+// (e.g. Poland Central -> RedundancyConfigurationNotAvailableInRegion).
+// Creating it ourselves and passing the resource ID as `existingResourceId`
+// lets us honor an explicit SKU (default `Standard_LRS`).
+module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (deployAiFoundry && aiFoundryStorageAccountResourceId == '') {
+  name: 'aiFoundryStorage-${resourceToken}-deployment'
+  params: {
+    name: aiFoundryStorageAccountName
+    location: location
+    tags: _tags
+    skuName: aiFoundryStorageSku
+    disablePublicNetworkAccess: _networkIsolation
+    privateEndpointSubnetResourceId: _networkIsolation ? _peSubnetId : ''
+    blobPrivateDnsZoneResourceId: _networkIsolation ? _dnsZoneBlobId : ''
+  }
+  dependsOn: [
+    #disable-next-line BCP321
+    (_networkIsolation && !useExistingVNet) ? virtualNetwork : null
+    #disable-next-line BCP321
+    (_networkIsolation && useExistingVNet && deploySubnets) ? virtualNetworkSubnets : null
+    #disable-next-line BCP321
+    _networkIsolation ? privateDnsZones : null
+  ]
+}
+
 // 16.1 AI Foundry Configuration
 module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
   name: '${aiFoundryAccountName}-${resourceToken}-deployment'
@@ -1558,6 +1618,8 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     #disable-next-line BCP321
     _networkIsolation ? privateDnsZones : null
     aiServicesAccount
+    #disable-next-line BCP321
+    (aiFoundryStorageAccountResourceId == '') ? aiFoundryStorageAccount : null
   ]
 }
 
@@ -1596,8 +1658,15 @@ var varAfKVCfgComplete = {
   roleAssignments: []
 }
 
+// NOTE: The AVM ai-foundry `storageAccountConfigurationType` does not expose
+// a `skuName` field. We instead pre-create the Storage Account in
+// `aiFoundryStorageAccount` above with the requested SKU and pass its
+// resource ID here as `existingResourceId`, which causes the AVM to skip
+// internal storage creation (and its default `Standard_GRS`).
 var varAfStorageCfgComplete = {
-  existingResourceId: aiFoundryStorageAccountResourceId != '' ? aiFoundryStorageAccountResourceId : null
+  existingResourceId: aiFoundryStorageAccountResourceId != ''
+    ? aiFoundryStorageAccountResourceId
+    : (deployAiFoundry ? aiFoundryStorageAccount.outputs.resourceId : null)
   name: aiFoundryStorageAccountName
   blobPrivateDnsZoneResourceId: _networkIsolation ? _dnsZoneBlobId : null
   roleAssignments: []
@@ -1703,7 +1772,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (deployAppI
 }
 
 //private link scope
-resource privateLinkScope 'microsoft.insights/privatelinkscopes@2021-07-01-preview' = if (_networkIsolation && deployAppInsights && deployLogAnalytics) {
+resource privateLinkScope 'microsoft.insights/privatelinkscopes@2021-07-01-preview' = if (_deployAmpls) {
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}'
   location: 'global'
   properties :{
@@ -1717,7 +1786,7 @@ resource privateLinkScope 'microsoft.insights/privatelinkscopes@2021-07-01-previ
   ]
 }
 
-module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deployAppInsights && deployLogAnalytics) {
+module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bicep' = if (_deployAmpls) {
   name: 'privatelink-scope-private-endpoint'
   params: {
     name: '${const.abbrs.networking.privateEndpoint}${const.abbrs.networking.privateLinkScope}${resourceToken}'
@@ -1751,7 +1820,7 @@ module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bice
   ]
 }
 
-resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_networkIsolation && deployAppInsights && deployLogAnalytics) {
+resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_deployAmpls) {
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${logAnalyticsWorkspaceName}'!
   properties :{
     #disable-next-line BCP318
@@ -1762,7 +1831,7 @@ resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scope
   ]
 }
 
-resource privateLinkScopedResources2 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_networkIsolation && deployAppInsights && deployLogAnalytics) {
+resource privateLinkScopedResources2 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_deployAmpls) {
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${appInsightsName}'!
   properties :{
     #disable-next-line BCP318

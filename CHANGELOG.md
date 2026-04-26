@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v1.1.1] - 2026-04-26
+
+### Added
+- **`enablePrivateLogAnalytics` parameter** (PR #16): new `bool` parameter (default `true`) that controls whether the Azure Monitor Private Link Scope (AMPLS) and its five associated private DNS zones (`privatelink.monitor.azure.com`, `privatelink.oms.opinsights.azure.com`, `privatelink.ods.opinsights.azure.com`, `privatelink.agentsvc.azure.automation.net`, `privatelink.applicationinsights.io`) are deployed when `networkIsolation = true`. Gated through `_deployAmpls = networkIsolation && deployAppInsights && deployLogAnalytics && enablePrivateLogAnalytics`. Set to `false` (or `ENABLE_PRIVATE_LOG_ANALYTICS=false`) when these singleton zones are managed centrally (e.g. by a hub) to avoid DNS conflicts and link collisions with other private endpoints. Default preserves existing zero-trust behavior.
+- **`aiFoundryStorageSku` parameter and helper module** (PR #17): new `string` parameter (default `Standard_LRS`, `@allowed` covers all standard/premium SKUs) plus new module `modules/ai-foundry/storage-account.bicep` that pre-creates the AI Foundry Storage Account via `avm/res/storage/storage-account` with the requested SKU and an optional blob private endpoint when `networkIsolation = true`. The pre-created account's resource ID is fed back to the AVM `ai-foundry` pattern via `storageAccountConfiguration.existingResourceId`, so the AVM skips its internal storage creation. Workaround for `avm/ptn/ai-ml/ai-foundry@<=0.6.0`, which does not expose `skuName` and hardcodes `Standard_GRS` — failing in regions that don't offer GRS (e.g. Poland Central, with `RedundancyConfigurationNotAvailableInRegion`). Existing deployments passing `aiFoundryStorageAccountResourceId` are unaffected.
+
+### Fixed
+- **ACR Tasks agent pool hangs in `Queued` forever** (fixes #18): the `AllowAcrTasks` application rule on the Azure Firewall only allowed `*.azurecr.io` and `*.data.azurecr.io` from the build-agents subnet, but the ACR Tasks agent VM also needs egress to the Azure Storage queue/blob/table endpoints used by the ACR Tasks control plane to dispatch jobs. Without it, `az acr build --agent-pool <pool>` stayed in `Queued` indefinitely (no `startTime`), the agent pool eventually flipped to `Failed`, and any subsequent `update`/`scale` returned `RegistryStatusConflict`. Extended `_firewallAcrTaskFqdns` with `*.blob.${environment().suffixes.storage}`, `*.queue.${environment().suffixes.storage}`, and `*.table.${environment().suffixes.storage}` (sovereign-cloud safe via `environment().suffixes.storage`).
+
+### Changed
+- **`aiFoundryStorageSku` default** (PR #17): for new deployments where `aiFoundryStorageAccountResourceId` is empty, the AI Foundry Storage Account SKU defaults to `Standard_LRS` instead of the AVM default `Standard_GRS`. Trades cross-region redundancy for guaranteed regional availability — appropriate for a workload-scoped AI Foundry storage account. Operators wanting GRS can set `aiFoundryStorageSku: 'Standard_GRS'`.
+
+### Removed
+- **`main.json` no longer versioned**: the compiled ARM template generated from `main.bicep` was removed from the repository and added to `.gitignore`. It was the source of recurring merge conflicts on PRs and is regenerated on demand by `azd` / `az bicep build` during deployment, so it does not need to be tracked.
+
 ## [v1.1.0] - 2026-04-24
 ### Added
 - **Optional ACR Task agent pool for network-isolated image builds** (fixes #14): new `Microsoft.ContainerRegistry/registries/agentPools@2019-06-01-preview` child resource parented to the existing `containerRegistry`, attached to the existing `devops-build-agents-subnet` (`/27`, previously unused). Gated on `deployContainerRegistry && networkIsolation && deployAcrTaskAgentPool`. Lets `az acr build --agent-pool <name>` run builds inside the VNet and push to the private ACR over its private endpoint, removing the need for Docker on any jumpbox or client and avoiding the common workaround of re-enabling `publicNetworkAccess` for every build.

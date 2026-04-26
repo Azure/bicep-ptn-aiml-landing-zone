@@ -375,6 +375,9 @@ MSBuild_Logs/
 # AWS SAM Build and Temporary Artifacts folder
 .aws-sam
 
+# Compiled Bicep ARM templates (generated from main.bicep on demand)
+main.json
+
 # NVidia Nsight GPU debugger configuration file
 *.nvuser
 
