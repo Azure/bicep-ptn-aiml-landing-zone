@@ -1435,11 +1435,19 @@ resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-
 }
 
 // 16.0 Pre-create AI Services account to avoid PE race condition in AVM module.
-// The AVM creates the CogSvc account and its PE in the same deployment, causing
-// the PE to fail with AccountProvisioningStateInvalid when the account is still
-// in "Accepted" state. By pre-creating the account here, the AVM's subsequent PUT
-// is an idempotent update on an already-provisioned resource, so the PE succeeds.
-resource aiServicesAccount 'Microsoft.CognitiveServices/accounts@2024-10-01' = if (deployAiFoundry) {
+// The AVM (avm/ptn/ai-ml/ai-foundry) creates the CogSvc account AND its private
+// endpoint as part of the same nested deployment graph. On a clean deploy, the
+// AVM PUT mutates the account (e.g. allowProjectManagement, networkInjections),
+// moving it to "Accepted/Updating", and the child PE PUT then fails with
+// AccountProvisioningStateInvalid (surfaced as "already exists or in a
+// conflicting state").
+//
+// To break the race, this pre-create must converge to the SAME end-state the
+// AVM will PUT, so the AVM PUT becomes an idempotent no-op and the account
+// stays "Succeeded" when the PE is created. Properties below mirror what the
+// AVM cognitive-services/account submodule sets (see modules/account.bicep in
+// avm/ptn/ai-ml/ai-foundry).
+resource aiServicesAccount 'Microsoft.CognitiveServices/accounts@2025-06-01' = if (deployAiFoundry) {
   name: aiFoundryAccountName
   location: location
   tags: deploymentTags
@@ -1450,15 +1458,28 @@ resource aiServicesAccount 'Microsoft.CognitiveServices/accounts@2024-10-01' = i
   sku: {
     name: 'S0'
   }
-  properties: {
-    customSubDomainName: aiFoundryAccountName
-    disableLocalAuth: true
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
-    networkAcls: {
-      defaultAction: 'Allow'
-      bypass: 'AzureServices'
-    }
-  }
+  properties: union(
+    {
+      customSubDomainName: aiFoundryAccountName
+      disableLocalAuth: true
+      #disable-next-line BCP037
+      allowProjectManagement: deployAfProject
+      publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+      networkAcls: {
+        defaultAction: 'Allow'
+        bypass: 'AzureServices'
+      }
+    },
+    (_networkIsolation && deployAiFoundrySubnet) ? {
+      networkInjections: [
+        {
+          scenario: 'agent'
+          subnetArmId: _agentSubnetId
+          useMicrosoftManagedNetwork: false
+        }
+      ]
+    } : {}
+  )
 }
 
 // 16.1 AI Foundry Configuration

@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "10591441757889706460"
+      "templateHash": "8395990828412302808"
     }
   },
   "definitions": {
@@ -2798,7 +2798,7 @@
     "aiServicesAccount": {
       "condition": "[parameters('deployAiFoundry')]",
       "type": "Microsoft.CognitiveServices/accounts",
-      "apiVersion": "2024-10-01",
+      "apiVersion": "2025-06-01",
       "name": "[parameters('aiFoundryAccountName')]",
       "location": "[parameters('location')]",
       "tags": "[parameters('deploymentTags')]",
@@ -2812,12 +2812,17 @@
       "properties": {
         "customSubDomainName": "[parameters('aiFoundryAccountName')]",
         "disableLocalAuth": true,
+        "allowProjectManagement": "[parameters('deployAfProject')]",
         "publicNetworkAccess": "[if(variables('_networkIsolation'), 'Disabled', 'Enabled')]",
         "networkAcls": {
           "defaultAction": "Allow",
           "bypass": "AzureServices"
-        }
-      }
+        },
+        "networkInjections": "[if(and(variables('_networkIsolation'), parameters('deployAiFoundrySubnet')), createArray(createObject('scenario', 'agent', 'subnetArmId', if(variables('_networkIsolation'), format('{0}/subnets/{1}', if(variables('_networkIsolation'), if(parameters('useExistingVNet'), parameters('existingVnetResourceId'), reference('virtualNetwork').outputs.resourceId.value), ''), parameters('agentSubnetName')), ''), 'useMicrosoftManagedNetwork', false())), null())]"
+      },
+      "dependsOn": [
+        "virtualNetwork"
+      ]
     },
     "appInsights": {
       "condition": "[and(parameters('deployAppInsights'), parameters('deployLogAnalytics'))]",
