@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.42.1.51946",
-      "templateHash": "10591441757889706460"
+      "templateHash": "572158922916262568"
     }
   },
   "definitions": {
@@ -314,6 +314,13 @@
       "defaultValue": true,
       "metadata": {
         "description": "Deploy an Azure Log Analytics workspace for centralized log collection and query."
+      }
+    },
+    "enablePrivateLogAnalytics": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "When network isolation is enabled, also deploy an Azure Monitor Private Link Scope (AMPLS) with private endpoints and the related monitor/opinsights/automation private DNS zones to keep Log Analytics + Application Insights traffic on the private network. Disable to opt-out and avoid sharing those Azure Monitor private DNS zones with other workloads (preventing cross-workload DNS conflicts). Has no effect when networkIsolation is false."
       }
     },
     "deployAppInsights": {
@@ -809,6 +816,7 @@
     },
     "_tags": "[union(variables('_azdTags'), parameters('deploymentTags'))]",
     "_networkIsolation": "[if(empty(string(parameters('networkIsolation'))), false(), bool(parameters('networkIsolation')))]",
+    "_deployAmpls": "[and(and(and(variables('_networkIsolation'), parameters('deployAppInsights')), parameters('deployLogAnalytics')), parameters('enablePrivateLogAnalytics'))]",
     "_deployPrivateDnsZones": "[and(variables('_networkIsolation'), not(parameters('policyManagedPrivateDns')))]",
     "_searchServiceLocation": "[if(empty(parameters('searchServiceLocation')), parameters('location'), parameters('searchServiceLocation'))]",
     "_containerDummyImageName": "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest",
@@ -883,7 +891,7 @@
     ],
     "_dnsZonesTargetRg": "[if(and(parameters('useExistingVNet'), not(parameters('sideBySideDeploy'))), variables('varExistingVnetResourceGroupName'), resourceGroup().name)]",
     "_dnsZonesLinkSuffix": "[if(parameters('useExistingVNet'), '-byon', '')]",
-    "_dnsZonesList": "[if(variables('_deployPrivateDnsZones'), concat(createArray(createObject('dnsName', 'privatelink.cognitiveservices.azure.com', 'virtualNetworkLinkName', format('{0}-cogsvcs-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.openai.azure.com', 'virtualNetworkLinkName', format('{0}-openai-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.services.ai.azure.com', 'virtualNetworkLinkName', format('{0}-aiservices-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.search.windows.net', 'virtualNetworkLinkName', format('{0}-search-std-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.documents.azure.com', 'virtualNetworkLinkName', format('{0}-cosmos-std-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', format('privatelink.blob.{0}', environment().suffixes.storage), 'virtualNetworkLinkName', format('{0}-blob-std-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.vaultcore.azure.net', 'virtualNetworkLinkName', format('{0}-kv-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.azconfig.io', 'virtualNetworkLinkName', format('{0}-appcfg-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.applicationinsights.io', 'virtualNetworkLinkName', format('{0}-appi-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix')))), if(parameters('deployContainerApps'), createArray(createObject('dnsName', format('privatelink.{0}.azurecontainerapps.io', parameters('location')), 'virtualNetworkLinkName', format('{0}-containerapps-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix')))), createArray()), if(parameters('deployContainerRegistry'), createArray(createObject('dnsName', format('privatelink.{0}', parameters('acrDnsSuffix')), 'virtualNetworkLinkName', format('{0}-containerregistry-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.monitor.azure.com', 'virtualNetworkLinkName', format('{0}-azure-monitor-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.oms.opinsights.azure.com', 'virtualNetworkLinkName', format('{0}-oms-opinsights-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.ods.opinsights.azure.com', 'virtualNetworkLinkName', format('{0}-ods-opinsights-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.agentsvc.azure.automation.net', 'virtualNetworkLinkName', format('{0}-azure-automation-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix')))), createArray())), createArray())]",
+    "_dnsZonesList": "[if(variables('_deployPrivateDnsZones'), concat(createArray(createObject('dnsName', 'privatelink.cognitiveservices.azure.com', 'virtualNetworkLinkName', format('{0}-cogsvcs-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.openai.azure.com', 'virtualNetworkLinkName', format('{0}-openai-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.services.ai.azure.com', 'virtualNetworkLinkName', format('{0}-aiservices-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.search.windows.net', 'virtualNetworkLinkName', format('{0}-search-std-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.documents.azure.com', 'virtualNetworkLinkName', format('{0}-cosmos-std-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', format('privatelink.blob.{0}', environment().suffixes.storage), 'virtualNetworkLinkName', format('{0}-blob-std-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.vaultcore.azure.net', 'virtualNetworkLinkName', format('{0}-kv-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.azconfig.io', 'virtualNetworkLinkName', format('{0}-appcfg-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.applicationinsights.io', 'virtualNetworkLinkName', format('{0}-appi-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix')))), if(parameters('deployContainerApps'), createArray(createObject('dnsName', format('privatelink.{0}.azurecontainerapps.io', parameters('location')), 'virtualNetworkLinkName', format('{0}-containerapps-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix')))), createArray()), if(parameters('deployContainerRegistry'), createArray(createObject('dnsName', format('privatelink.{0}', parameters('acrDnsSuffix')), 'virtualNetworkLinkName', format('{0}-containerregistry-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix')))), createArray()), if(variables('_deployAmpls'), createArray(createObject('dnsName', 'privatelink.monitor.azure.com', 'virtualNetworkLinkName', format('{0}-azure-monitor-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.oms.opinsights.azure.com', 'virtualNetworkLinkName', format('{0}-oms-opinsights-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.ods.opinsights.azure.com', 'virtualNetworkLinkName', format('{0}-ods-opinsights-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix'))), createObject('dnsName', 'privatelink.agentsvc.azure.automation.net', 'virtualNetworkLinkName', format('{0}-azure-automation-link{1}', parameters('vnetName'), variables('_dnsZonesLinkSuffix')))), createArray())), createArray())]",
     "_peDnsZoneGroupBlob": "[if(parameters('policyManagedPrivateDns'), createObject(), createObject('name', 'blobDnsZoneGroup', 'privateDnsZoneGroupConfigs', createArray(createObject('name', 'blobARecord', 'privateDnsZoneResourceId', variables('_dnsZoneBlobId')))))]",
     "_peDnsZoneGroupCosmos": "[if(parameters('policyManagedPrivateDns'), createObject(), createObject('name', 'cosmosDnsZoneGroup', 'privateDnsZoneGroupConfigs', createArray(createObject('name', 'cosmosARecord', 'privateDnsZoneResourceId', variables('_dnsZoneCosmosId')))))]",
     "_peDnsZoneGroupSearch": "[if(parameters('policyManagedPrivateDns'), createObject(), createObject('name', 'searchDnsZoneGroup', 'privateDnsZoneGroupConfigs', createArray(createObject('name', 'searchARecord', 'privateDnsZoneResourceId', variables('_dnsZoneSearchId')))))]",
@@ -2839,7 +2847,7 @@
       ]
     },
     "privateLinkScope": {
-      "condition": "[and(and(variables('_networkIsolation'), parameters('deployAppInsights')), parameters('deployLogAnalytics'))]",
+      "condition": "[variables('_deployAmpls')]",
       "type": "microsoft.insights/privateLinkScopes",
       "apiVersion": "2021-07-01-preview",
       "name": "[format('{0}{1}', variables('_1.abbrs').networking.privateLinkScope, parameters('resourceToken'))]",
@@ -2855,7 +2863,7 @@
       ]
     },
     "privateLinkScopedResources1": {
-      "condition": "[and(and(variables('_networkIsolation'), parameters('deployAppInsights')), parameters('deployLogAnalytics'))]",
+      "condition": "[variables('_deployAmpls')]",
       "type": "Microsoft.Insights/privateLinkScopes/scopedResources",
       "apiVersion": "2021-07-01-preview",
       "name": "[format('{0}{1}/{2}', variables('_1.abbrs').networking.privateLinkScope, parameters('resourceToken'), parameters('logAnalyticsWorkspaceName'))]",
@@ -2868,7 +2876,7 @@
       ]
     },
     "privateLinkScopedResources2": {
-      "condition": "[and(and(variables('_networkIsolation'), parameters('deployAppInsights')), parameters('deployLogAnalytics'))]",
+      "condition": "[variables('_deployAmpls')]",
       "type": "Microsoft.Insights/privateLinkScopes/scopedResources",
       "apiVersion": "2021-07-01-preview",
       "name": "[format('{0}{1}/{2}', variables('_1.abbrs').networking.privateLinkScope, parameters('resourceToken'), parameters('appInsightsName'))]",
@@ -47929,7 +47937,7 @@
       ]
     },
     "privateEndpointPrivateLinkScope": {
-      "condition": "[and(and(variables('_networkIsolation'), parameters('deployAppInsights')), parameters('deployLogAnalytics'))]",
+      "condition": "[variables('_deployAmpls')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "privatelink-scope-private-endpoint",
