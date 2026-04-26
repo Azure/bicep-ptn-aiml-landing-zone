@@ -180,7 +180,7 @@ param deployVmKeyVault bool = true
 param deployLogAnalytics bool = true
 
 @description('When network isolation is enabled, also deploy an Azure Monitor Private Link Scope (AMPLS) with private endpoints and the related monitor/opinsights/automation private DNS zones to keep Log Analytics + Application Insights traffic on the private network. Disable to opt-out and avoid sharing those Azure Monitor private DNS zones with other workloads (preventing cross-workload DNS conflicts). Has no effect when networkIsolation is false.')
-param enablePrivateLogAnalytics bool = false
+param enablePrivateLogAnalytics bool = true
 
 @description('Deploy Azure Application Insights for application performance monitoring and diagnostics.')
 param deployAppInsights bool = true
@@ -1203,7 +1203,6 @@ var _dnsZonesList = _deployPrivateDnsZones ? concat(
     { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${vnetName}-blob-std-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${vnetName}-kv-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${vnetName}-appcfg-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' }
   ],
   deployContainerApps ? [
     { dnsName: 'privatelink.${location}.azurecontainerapps.io', virtualNetworkLinkName: '${vnetName}-containerapps-link${_dnsZonesLinkSuffix}' }
@@ -1212,6 +1211,7 @@ var _dnsZonesList = _deployPrivateDnsZones ? concat(
     { dnsName: 'privatelink.${acrDnsSuffix}',                         virtualNetworkLinkName: '${vnetName}-containerregistry-link${_dnsZonesLinkSuffix}' }
   ] : [],
   _deployAmpls ? [
+    { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.monitor.azure.com',                       virtualNetworkLinkName: '${vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.oms.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.ods.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' }
