@@ -40,6 +40,7 @@
     "deployKeyVault":                       { "value": "true" },
     "deployVmKeyVault":                     { "value": "${DEPLOY_VM_KEY_VAULT}" },
     "deployLogAnalytics":                   { "value": "true" },
+    "enablePrivateLogAnalytics":            { "value": "${ENABLE_PRIVATE_LOG_ANALYTICS=true}" },
     "deploySearchService":                  { "value": "true" },
     "deployStorageAccount":                 { "value": "true" },
     "greenFieldDeployment":                 { "value": "true" },
