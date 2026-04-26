@@ -179,6 +179,9 @@ param deployVmKeyVault bool = true
 @description('Deploy an Azure Log Analytics workspace for centralized log collection and query.')
 param deployLogAnalytics bool = true
 
+@description('When network isolation is enabled, also deploy an Azure Monitor Private Link Scope (AMPLS) with private endpoints and the related monitor/opinsights/automation private DNS zones to keep Log Analytics + Application Insights traffic on the private network. Disable to opt-out and avoid sharing those Azure Monitor private DNS zones with other workloads (preventing cross-workload DNS conflicts). Has no effect when networkIsolation is false.')
+param enablePrivateLogAnalytics bool = true
+
 @description('Deploy Azure Application Insights for application performance monitoring and diagnostics.')
 param deployAppInsights bool = true
 
@@ -433,6 +436,11 @@ var _manifest = loadJsonContent('./manifest.json')
 var _azdTags = { 'azd-env-name': environmentName }
 var _tags = union(_azdTags, deploymentTags)
 var _networkIsolation = empty(string(networkIsolation)) ? false : bool(networkIsolation)
+// AMPLS (Azure Monitor Private Link Scope) and the related monitor/opinsights/automation
+// private DNS zones + private endpoint are only deployed when network isolation is on AND
+// the operator explicitly opts in via enablePrivateLogAnalytics. This lets isolated
+// deployments opt-out of AMPLS to avoid cross-workload private DNS conflicts.
+var _deployAmpls = _networkIsolation && deployAppInsights && deployLogAnalytics && enablePrivateLogAnalytics
 var _deployPrivateDnsZones = _networkIsolation && !policyManagedPrivateDns
 var _searchServiceLocation = empty(searchServiceLocation) ? location : searchServiceLocation
 
@@ -1208,13 +1216,15 @@ var _dnsZonesList = _deployPrivateDnsZones ? concat(
     { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${vnetName}-blob-std-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${vnetName}-kv-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${vnetName}-appcfg-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' }
   ],
   deployContainerApps ? [
     { dnsName: 'privatelink.${location}.azurecontainerapps.io', virtualNetworkLinkName: '${vnetName}-containerapps-link${_dnsZonesLinkSuffix}' }
   ] : [],
   deployContainerRegistry ? [
     { dnsName: 'privatelink.${acrDnsSuffix}',                         virtualNetworkLinkName: '${vnetName}-containerregistry-link${_dnsZonesLinkSuffix}' }
+  ] : [],
+  _deployAmpls ? [
+    { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.monitor.azure.com',                       virtualNetworkLinkName: '${vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.oms.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' }
     { dnsName: 'privatelink.ods.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' }
@@ -1731,7 +1741,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (deployAppI
 }
 
 //private link scope
-resource privateLinkScope 'microsoft.insights/privatelinkscopes@2021-07-01-preview' = if (_networkIsolation && deployAppInsights && deployLogAnalytics) {
+resource privateLinkScope 'microsoft.insights/privatelinkscopes@2021-07-01-preview' = if (_deployAmpls) {
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}'
   location: 'global'
   properties :{
@@ -1745,7 +1755,7 @@ resource privateLinkScope 'microsoft.insights/privatelinkscopes@2021-07-01-previ
   ]
 }
 
-module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bicep' = if (_networkIsolation && deployAppInsights && deployLogAnalytics) {
+module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bicep' = if (_deployAmpls) {
   name: 'privatelink-scope-private-endpoint'
   params: {
     name: '${const.abbrs.networking.privateEndpoint}${const.abbrs.networking.privateLinkScope}${resourceToken}'
@@ -1779,7 +1789,7 @@ module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bice
   ]
 }
 
-resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_networkIsolation && deployAppInsights && deployLogAnalytics) {
+resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_deployAmpls) {
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${logAnalyticsWorkspaceName}'!
   properties :{
     #disable-next-line BCP318
@@ -1790,7 +1800,7 @@ resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scope
   ]
 }
 
-resource privateLinkScopedResources2 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_networkIsolation && deployAppInsights && deployLogAnalytics) {
+resource privateLinkScopedResources2 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_deployAmpls) {
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${appInsightsName}'!
   properties :{
     #disable-next-line BCP318
