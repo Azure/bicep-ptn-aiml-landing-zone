@@ -52,6 +52,7 @@
     "aiFoundryProjectDisplayName":           { "value": null },
     "aiFoundryProjectDescription":           { "value": null },    
     "aiFoundryStorageAccountName":           { "value": null },
+    "aiFoundryStorageSku":                 { "value": "Standard_LRS" },
     "aiFoundrySearchServiceName":            { "value": null },
     "aiFoundryCosmosDbName":                 { "value": null },
     "bingSearchName":                        { "value": null },  

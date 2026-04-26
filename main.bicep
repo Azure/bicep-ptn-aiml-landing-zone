@@ -262,6 +262,19 @@ param aiSearchResourceId string = ''
 @description('The AI Storage Account full ARM resource ID. Optional; if not provided, a new resource will be created.')
 param aiFoundryStorageAccountResourceId string = ''
 
+@description('The SKU name for the AI Foundry Storage Account. Only used when a new account is created (aiFoundryStorageAccountResourceId is empty). The AVM ai-foundry module does not expose this, so we pre-create the storage account with the requested SKU. Defaults to Standard_LRS for broad regional availability (some regions, e.g. Poland Central, do not support the AVM default Standard_GRS).')
+@allowed([
+  'Standard_LRS'
+  'Standard_GRS'
+  'Standard_RAGRS'
+  'Standard_ZRS'
+  'Standard_GZRS'
+  'Standard_RAGZRS'
+  'Premium_LRS'
+  'Premium_ZRS'
+])
+param aiFoundryStorageSku string = 'Standard_LRS'
+
 @description('The Cosmos DB account full ARM resource ID. Optional; if not provided, a new resource will be created.')
 param aiFoundryCosmosDBAccountResourceId string = ''
 
@@ -1461,6 +1474,33 @@ resource aiServicesAccount 'Microsoft.CognitiveServices/accounts@2024-10-01' = i
   }
 }
 
+// Pre-create AI Foundry Storage Account with a region-safe SKU.
+// The AVM ai-foundry module (<= 0.6.0) creates its Storage Account with the
+// provider default `Standard_GRS`, which is not offered in every region
+// (e.g. Poland Central -> RedundancyConfigurationNotAvailableInRegion).
+// Creating it ourselves and passing the resource ID as `existingResourceId`
+// lets us honor an explicit SKU (default `Standard_LRS`).
+module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (deployAiFoundry && aiFoundryStorageAccountResourceId == '') {
+  name: 'aiFoundryStorage-${resourceToken}-deployment'
+  params: {
+    name: aiFoundryStorageAccountName
+    location: location
+    tags: _tags
+    skuName: aiFoundryStorageSku
+    disablePublicNetworkAccess: _networkIsolation
+    privateEndpointSubnetResourceId: _networkIsolation ? _peSubnetId : ''
+    blobPrivateDnsZoneResourceId: _networkIsolation ? _dnsZoneBlobId : ''
+  }
+  dependsOn: [
+    #disable-next-line BCP321
+    (_networkIsolation && !useExistingVNet) ? virtualNetwork : null
+    #disable-next-line BCP321
+    (_networkIsolation && useExistingVNet && deploySubnets) ? virtualNetworkSubnets : null
+    #disable-next-line BCP321
+    _networkIsolation ? privateDnsZones : null
+  ]
+}
+
 // 16.1 AI Foundry Configuration
 module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
   name: '${aiFoundryAccountName}-${resourceToken}-deployment'
@@ -1537,6 +1577,8 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     #disable-next-line BCP321
     _networkIsolation ? privateDnsZones : null
     aiServicesAccount
+    #disable-next-line BCP321
+    (aiFoundryStorageAccountResourceId == '') ? aiFoundryStorageAccount : null
   ]
 }
 
@@ -1575,8 +1617,15 @@ var varAfKVCfgComplete = {
   roleAssignments: []
 }
 
+// NOTE: The AVM ai-foundry `storageAccountConfigurationType` does not expose
+// a `skuName` field. We instead pre-create the Storage Account in
+// `aiFoundryStorageAccount` above with the requested SKU and pass its
+// resource ID here as `existingResourceId`, which causes the AVM to skip
+// internal storage creation (and its default `Standard_GRS`).
 var varAfStorageCfgComplete = {
-  existingResourceId: aiFoundryStorageAccountResourceId != '' ? aiFoundryStorageAccountResourceId : null
+  existingResourceId: aiFoundryStorageAccountResourceId != ''
+    ? aiFoundryStorageAccountResourceId
+    : (deployAiFoundry ? aiFoundryStorageAccount.outputs.resourceId : null)
   name: aiFoundryStorageAccountName
   blobPrivateDnsZoneResourceId: _networkIsolation ? _dnsZoneBlobId : null
   roleAssignments: []
