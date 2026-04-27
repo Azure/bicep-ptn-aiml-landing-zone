@@ -233,6 +233,9 @@ param acrTaskAgentPoolCount int = 1
 @description('When true, extends the Azure Firewall Policy with the FQDN allow-list required by the default install.ps1 jumpbox bootstrap (Chocolatey, Python, Node, VS Code, GitHub clones, Azure CLI control plane). Disable if you manage egress centrally.')
 param extendFirewallForJumpboxBootstrap bool = true
 
+@description('When true, extends the Azure Firewall Policy with the FQDN allow-list required for ACR Tasks builds running inside the build-agents subnet to fetch language packages (npm, PyPI) and OS packages (Debian/Ubuntu apt repos, yarn). Only effective when networkIsolation, deployAzureFirewall and deployAcrTaskAgentPool are all enabled. Disable if you manage egress centrally or pre-bake all dependencies into the builder base image.')
+param extendFirewallForAcrTaskBuilds bool = true
+
 @description('List of trusted source IP CIDRs allowed to connect to the Bastion public IP on port 443. When empty, all internet inbound to port 443 is denied by default.')
 param bastionAllowedSourceIPs array = []
 
@@ -615,6 +618,20 @@ var _firewallAcrTaskFqdns = _deployAcrTaskAgentPool ? [
   '*.table.${environment().suffixes.storage}'
 ] : []
 
+// OS package repositories used by Debian/Ubuntu-based builder images during
+// `apt-get` steps in ACR Tasks runs. Scoped to devopsBuildAgentsSubnetPrefix
+// via `AllowAcrTaskOsPackages`. Language registries (npm/PyPI/python.org) are
+// reused from `_firewallDevRuntimeFqdns` via `AllowAcrTaskDevRuntimes`.
+// See issue #20.
+#disable-next-line no-hardcoded-env-urls
+var _firewallAcrTaskOsPackageFqdns = [
+  'deb.debian.org'
+  'security.debian.org'
+  'archive.ubuntu.com'
+  'security.ubuntu.com'
+  'dl.yarnpkg.com'
+]
+
 // Route Table for egress traffic control through Azure Firewall
 resource routeTable 'Microsoft.Network/routeTables@2024-07-01' = if (_networkIsolation) {
   name: '${const.abbrs.networking.routeTable}${resourceToken}'
@@ -868,6 +885,25 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
               { protocolType: 'Https', port: 443 }
             ]
             targetFqdns: _firewallAcrTaskFqdns
+            sourceAddresses: [devopsBuildAgentsSubnetPrefix]
+          }
+          {
+            ruleType: 'ApplicationRule'
+            name: 'AllowAcrTaskDevRuntimes'
+            protocols: [
+              { protocolType: 'Https', port: 443 }
+            ]
+            targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? _firewallDevRuntimeFqdns : []
+            sourceAddresses: [devopsBuildAgentsSubnetPrefix]
+          }
+          {
+            ruleType: 'ApplicationRule'
+            name: 'AllowAcrTaskOsPackages'
+            protocols: [
+              { protocolType: 'Https', port: 443 }
+              { protocolType: 'Http', port: 80 }
+            ]
+            targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? _firewallAcrTaskOsPackageFqdns : []
             sourceAddresses: [devopsBuildAgentsSubnetPrefix]
           }
         ]
