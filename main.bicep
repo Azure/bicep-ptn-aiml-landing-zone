@@ -1520,16 +1520,32 @@ resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-
 // 16.0 Pre-create AI Services account to avoid PE race condition in AVM module.
 // The AVM (avm/ptn/ai-ml/ai-foundry) creates the CogSvc account AND its private
 // endpoint as part of the same nested deployment graph. On a clean deploy, the
-// AVM PUT mutates the account (e.g. allowProjectManagement, networkInjections),
-// moving it to "Accepted/Updating", and the child PE PUT then fails with
-// AccountProvisioningStateInvalid (surfaced as "already exists or in a
-// conflicting state").
+// AVM PUT mutates the account, moving it to "Accepted/Updating", and the child
+// PE PUT then fails with AccountProvisioningStateInvalid (surfaced as "already
+// exists or in a conflicting state").
 //
 // To break the race, this pre-create must converge to the SAME end-state the
 // AVM will PUT, so the AVM PUT becomes an idempotent no-op and the account
 // stays "Succeeded" when the PE is created. Properties below mirror what the
 // AVM cognitive-services/account submodule sets (see modules/account.bicep in
 // avm/ptn/ai-ml/ai-foundry).
+//
+// History:
+//   - PR #19 (v1.0.9) initially added `allowProjectManagement` AND a
+//     conditional `networkInjections` (scenario `agent`) to align with what
+//     we believed the AVM was setting.
+//   - Issue #25 (v1.1.2 regression): empirical evidence shows the AVM PUT
+//     does NOT include `networkInjections` in its body — observed account
+//     final state is `networkInjections: null` even when our pre-create
+//     requested an array. ARM PUT replace-semantics means AVM's PUT then
+//     wipes our networkInjections, mutating the account back to
+//     `Accepted/Updating` and re-triggering the PE race. The agent subnet
+//     is actually wired by the AVM submodule via
+//     `aiFoundryConfiguration.networking.agentServiceSubnetResourceId`
+//     (set below as `varAfNetworkingOverride.agentServiceSubnetResourceId`),
+//     not via a top-level `networkInjections` property on the account.
+//     So we drop `networkInjections` from the pre-create — restoring the
+//     #19 contract that AVM's PUT becomes a true no-op.
 resource aiServicesAccount 'Microsoft.CognitiveServices/accounts@2025-06-01' = if (deployAiFoundry) {
   name: aiFoundryAccountName
   location: location
@@ -1541,28 +1557,17 @@ resource aiServicesAccount 'Microsoft.CognitiveServices/accounts@2025-06-01' = i
   sku: {
     name: 'S0'
   }
-  properties: union(
-    {
-      customSubDomainName: aiFoundryAccountName
-      disableLocalAuth: true
-      #disable-next-line BCP037
-      allowProjectManagement: deployAfProject
-      publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
-      networkAcls: {
-        defaultAction: 'Allow'
-        bypass: 'AzureServices'
-      }
-    },
-    (_networkIsolation && deployAiFoundrySubnet) ? {
-      networkInjections: [
-        {
-          scenario: 'agent'
-          subnetArmId: _agentSubnetId
-          useMicrosoftManagedNetwork: false
-        }
-      ]
-    } : {}
-  )
+  properties: {
+    customSubDomainName: aiFoundryAccountName
+    disableLocalAuth: true
+    #disable-next-line BCP037
+    allowProjectManagement: deployAfProject
+    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    networkAcls: {
+      defaultAction: 'Allow'
+      bypass: 'AzureServices'
+    }
+  }
 }
 
 // Pre-create AI Foundry Storage Account with a region-safe SKU.
