@@ -245,16 +245,22 @@ foreach ($repo in $manifest.components) {
 }
 
 # ------------------------------
-# Clone extra repos passed by downstream consumers via -ExtraRepoUrls
+# Clone extra repos derived from manifest.json#components (forwarded by main.bicep)
 # ------------------------------
-# Additive extension point for downstream accelerators (e.g. GPT-RAG,
-# live-voice-practice) that consume this landing zone as a Bicep module / git
-# submodule and need their own application repository present on the jumpbox
-# for private-network data-plane post-provisioning. See issue #21.
+# The Bicep module derives -ExtraRepoUrls/-ExtraRepoTags/-ExtraRepoNames from
+# the consumer's overlay `manifest.json#components`, so downstream solution
+# accelerators (e.g. GPT-RAG, live-voice-practice) keep a single source of
+# truth (their manifest.json) for both release versioning and jumpbox repo
+# bootstrapping. See issues #21 and #22.
+#
+# Note: each split is wrapped in @(...) to force array context. Without it,
+# PowerShell 5.1 collapses a single-element pipeline result into a scalar
+# string, and `$arr[0]` then returns the FIRST CHARACTER of the URL/tag/name
+# instead of the value itself (issue #22 repro).
 if (-not [string]::IsNullOrWhiteSpace($ExtraRepoUrls)) {
-    $extraUrls  = $ExtraRepoUrls  -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-    $extraTags  = if ([string]::IsNullOrWhiteSpace($ExtraRepoTags))  { @() } else { $ExtraRepoTags  -split ',' | ForEach-Object { $_.Trim() } }
-    $extraNames = if ([string]::IsNullOrWhiteSpace($ExtraRepoNames)) { @() } else { $ExtraRepoNames -split ',' | ForEach-Object { $_.Trim() } }
+    $extraUrls  = @($ExtraRepoUrls  -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $extraTags  = if ([string]::IsNullOrWhiteSpace($ExtraRepoTags))  { @() } else { @($ExtraRepoTags  -split ',' | ForEach-Object { $_.Trim() }) }
+    $extraNames = if ([string]::IsNullOrWhiteSpace($ExtraRepoNames)) { @() } else { @($ExtraRepoNames -split ',' | ForEach-Object { $_.Trim() }) }
 
     for ($i = 0; $i -lt $extraUrls.Count; $i++) {
         $url  = $extraUrls[$i]
@@ -270,9 +276,15 @@ if (-not [string]::IsNullOrWhiteSpace($ExtraRepoUrls)) {
         else {
             write-host "Cloning extra repository: $name ($tag) from $url"
             git clone -b $tag --depth 1 $url "C:\github\$name"
-            if (Test-Path "C:\github\$name") {
-                copy-item C:\github\ai-lz\.azure "C:\github\$name" -recurse -force
+            # Surface git clone failures in the CSE transcript. The CSE itself
+            # will not fail because of this (we don't want a single failed
+            # extra clone to roll back the entire jumpbox bootstrap), but the
+            # operator gets a clear signal in C:\WindowsAzure\Logs\.
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path "C:\github\$name")) {
+                write-warning "git clone failed for extra repository '$name' ($tag) from '$url' (exit code $LASTEXITCODE). Skipping .azure context copy and safe-directory config."
+                continue
             }
+            copy-item C:\github\ai-lz\.azure "C:\github\$name" -recurse -force
         }
 
         git config --global --add safe.directory "C:/github/$name"

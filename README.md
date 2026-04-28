@@ -91,20 +91,23 @@ azd provision
 
 #### Cloning extra repositories onto the jumpbox
 
-The default `install.ps1` bootstrap clones this repository to `C:\github\ai-lz` and walks `manifest.json#components` for additional repos. That path requires forking `install.ps1`, which is rarely what consumers want. Downstream solution accelerators that consume this landing zone as a Bicep module / git submodule and need their own application repository present on the jumpbox (for private-network data-plane post-provisioning — Cosmos seeding, AI Search index creation, sample data loading, etc.) can use the additive `extraRepoUrls` / `extraRepoTags` / `extraRepoNames` parameters instead:
+The default `install.ps1` bootstrap clones this repository to `C:\github\ai-lz` and walks `manifest.json#components` for additional repos. Downstream solution accelerators that consume this landing zone as a Bicep module / git submodule and need their own application repository present on the jumpbox (for private-network data-plane post-provisioning — Cosmos seeding, AI Search index creation, sample data loading, etc.) declare those repos in their **overlay** `manifest.json`:
 
-```bicep
-module aiml 'br/public:avm/ptn/aiml/ai-landing-zone:1.1.1' = {
-  params: {
-    // ...existing params...
-    extraRepoUrls:  [ 'https://github.com/Contoso/voice-app.git' ]
-    extraRepoTags:  [ 'v0.3.0' ]                  // optional; defaults to "main"
-    extraRepoNames: [ 'voice-app' ]               // optional; defaults to repo basename
-  }
+```json
+{
+  "tag": "v1.0.0",
+  "ailz_tag": "v1.1.1",
+  "components": [
+    {
+      "name": "voice-app",
+      "repo": "https://github.com/Contoso/voice-app.git",
+      "tag": "v0.3.0"
+    }
+  ]
 }
 ```
 
-Each entry is forwarded to `install.ps1` and cloned into `C:\github\<name>` on the jumpbox alongside `ai-lz`. The arrays are positional: index `i` of `extraRepoUrls` pairs with index `i` of `extraRepoTags` and `extraRepoNames`. Existing `manifest.components` behavior is preserved — `extraRepoUrls` is purely additive.
+`main.bicep` derives the URLs/tags/names from `_manifest.components` at compile time and forwards them to `install.ps1` over the CSE `commandToExecute`. Each entry is cloned into `C:\github\<name>` on the jumpbox. `tag` defaults to `main`; `name` defaults to the repo URL basename without `.git`. There are no per-deployment Bicep parameters to wire — `manifest.json` is the single source of truth, the same one consumers already use to pin their `ailz_tag` release.
 
 #### Building and pushing images with network isolation
 

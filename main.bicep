@@ -236,15 +236,6 @@ param extendFirewallForJumpboxBootstrap bool = true
 @description('When true, extends the Azure Firewall Policy with the FQDN allow-list required for ACR Tasks builds running inside the build-agents subnet to fetch language packages (npm, PyPI) and OS packages (Debian/Ubuntu apt repos, yarn). Only effective when networkIsolation, deployAzureFirewall and deployAcrTaskAgentPool are all enabled. Disable if you manage egress centrally or pre-bake all dependencies into the builder base image.')
 param extendFirewallForAcrTaskBuilds bool = true
 
-@description('Optional. Additional Git repository URLs to clone onto the jumpbox under C:\\github\\ during install.ps1 bootstrap. Useful for downstream solution accelerators that need their app repo present for private-network data-plane post-provisioning (Cosmos seeding, AI Search index creation, etc.). Forwarded to install.ps1 as a comma-separated string.')
-param extraRepoUrls string[] = []
-
-@description('Optional. Git refs (tags/branches) to check out for each entry in extraRepoUrls. When shorter than extraRepoUrls or an entry is empty, defaults to "main". Forwarded to install.ps1 as a comma-separated string.')
-param extraRepoTags string[] = []
-
-@description('Optional. Local folder names under C:\\github\\ for each entry in extraRepoUrls. When shorter than extraRepoUrls or an entry is empty, defaults to the repo URL basename without the .git suffix. Forwarded to install.ps1 as a comma-separated string.')
-param extraRepoNames string[] = []
-
 @description('List of trusted source IP CIDRs allowed to connect to the Bastion public IP on port 443. When empty, all internet inbound to port 443 is denied by default.')
 param bastionAllowedSourceIPs array = []
 
@@ -447,6 +438,20 @@ param storageAccountContainersList array
 var _manifest = loadJsonContent('./manifest.json')
 var _azdTags = { 'azd-env-name': environmentName }
 var _tags = union(_azdTags, deploymentTags)
+
+// Derive the list of additional Git repositories to clone onto the jumpbox
+// directly from `manifest.json#components`. Consumers that use this landing
+// zone as a Bicep module / git submodule overlay their own `manifest.json`
+// (the documented submodule pattern) and so control the components there as
+// the single source of truth, without needing per-deployment Bicep params.
+// The derived CSV strings are forwarded to install.ps1 via the CSE
+// commandToExecute as `-ExtraRepoUrls/-ExtraRepoTags/-ExtraRepoNames`. See
+// issue #22.
+var _manifestComponents = _manifest.?components ?? []
+var _extraRepoUrls  = [for c in _manifestComponents: c.repo]
+var _extraRepoTags  = [for c in _manifestComponents: c.?tag ?? 'main']
+var _extraRepoNames = [for c in _manifestComponents: c.?name ?? replace(last(split(c.repo, '/')), '.git', '')]
+
 var _networkIsolation = empty(string(networkIsolation)) ? false : bool(networkIsolation)
 // AMPLS (Azure Monitor Private Link Scope) and the related monitor/opinsights/automation
 // private DNS zones + private endpoint are only deployed when network isolation is on AND
@@ -1239,7 +1244,7 @@ resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (dep
     forceUpdateTag: deployment().name
     settings: {
       fileUris: _fileUris
-      commandToExecute: 'powershell.exe -ExecutionPolicy Unrestricted -File install.ps1 -release ${_manifest.ailz_tag} -UseUAI ${_useUAI} -ResourceToken ${resourceToken} -AzureTenantId ${subscription().tenantId} -AzureLocation ${location} -AzureSubscriptionId ${subscription().subscriptionId} -AzureResourceGroupName ${resourceGroup().name} -AzdEnvName ${environmentName} -ExtraRepoUrls "${join(extraRepoUrls, ',')}" -ExtraRepoTags "${join(extraRepoTags, ',')}" -ExtraRepoNames "${join(extraRepoNames, ',')}"'
+      commandToExecute: 'powershell.exe -ExecutionPolicy Unrestricted -File install.ps1 -release ${_manifest.ailz_tag} -UseUAI ${_useUAI} -ResourceToken ${resourceToken} -AzureTenantId ${subscription().tenantId} -AzureLocation ${location} -AzureSubscriptionId ${subscription().subscriptionId} -AzureResourceGroupName ${resourceGroup().name} -AzdEnvName ${environmentName} -ExtraRepoUrls "${join(_extraRepoUrls, ',')}" -ExtraRepoTags "${join(_extraRepoTags, ',')}" -ExtraRepoNames "${join(_extraRepoNames, ',')}"'
     }
     protectedSettings: {
       
