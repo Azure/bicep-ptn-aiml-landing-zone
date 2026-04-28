@@ -239,6 +239,55 @@ module foundryProject 'modules/project/main.bicep' = {
   }
 }
 
+// =============================================================================
+// AI Foundry account private endpoint — STRUCTURAL FIX for issues #26 + #29
+// =============================================================================
+// Created HERE (not inside account.bicep / not inline in the AVM cog-svc
+// account module) so it can declaratively `dependsOn` the foundryProject
+// module. `Microsoft.CognitiveServices/accounts/projects` is processed by the
+// cog-svc resource provider, which serializes child-resource creation against
+// the parent account `provisioningState` — by the time foundryProject
+// completes, the parent account is in `Succeeded`, so the PE PUT is safe and
+// cannot raise `AccountProvisioningStateInvalid`. Fully declarative,
+// policy-neutral (no deploymentScripts, no shared-key storage required).
+// =============================================================================
+module foundryAccountPrivateEndpoint 'br/public:avm/res/network/private-endpoint:0.11.0' = if (!empty(privateEndpointSubnetResourceId) && !empty(aiFoundryConfiguration.?networking)) {
+  name: take('module.account.pe.${resourcesName}', 64)
+  params: {
+    name: 'pep-${foundryAccount.outputs.name}-account'
+    location: location
+    tags: tags
+    subnetResourceId: privateEndpointSubnetResourceId!
+    privateLinkServiceConnections: [
+      {
+        name: 'pep-${foundryAccount.outputs.name}-account'
+        properties: {
+          privateLinkServiceId: foundryAccount.outputs.resourceId
+          groupIds: [
+            'account'
+          ]
+        }
+      }
+    ]
+    privateDnsZoneGroup: {
+      privateDnsZoneGroupConfigs: [
+        {
+          privateDnsZoneResourceId: aiFoundryConfiguration!.networking!.cognitiveServicesPrivateDnsZoneResourceId!
+        }
+        {
+          privateDnsZoneResourceId: aiFoundryConfiguration!.networking!.openAiPrivateDnsZoneResourceId!
+        }
+        {
+          privateDnsZoneResourceId: aiFoundryConfiguration!.networking!.aiServicesPrivateDnsZoneResourceId!
+        }
+      ]
+    }
+  }
+  dependsOn: [
+    foundryProject
+  ]
+}
+
 @description('Name of the deployed Azure Resource Group.')
 output resourceGroupName string = resourceGroup().name
 

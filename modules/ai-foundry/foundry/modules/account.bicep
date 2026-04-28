@@ -1,38 +1,42 @@
 // =============================================================================
-// AI Foundry account module — STRUCTURAL FIX for issue #26
+// AI Foundry account module — STRUCTURAL fix for issues #26 + #29
 // =============================================================================
-// This is a customized derivation of the AVM PTN ai-foundry@0.6.0 account
-// submodule. It addresses the long-standing race condition between
-// `Microsoft.CognitiveServices/accounts` provisioning and the dependent
-// private endpoint deployment, also tracked upstream in
-// Azure/bicep-registry-modules#5957.
+// This module is part of the customized derivation of
+// avm/ptn/ai-ml/ai-foundry@0.6.0 maintained at `modules/ai-foundry/foundry/`.
 //
-// ROOT CAUSE
-// ----------
-// `Microsoft.CognitiveServices/accounts` PUT returns HTTP 200 synchronously
-// with `provisioningState: Accepted` and transitions to `Succeeded`
-// asynchronously WITHOUT returning a real LRO. Bicep/ARM consider the parent
-// resource "deployed" after the sync 200, so any dependent private endpoint
-// PUT runs while the account is still in `Accepted`, raising
-// `AccountProvisioningStateInvalid`.
+// The previous v1.1.3 fix (deploymentScripts wait) was structurally
+// incompatible with the Azure Policy
+//   `Storage accounts should prevent shared key access`
+//   (8c6a50c6-9ffd-4ae7-986f-5fa6111f9a54)
+// because deploymentScripts require a backing storage account with shared-key
+// access. See issue #29.
 //
-// FIX STRUCTURE
-// -------------
-// 1. Pass `privateEndpoints: []` to `avm/res/cognitive-services/account`
-//    so the AVM resource module does NOT create the PE inline.
-// 2. Provision a small user-assigned identity and grant it `Reader` on the
-//    cog-svc account.
-// 3. Run a `Microsoft.Resources/deploymentScripts` (AzPowerShell) that polls
-//    `Get-AzCognitiveServicesAccount` until `provisioningState == Succeeded`
-//    (max ~10 minutes).
-// 4. Create the private endpoint via `avm/res/network/private-endpoint` with
-//    an explicit `dependsOn` on the wait script.
+// CURRENT FIX (#29)
+// -----------------
+// Cognitive Services child resources (`accounts/projects`,
+// `accounts/deployments`, `accounts/capabilityHosts`) are processed by the
+// cog-svc resource provider and serialize server-side against the parent
+// account `provisioningState`. By the time any such child resource completes,
+// the parent account is in `Succeeded`. Therefore the private endpoint can be
+// gated on a child resource — specifically `foundryProject` (which creates
+// `Microsoft.CognitiveServices/accounts/projects/{name}`) declared in the
+// parent `foundry/main.bicep`. This is fully declarative, policy-neutral, and
+// requires no out-of-band runtime dependency.
+//
+// CONSEQUENCES FOR THIS MODULE
+// ----------------------------
+// - `privateEndpoints: []` is still passed to `avm/res/cognitive-services/account`
+//   so the AVM resource module does NOT create the PE inline.
+// - The PE itself is created in `foundry/main.bicep` AFTER `foundryProject`.
+// - All wait machinery (deploymentScript, UAI, Reader role) is removed.
 //
 // History on this repo:
 //   - PR  #19  — original property-matching pre-create workaround
 //   - Issue #25 — first regression (networkInjections)
-//   - Issue #26 — second regression (networkAcls.bypass) → this fix
-//   - Issue #27 — upstream tracking
+//   - Issue #26 — second regression (networkAcls.bypass) → split structure
+//   - Issue #27 — upstream tracking (Azure/bicep-registry-modules#5957)
+//   - Issue #29 — deploymentScript incompatible with deny-shared-key policy
+//                  → switched to declarative `dependsOn` on foundryProject
 // =============================================================================
 
 @description('Required. The name of the AI Foundry resource.')
@@ -104,11 +108,8 @@ var privateDnsZoneResourceIdValues = [
 ]
 var privateNetworkingEnabled = !empty(privateDnsZoneResourceIdValues) && !empty(privateEndpointSubnetResourceId)
 
-// Built-in role definition IDs
-var readerRoleDefinitionId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
-
 // -----------------------------------------------------------------------------
-// 1. Cognitive Services account (no inline PE — fix for #26)
+// Cognitive Services account (no inline PE — see header for #29 fix)
 // -----------------------------------------------------------------------------
 module foundryAccount 'br/public:avm/res/cognitive-services/account:0.13.2' = {
   name: take('avm.res.cognitive-services.account.${name}', 64)
@@ -138,136 +139,13 @@ module foundryAccount 'br/public:avm/res/cognitive-services/account:0.13.2' = {
           useMicrosoftManagedNetwork: false
         }
       : null
-    // Issue #26: PE is created OUTSIDE this AVM module, gated on a wait script,
-    // to break the race against the cog-svc provisioningState transition.
+    // Issue #26+#29: PE is created OUTSIDE this AVM module, gated on the
+    // foundryProject child resource declared in `foundry/main.bicep`, which
+    // server-side blocks until parent `provisioningState == Succeeded`.
     privateEndpoints: []
     enableTelemetry: enableTelemetry
     roleAssignments: roleAssignments
   }
-}
-
-// -----------------------------------------------------------------------------
-// 2. Existing reference (for use by wait script + PE)
-// -----------------------------------------------------------------------------
-resource accountExisting 'Microsoft.CognitiveServices/accounts@2025-06-01' existing = {
-  name: name
-}
-
-// -----------------------------------------------------------------------------
-// 3. UAI for the wait script (only when private networking enabled)
-// -----------------------------------------------------------------------------
-resource accountWaitUai 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (privateNetworkingEnabled) {
-  name: take('id-aifwait-${name}', 128)
-  location: location
-  tags: tags
-}
-
-// -----------------------------------------------------------------------------
-// 4. Reader role assignment for the UAI on the cog-svc account
-// -----------------------------------------------------------------------------
-resource accountWaitUaiReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (privateNetworkingEnabled) {
-  name: guid(accountExisting.id, readerRoleDefinitionId, 'aifwait')
-  scope: accountExisting
-  properties: {
-    principalId: accountWaitUai!.properties.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', readerRoleDefinitionId)
-  }
-  dependsOn: [
-    foundryAccount
-  ]
-}
-
-// -----------------------------------------------------------------------------
-// 5. Wait deploymentScript — polls account.provisioningState until Succeeded
-// -----------------------------------------------------------------------------
-resource accountWaitScript 'Microsoft.Resources/deploymentScripts@2023-08-01' = if (privateNetworkingEnabled) {
-  name: take('ds-aifwait-${name}', 90)
-  location: location
-  tags: tags
-  kind: 'AzurePowerShell'
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${accountWaitUai!.id}': {}
-    }
-  }
-  properties: {
-    azPowerShellVersion: '12.3'
-    retentionInterval: 'PT1H'
-    timeout: 'PT15M'
-    cleanupPreference: 'OnSuccess'
-    environmentVariables: [
-      {
-        name: 'RG_NAME'
-        value: resourceGroup().name
-      }
-      {
-        name: 'ACCOUNT_NAME'
-        value: name
-      }
-    ]
-    scriptContent: '''
-      $ErrorActionPreference = 'Stop'
-      $maxAttempts = 60
-      $delaySeconds = 10
-      $attempt = 0
-      $state = ''
-      while ($attempt -lt $maxAttempts) {
-        $attempt++
-        try {
-          $acct = Get-AzCognitiveServicesAccount -ResourceGroupName $env:RG_NAME -Name $env:ACCOUNT_NAME -ErrorAction Stop
-          $state = $acct.ProvisioningState
-          Write-Output "Attempt $attempt/$maxAttempts — provisioningState: $state"
-          if ($state -eq 'Succeeded') {
-            $DeploymentScriptOutputs = @{ provisioningState = $state; attempts = $attempt }
-            return
-          }
-          if ($state -eq 'Failed' -or $state -eq 'Canceled') {
-            throw "Account provisioning ended in terminal non-success state: $state"
-          }
-        } catch {
-          Write-Output "Attempt $attempt/$maxAttempts — transient error: $($_.Exception.Message)"
-        }
-        Start-Sleep -Seconds $delaySeconds
-      }
-      throw "Timed out after $maxAttempts attempts; last observed state: $state"
-    '''
-  }
-  dependsOn: [
-    foundryAccount
-    accountWaitUaiReader
-  ]
-}
-
-// -----------------------------------------------------------------------------
-// 6. Private endpoint, gated on the wait script
-// -----------------------------------------------------------------------------
-module accountPrivateEndpoint 'br/public:avm/res/network/private-endpoint:0.11.0' = if (privateNetworkingEnabled) {
-  name: take('pe.${name}.account', 64)
-  params: {
-    name: 'pep-${name}-account'
-    location: location
-    tags: tags
-    subnetResourceId: privateEndpointSubnetResourceId!
-    privateLinkServiceConnections: [
-      {
-        name: 'pep-${name}-account'
-        properties: {
-          privateLinkServiceId: accountExisting.id
-          groupIds: [
-            'account'
-          ]
-        }
-      }
-    ]
-    privateDnsZoneGroup: {
-      privateDnsZoneGroupConfigs: privateDnsZoneResourceIdValues
-    }
-  }
-  dependsOn: [
-    accountWaitScript
-  ]
 }
 
 @description('Name of the AI Foundry resource.')
@@ -287,3 +165,9 @@ output location string = location
 
 @description('System assigned managed identity principal ID of the AI Foundry resource.')
 output systemAssignedMIPrincipalId string = foundryAccount!.outputs.systemAssignedMIPrincipalId!
+
+@description('Whether private networking is enabled (PE must be created externally and gated on a cog-svc child resource).')
+output privateNetworkingEnabled bool = privateNetworkingEnabled
+
+@description('Private DNS zone configs for the externally-created PE.')
+output privateDnsZoneConfigs array = privateDnsZoneResourceIdValues
