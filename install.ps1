@@ -59,14 +59,28 @@ $env:Path += ";C:\ProgramData\chocolatey\bin"
 
 
 # ------------------------------
-# Install tooling (parallel via Start-Job — see issue #24)
+# Install tooling (parallel via Start-Job — see issue #24, hardened in #30)
 # ------------------------------
 # Run the six independent installs (vscode, azure-cli, git, python311,
 # powershell-core, azd) concurrently as background jobs so the CSE wall time
 # becomes max(slowest-package) instead of sum-of-all. Net savings on a clean
 # network-isolated provision: ~10–15 minutes.
 #
-# Notes:
+# MSI mutex hardening (#30):
+#   The Windows Installer service uses a machine-wide exclusive mutex
+#   (`Global\_MSIExecute`). When more than one MSI-backed choco package is
+#   installed concurrently, all but one of the parallel `msiexec` invocations
+#   return exit code **1618** ("Another installation currently in progress").
+#   Several of our packages (powershell-core, azd, python311, sometimes git)
+#   are MSI-backed, so naive parallelization is racy. The fix is per-job
+#   retry-on-1618 with capped exponential backoff:
+#     * MSI-backed installs serialize *naturally* through the mutex via
+#       retries (each MSI waits for the previous to release the lock), so we
+#       still run all six in parallel and don't lose the wall-time benefit.
+#     * Non-MSI installs are unaffected.
+#     * Non-1618 failures fail fast (we don't paper over real package errors).
+#
+# Implementation notes:
 #   * Using built-in `Start-Job` (not `Start-ThreadJob`) on purpose:
 #     `ThreadJob` is NOT bundled with PowerShell 5.1 and would require an
 #     `Install-Module` from PSGallery — which would force adding
@@ -74,6 +88,10 @@ $env:Path += ";C:\ProgramData\chocolatey\bin"
 #     mode under network isolation. `Start-Job` spawns one child
 #     `powershell.exe` per job (~1–2 s each), which is negligible against
 #     `choco install` steps that take minutes. See issue #24.
+#   * Each job calls `Invoke-ChocoWithRetry` (defined in `-InitializationScript`)
+#     which inspects stdout/stderr for the literal `1618` token and the
+#     "Another installation currently in progress" marker and retries with
+#     backoff (initial 15 s, ×2 capped at 120 s, max 8 attempts).
 #   * AZD is installed via `choco install azd` instead of `aka.ms/install-azd.ps1`
 #     so it can be parallelized with the rest. The path-discovery block below
 #     still searches the legacy MSI locations as a fallback in case the
@@ -84,14 +102,51 @@ $env:Path += ";C:\ProgramData\chocolatey\bin"
 #     (the script ends with a delayed reboot, see bottom of file).
 $chocoArgs = @('-y','--ignoredetectedreboot','--force','--no-progress','--limitoutput','--no-color')
 
-Write-Host "Starting parallel choco installs (vscode, azure-cli, git, python311, powershell-core, azd)..."
+# Function definition shared by every background job via -InitializationScript.
+$chocoRetryInit = {
+    function Invoke-ChocoWithRetry {
+        param(
+            [Parameter(Mandatory=$true)][ValidateSet('install','upgrade')][string]$Action,
+            [Parameter(Mandatory=$true)][string]$Package,
+            [Parameter(Mandatory=$true)][string[]]$ExtraArgs
+        )
+        $maxAttempts = 8
+        $delay = 15
+        for ($i = 1; $i -le $maxAttempts; $i++) {
+            $output = & choco $Action $Package @ExtraArgs 2>&1 | Out-String
+            $exit = $LASTEXITCODE
+            Write-Output $output
+            if ($exit -eq 0) {
+                if ($i -gt 1) {
+                    Write-Output "[$Package] choco $Action succeeded on attempt $i/$maxAttempts after MSI lock contention."
+                }
+                return
+            }
+            $isMsiLockContention = ($output -match '\b1618\b') -or ($output -match 'Another installation currently in progress')
+            if ($isMsiLockContention -and $i -lt $maxAttempts) {
+                Write-Output "[$Package] MSI lock contention (exit=$exit, code 1618) on attempt $i/$maxAttempts; backing off ${delay}s..."
+                Start-Sleep -Seconds $delay
+                $delay = [Math]::Min($delay * 2, 120)
+                continue
+            }
+            if ($isMsiLockContention) {
+                Write-Warning "[$Package] choco $Action exhausted $maxAttempts retries due to persistent MSI lock contention (exit=$exit)."
+                return
+            }
+            Write-Warning "[$Package] choco $Action failed with exit=$exit (non-1618); not retrying."
+            return
+        }
+    }
+}
+
+Write-Host "Starting parallel choco installs (vscode, azure-cli, git, python311, powershell-core, azd) with MSI-retry hardening..."
 $jobs = @(
-    Start-Job -Name vscode      -ScriptBlock { & choco upgrade vscode          @using:chocoArgs }
-    Start-Job -Name azure-cli   -ScriptBlock { & choco install azure-cli       @using:chocoArgs }
-    Start-Job -Name git         -ScriptBlock { & choco upgrade git             @using:chocoArgs }
-    Start-Job -Name python311   -ScriptBlock { & choco install python311       @using:chocoArgs }
-    Start-Job -Name pwsh        -ScriptBlock { & choco install powershell-core @using:chocoArgs }
-    Start-Job -Name azd         -ScriptBlock { & choco install azd             @using:chocoArgs }
+    Start-Job -Name vscode    -InitializationScript $chocoRetryInit -ScriptBlock { Invoke-ChocoWithRetry -Action upgrade -Package vscode          -ExtraArgs $using:chocoArgs }
+    Start-Job -Name azure-cli -InitializationScript $chocoRetryInit -ScriptBlock { Invoke-ChocoWithRetry -Action install -Package azure-cli       -ExtraArgs $using:chocoArgs }
+    Start-Job -Name git       -InitializationScript $chocoRetryInit -ScriptBlock { Invoke-ChocoWithRetry -Action upgrade -Package git             -ExtraArgs $using:chocoArgs }
+    Start-Job -Name python311 -InitializationScript $chocoRetryInit -ScriptBlock { Invoke-ChocoWithRetry -Action install -Package python311       -ExtraArgs $using:chocoArgs }
+    Start-Job -Name pwsh      -InitializationScript $chocoRetryInit -ScriptBlock { Invoke-ChocoWithRetry -Action install -Package powershell-core -ExtraArgs $using:chocoArgs }
+    Start-Job -Name azd       -InitializationScript $chocoRetryInit -ScriptBlock { Invoke-ChocoWithRetry -Action install -Package azd             -ExtraArgs $using:chocoArgs }
 )
 
 $jobs | Wait-Job | Out-Null
