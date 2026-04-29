@@ -246,58 +246,90 @@ Write-Host "==============================================================`n" -F
 # Clone Bicep PTN AIML Landing Zone repo
 # ------------------------------
 # All `git clone` invocations in this script run via Invoke-GitCloneWithTimeout
-# (defined below) — see issue #32. A plain `git clone` over HTTPS has no
-# upper bound on idle/zombie connections, and the Azure VM Guest Agent
+# (defined below) — see issues #32 and #33. A plain `git clone` over HTTPS has
+# no upper bound on idle/zombie connections, and the Azure VM Guest Agent
 # serializes every Run-Command behind the active CSE. So a single hanging
 # clone can keep CSE in `Transitioning` for hours and freeze the entire VM
 # operation queue (including operator remediation via `az vm run-command
-# invoke`). The helper sets `GIT_HTTP_LOW_SPEED_LIMIT=1000` /
-# `GIT_HTTP_LOW_SPEED_TIME=60` (abort if <1 KB/s for 60 s — the actual
-# observed failure mode) and wraps each clone in a `Start-Job` with a hard
-# 10-minute wall clock cap, after which the job is forcibly stopped.
+# invoke`). The helper wraps each clone in a `Start-Job` with a hard wall
+# clock cap, after which the job is forcibly stopped.
+#
+# The `Start-Job` child has no TTY, so Git Credential Manager can stall on
+# discovery prompts that never resolve (#33 Bug A). We therefore force
+# `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=Never`, and disable
+# `credential.helper` for this child invocation. Cold-start TLS on freshly
+# booted NI VMs (Defender + post-choco) can take >60 s to complete the first
+# byte, so `GIT_HTTP_LOW_SPEED_TIME` is loosened to 180 s and the wall clock
+# to 900 s (#33 Bug B). The real `git` exit code is captured via a sentinel
+# line in the job's output stream, with a `.git` directory existence
+# fallback, so genuine non-zero exits are not silently swallowed (#33 Bug C).
+# One automatic retry with a 15 s back-off covers single transient failures
+# without becoming an infinite retry loop.
 function Invoke-GitCloneWithTimeout {
     param(
         [Parameter(Mandatory=$true)][string]$Url,
         [Parameter(Mandatory=$true)][string]$Tag,
         [Parameter(Mandatory=$true)][string]$Destination,
-        [int]$TimeoutSec = 600
+        [int]$TimeoutSec       = 900,
+        [int]$LowSpeedTimeSec  = 180,
+        [int]$LowSpeedLimitBps = 1000,
+        [int]$MaxAttempts      = 2
     )
-    Write-Host "[clone] $Url (tag=$Tag) -> $Destination (timeout=${TimeoutSec}s)"
-    $job = Start-Job -ScriptBlock {
-        param($u,$t,$d)
-        # Abort connections that aren't transferring at least 1 KB/s for 60 s.
-        # This prevents a half-open HTTPS connection from blocking forever.
-        $env:GIT_HTTP_LOW_SPEED_LIMIT = '1000'
-        $env:GIT_HTTP_LOW_SPEED_TIME  = '60'
-        # `--no-tags` skips fetching unrelated tag refs on the wire.
-        & git clone -b $t --depth 1 --no-tags $u $d 2>&1
-        exit $LASTEXITCODE
-    } -ArgumentList $Url, $Tag, $Destination
-
-    if (-not (Wait-Job $job -Timeout $TimeoutSec)) {
-        Write-Warning "[clone] timeout (${TimeoutSec}s) cloning '$Url' (tag=$Tag) into '$Destination' — aborting and continuing."
-        Stop-Job  $job -ErrorAction SilentlyContinue
-        Receive-Job $job -ErrorAction SilentlyContinue | ForEach-Object { Write-Output $_ }
-        Remove-Job $job -Force -ErrorAction SilentlyContinue
-        # Best-effort cleanup of partial clone so a subsequent retry wouldn't
-        # be confused by a half-baked working tree.
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        Write-Host "[clone] attempt ${attempt}/${MaxAttempts}: $Url (tag=$Tag) -> $Destination (timeout=${TimeoutSec}s)"
         if (Test-Path $Destination) {
             Remove-Item $Destination -Recurse -Force -ErrorAction SilentlyContinue
         }
-        $script:LASTEXITCODE = 124  # convention: 124 == timeout
-        return
-    }
 
-    Receive-Job $job | ForEach-Object { Write-Output $_ }
-    $exit = $job.ChildJobs[0].JobStateInfo.Reason
-    if ($null -ne $exit -and $exit -is [System.Exception]) {
-        Write-Warning "[clone] job for '$Url' failed: $($exit.Message)"
-        $script:LASTEXITCODE = 1
-    } else {
-        # Use the job's last exit code as our LASTEXITCODE so callers can check it.
-        $script:LASTEXITCODE = if ($job.State -eq 'Completed') { 0 } else { 1 }
+        $job = Start-Job -ScriptBlock {
+            param($u, $t, $d, $lim, $tsec)
+            # No TTY in Start-Job: silence any chance of an interactive prompt.
+            $env:GIT_TERMINAL_PROMPT = '0'
+            $env:GCM_INTERACTIVE     = 'Never'
+            # Disable Git Credential Manager for this public-clone path.
+            # Avoids GCM discovery RTTs that can stall a cold TLS in NI subnets.
+            $env:GIT_CONFIG_COUNT     = '1'
+            $env:GIT_CONFIG_KEY_0     = 'credential.helper'
+            $env:GIT_CONFIG_VALUE_0   = ''
+            # Abort only on truly stuck transfers, not on cold TLS startup.
+            $env:GIT_HTTP_LOW_SPEED_LIMIT = "$lim"
+            $env:GIT_HTTP_LOW_SPEED_TIME  = "$tsec"
+            & git clone -b $t --depth 1 --no-tags $u $d 2>&1
+            "__GIT_EXIT__:$LASTEXITCODE"   # surface the real exit code
+        } -ArgumentList $Url, $Tag, $Destination, $LowSpeedLimitBps, $LowSpeedTimeSec
+
+        $finished = Wait-Job $job -Timeout $TimeoutSec
+        if (-not $finished) {
+            Write-Warning "[clone] wall-clock timeout (${TimeoutSec}s) on attempt $attempt"
+            Stop-Job  $job -ErrorAction SilentlyContinue
+            Receive-Job $job -ErrorAction SilentlyContinue | ForEach-Object { Write-Output $_ }
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
+            $exit = 124  # convention: 124 == timeout
+        }
+        else {
+            $output = Receive-Job $job
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
+            $output | ForEach-Object { Write-Output $_ }
+            $marker = $output | Where-Object { $_ -match '^__GIT_EXIT__:(\-?\d+)$' } | Select-Object -Last 1
+            if ($marker -and $marker -match '^__GIT_EXIT__:(\-?\d+)$') {
+                $exit = [int]$Matches[1]
+            }
+            elseif (Test-Path (Join-Path $Destination '.git')) {
+                $exit = 0
+            }
+            else {
+                $exit = 1
+            }
+        }
+
+        if ($exit -eq 0) {
+            $script:LASTEXITCODE = 0
+            return
+        }
+        Write-Warning "[clone] attempt $attempt failed (exit=$exit)"
+        if ($attempt -lt $MaxAttempts) { Start-Sleep -Seconds 15 }
+        else { $script:LASTEXITCODE = $exit; return }
     }
-    Remove-Job $job -Force -ErrorAction SilentlyContinue
 }
 
 write-host "Cloning Bicep PTN AIML Landing Zone repo"
