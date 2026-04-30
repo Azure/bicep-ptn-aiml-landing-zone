@@ -9,6 +9,7 @@
     "psqlLocation":                        { "value": "${AZURE_PSQL_LOCATION}" },
     "cosmosLocation":                        { "value": "${AZURE_COSMOS_LOCATION}" },
     "searchServiceLocation":                 { "value": "${AZURE_SEARCH_LOCATION}" },
+    "speechServiceLocation":                 { "value": "${AZURE_SPEECH_LOCATION}" },
     "deploymentTags":                      { "value": {} },
     "principalId":                         { "value": "${AZURE_PRINCIPAL_ID}" },
 
@@ -42,6 +43,8 @@
     "deployLogAnalytics":                   { "value": "true" },
     "enablePrivateLogAnalytics":            { "value": "${ENABLE_PRIVATE_LOG_ANALYTICS=true}" },
     "deploySearchService":                  { "value": "true" },
+    "deploySpeechService":                  { "value": "${DEPLOY_SPEECH_SERVICE=false}" },
+    "speechServiceSku":                     { "value": "S0" },
     "deployStorageAccount":                 { "value": "true" },
     "greenFieldDeployment":                 { "value": "true" },
     "deployVM":                             { "value": "${DEPLOY_VM=true}" },
@@ -70,6 +73,7 @@
     "keyVaultName":                          { "value": null },
     "logAnalyticsWorkspaceName":             { "value": null },
     "searchServiceName":                     { "value": null },
+    "speechServiceName":                     { "value": null },
     "solutionStorageAccountName":            { "value": null },
 
     "vmAdminPassword":                       {"value": "$(secretOrRandomPassword)"},  

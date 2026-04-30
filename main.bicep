@@ -69,6 +69,9 @@ param cosmosLocation string = resourceGroup().location
 @description('The Azure region where Azure AI Search services will be created. Defaults to the main deployment location. Override this when the primary region is out of capacity for AI Search.')
 param searchServiceLocation string = ''
 
+@description('The Azure region where the Azure AI Speech service will be created. Defaults to the main deployment location.')
+param speechServiceLocation string = ''
+
 @description('Principal ID for role assignments. This is typically the Object ID of the user or service principal running the deployment.')
 param principalId string
 
@@ -187,6 +190,16 @@ param deployAppInsights bool = true
 
 @description('Deploy an Azure Cognitive Search service for indexing and querying content. When disabled, search-related connections are skipped and search app configuration values resolve to empty values.')
 param deploySearchService bool = true
+
+@description('Deploy an Azure AI Speech (SpeechServices) cognitive account with the same private-endpoint / DNS / RBAC posture as the rest of the AI services in this landing zone. Off by default so the change is non-breaking for existing consumers. When enabled under network isolation, the account is created with publicNetworkAccess=Disabled and a private endpoint into the existing privatelink.cognitiveservices.azure.com zone.')
+param deploySpeechService bool = false
+
+@description('SKU for the Azure AI Speech service. Only F0 (free) and S0 (standard) are supported via SDK.')
+@allowed([
+  'F0'
+  'S0'
+])
+param speechServiceSku string = 'S0'
 
 @description('Deploy an Azure Storage Account to hold blobs, queues, tables, and files.')
 param deployStorageAccount bool = true
@@ -348,6 +361,9 @@ param logAnalyticsWorkspaceName string = '${const.abbrs.managementGovernance.log
 @description('Name of the Cognitive Search service.')
 param searchServiceName string = '${const.abbrs.ai.aiSearch}${resourceToken}'
 
+@description('Optional override for the Azure AI Speech account name. When empty, a name is generated from the resource token. Also used as the customSubDomainName, so it must be globally unique within `cognitiveservices.azure.com`.')
+param speechServiceName string = '${const.abbrs.ai.speechService}${resourceToken}'
+
 @description('Name of the Azure Storage Account for general-purpose blob and file storage.')
 param storageAccountName string = '${const.abbrs.storage.storageAccount}${resourceToken}'
 
@@ -460,6 +476,7 @@ var _networkIsolation = empty(string(networkIsolation)) ? false : bool(networkIs
 var _deployAmpls = _networkIsolation && deployAppInsights && deployLogAnalytics && enablePrivateLogAnalytics
 var _deployPrivateDnsZones = _networkIsolation && !policyManagedPrivateDns
 var _searchServiceLocation = empty(searchServiceLocation) ? location : searchServiceLocation
+var _speechServiceLocation = empty(speechServiceLocation) ? location : speechServiceLocation
 
 
 // ----------------------------------------------------------------------
@@ -592,6 +609,19 @@ var _firewallVmBootstrapFqdns = [
   '*.download.microsoft.com'
   'aka.ms'
   'go.microsoft.com'
+  // azd auto-downloads the Bicep CLI binary from `downloads.bicep.azure.com`
+  // on first run (`azd env refresh` / `azd provision`); without this FQDN the
+  // jumpbox fails at "Downloading Bicep" before any deployment work begins
+  // (#36).
+  'downloads.bicep.azure.com'
+  // GitHub release fallback used by azd, the .NET installer, and many
+  // bootstrap scripts. `objects.githubusercontent.com` and
+  // `codeload.github.com` are the actual content hosts behind release asset
+  // and source-archive URLs respectively (#36).
+  'github.com'
+  '*.githubusercontent.com'
+  'objects.githubusercontent.com'
+  'codeload.github.com'
   #disable-next-line no-hardcoded-env-urls
   '*.core.windows.net'
   '*.azureedge.net'
@@ -613,6 +643,16 @@ var _firewallEditorFqdns = [
   '*.vo.msecnd.net'
   '*.vscode-cdn.net'
 ]
+
+// Azure AI Speech FQDNs (#35) — only added to the bootstrap allow rule when
+// `deploySpeechService` is true. Covers control plane, TTS, and STT regional
+// endpoints used by the Speech SDK.
+#disable-next-line no-hardcoded-env-urls
+var _firewallSpeechFqdns = deploySpeechService ? [
+  '*.cognitiveservices.azure.com'
+  '*.tts.speech.microsoft.com'
+  '*.stt.speech.microsoft.com'
+] : []
 
 // ACR Tasks agent-pool FQDNs — scoped to devopsBuildAgentsSubnetPrefix. Only
 // populated when the agent pool is actually deployed.
@@ -871,7 +911,7 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
               { protocolType: 'Https', port: 443 }
               { protocolType: 'Http', port: 80 }
             ]
-            targetFqdns: extendFirewallForJumpboxBootstrap ? _firewallVmBootstrapFqdns : []
+            targetFqdns: extendFirewallForJumpboxBootstrap ? concat(_firewallVmBootstrapFqdns, _firewallSpeechFqdns) : []
             sourceAddresses: [jumpboxSubnetPrefix]
           }
           {
@@ -1198,6 +1238,22 @@ var _testVmRoles = (deployVM && _networkIsolation) ? concat(
       principalType: 'ServicePrincipal'
     }
   ] : [],
+  deploySpeechService ? [
+    {
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesContributor.guid)
+      principalId: _testVmPrincipalId
+      #disable-next-line BCP318
+      resourceId: speechService.outputs.resourceId
+      principalType: 'ServicePrincipal'
+    }
+    {
+      principalId: _testVmPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
+      #disable-next-line BCP318
+      resourceId: speechService.outputs.resourceId
+      principalType: 'ServicePrincipal'
+    }
+  ] : [],
   deployStorageAccount ? [
     {
       principalId: _testVmPrincipalId
@@ -1351,6 +1407,12 @@ var _peDnsZoneGroupAcr = policyManagedPrivateDns ? {} : {
     { name: 'acr', privateDnsZoneResourceId: _dnsZoneAcrId }
   ]
 }
+var _peDnsZoneGroupCogSvcs = policyManagedPrivateDns ? {} : {
+  name: 'cogSvcsDnsZoneGroup'
+  privateDnsZoneGroupConfigs: [
+    { name: 'cogSvcsARecord', privateDnsZoneResourceId: _dnsZoneCogSvcsId }
+  ]
+}
 
 var _peList = concat(
   (_networkIsolation && deployStorageAccount) ? [
@@ -1456,6 +1518,19 @@ var _peList = concat(
       ]
       privateDnsZoneGroup: _peDnsZoneGroupAcr
     }
+  ] : [],
+  (_networkIsolation && deploySpeechService) ? [
+    {
+      name: '${const.abbrs.networking.privateEndpoint}${speechServiceName}'
+      privateLinkServiceConnections: [
+        {
+          name: 'speechConnection${useExistingVNet?'-byon':''}'
+          #disable-next-line BCP318
+          properties: { privateLinkServiceId: speechService.outputs.resourceId, groupIds: ['account'] }
+        }
+      ]
+      privateDnsZoneGroup: _peDnsZoneGroupCogSvcs
+    }
   ] : []
 )
 
@@ -1478,6 +1553,7 @@ module privateEndpoints 'modules/networking/private-endpoints.bicep' = if (_netw
     appConfig!
     containerEnv!
     containerRegistry!
+    speechService!
   ]
 }
 
@@ -1989,21 +2065,33 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
             cpu: app.?cpu ?? '0.5'
             memory: app.?memory ?? '1.0Gi'
           }
-          env: [
-            {
-              name: 'APP_CONFIG_ENDPOINT'
-              value: 'https://${appConfigName}.azconfig.io'
-            }
-            {
-              name: 'AZURE_TENANT_ID'
-              value: subscription().tenantId
-            }
-            {
-              name: 'AZURE_CLIENT_ID'
-              #disable-next-line BCP318
-              value: _useUAI ? containerAppsUAI[index].properties.clientId : ''
-            }
-          ]
+          env: concat(
+            [
+              {
+                name: 'APP_CONFIG_ENDPOINT'
+                value: 'https://${appConfigName}.azconfig.io'
+              }
+              {
+                name: 'AZURE_TENANT_ID'
+                value: subscription().tenantId
+              }
+            ],
+            // Only inject AZURE_CLIENT_ID when a UAI is actually configured (#38).
+            // Emitting an empty AZURE_CLIENT_ID alongside AZURE_TENANT_ID breaks
+            // DefaultAzureCredential on the SystemAssigned path: EnvironmentCredential
+            // sees both vars and tries to authenticate with the empty client_id, then
+            // ManagedIdentityCredential hits the Container Apps IMDS proxy with the
+            // empty client_id and gets HTTP 500 invalid_scope. With the var omitted,
+            // ManagedIdentityCredential picks up the platform-injected
+            // IDENTITY_ENDPOINT / IDENTITY_HEADER and uses the SystemAssigned MI.
+            _useUAI ? [
+              {
+                name: 'AZURE_CLIENT_ID'
+                #disable-next-line BCP318
+                value: containerAppsUAI[index].properties.clientId
+              }
+            ] : []
+          )
         }
       ]
 
@@ -2238,6 +2326,53 @@ module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' =
   ]
 }
 
+// Azure AI Speech (SpeechServices)
+//////////////////////////////////////////////////////////////////////////
+// First-class, optional Speech account. Same network-isolated posture as the
+// rest of the AI services in this landing zone — customSubDomainName,
+// publicNetworkAccess=Disabled under NI, private endpoint into the existing
+// `privatelink.cognitiveservices.azure.com` zone (groupId `account`), and
+// system-assigned MI for diagnostic settings / future RBAC scenarios.
+//
+// PE is created externally via `_peList` (parallel to the search/cosmos
+// pattern) so it routes through the same `privateEndpoints` aggregator
+// module and reuses the existing private DNS zone — no duplicate zone.
+module speechService 'br/public:avm/res/cognitive-services/account:0.13.2' = if (deploySpeechService) {
+  name: 'speechService'
+  params: {
+    name: speechServiceName
+    location: _speechServiceLocation
+    tags: _tags
+    kind: 'SpeechServices'
+    sku: speechServiceSku
+
+    // customSubDomainName is required for AAD auth and private endpoints.
+    // Pinning it to the account name keeps the FQDN deterministic.
+    customSubDomainName: speechServiceName
+
+    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    networkAcls: {
+      defaultAction: 'Allow'
+      bypass: 'AzureServices'
+    }
+
+    // Identity for diagnostic settings + future data-plane RBAC scenarios.
+    managedIdentities: {
+      systemAssigned: true
+    }
+
+    // PE is created out-of-module via `_peList` (#35).
+    privateEndpoints: []
+
+    diagnosticSettings: deployLogAnalytics ? [
+      {
+        #disable-next-line BCP318
+        workspaceResourceId: logAnalytics.id
+      }
+    ] : []
+  }
+}
+
 // Storage Accounts
 //////////////////////////////////////////////////////////////////////////
 
@@ -2365,10 +2500,26 @@ var _executorRoles = concat(
       resourceId: aiFoundryAccountResourceId
       principalType: principalType
     }
+  ] : [],
+  deploySpeechService ? [
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesContributor.guid)
+      #disable-next-line BCP318
+      resourceId: speechService.outputs.resourceId
+      principalType: principalType
+    }
+    {
+      principalId: principalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
+      #disable-next-line BCP318
+      resourceId: speechService.outputs.resourceId
+      principalType: principalType
+    }
   ] : []
 )
 
-module assignExecutorRoles 'modules/security/resource-role-assignment.bicep' = if (deployContainerRegistry || deployKeyVault || deploySearchService || deployStorageAccount || deployAiFoundry) {
+module assignExecutorRoles 'modules/security/resource-role-assignment.bicep' = if (deployContainerRegistry || deployKeyVault || deploySearchService || deployStorageAccount || deployAiFoundry || deploySpeechService) {
   name: 'assignExecutorRoles'
   params: {
     name: 'assignExecutorRoles'
@@ -2480,6 +2631,36 @@ module assignAIFoundryCogServOAIUserContainerApps 'modules/security/resource-rol
           #disable-next-line BCP318
           principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
           resourceId: aiFoundryAccountResourceId
+          principalType: 'ServicePrincipal'
+        }
+      ]
+    }
+  }
+]
+
+// Speech Service - Cognitive Services User -> ContainerApp (#35)
+// Granted whenever a container app declares the `CognitiveServicesUser` role
+// token in its `roles` array AND `deploySpeechService=true`. Idempotent with
+// the AI Foundry assignment of the same role token because the two have
+// different `resourceId` scopes.
+module assignSpeechCognitiveServicesUserContainerApps 'modules/security/resource-role-assignment.bicep' = [
+  for (app, i) in containerAppsList: if (deployContainerApps && deploySpeechService && contains(
+    app.roles,
+    const.roles.CognitiveServicesUser.key
+  )) {
+    name: 'assignSpeechCognitiveServicesUser-${app.service_name}'
+    params: {
+      name: 'assignSpeechCognitiveServicesUser-${app.service_name}'
+      roleAssignments: [
+        {
+          roleDefinitionId: subscriptionResourceId(
+            'Microsoft.Authorization/roleDefinitions',
+            const.roles.CognitiveServicesUser.guid
+          )
+          #disable-next-line BCP318
+          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+          #disable-next-line BCP318
+          resourceId: speechService.outputs.resourceId
           principalType: 'ServicePrincipal'
         }
       ]
@@ -2951,6 +3132,8 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'SEARCH_SERVICE_UAI_RESOURCE_ID', value: (deploySearchService && _useUAI) ? searchServiceUAI.id : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'SEARCH_SERVICE_RESOURCE_ID', value: deploySearchService ? searchService.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
+      #disable-next-line BCP318
+      { name: 'AZURE_SPEECH_RESOURCE_ID', value: deploySpeechService ? speechService.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       
       // ── Resource Names ───────────────────────────────────────────────────
       { name: 'AI_FOUNDRY_ACCOUNT_NAME', value: aiFoundryAccountName, label: appConfigLabel, contentType: 'text/plain' }
@@ -2964,6 +3147,8 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'DATABASE_ACCOUNT_NAME', value: dbAccountName, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DATABASE_NAME', value: dbDatabaseName, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'SEARCH_SERVICE_NAME', value: searchServiceName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'AZURE_SPEECH_RESOURCE_NAME', value: deploySpeechService ? speechServiceName : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'AZURE_SPEECH_REGION', value: deploySpeechService ? _speechServiceLocation : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'STORAGE_ACCOUNT_NAME', value: storageAccountName, label: appConfigLabel, contentType: 'text/plain' }
 
       // ── Feature flagging ─────────────────────────────────────────────────
@@ -2972,6 +3157,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'DEPLOY_LOG_ANALYTICS', value: string(deployLogAnalytics), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOY_APP_INSIGHTS', value: string(deployAppInsights), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOY_SEARCH_SERVICE', value: string(deploySearchService), label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'DEPLOY_SPEECH_SERVICE', value: string(deploySpeechService), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOY_STORAGE_ACCOUNT', value: string(deployStorageAccount), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOY_COSMOS_DB', value: string(deployCosmosDb), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOY_CONTAINER_APPS', value: string(deployContainerApps), label: appConfigLabel, contentType: 'text/plain' }
@@ -2987,6 +3173,8 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'AI_FOUNDRY_PROJECT_ENDPOINT',     value: (deployAiFoundry) ? aiFoundryProjectEndpoint : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'SEARCH_SERVICE_QUERY_ENDPOINT',   value: deploySearchService ? searchService.outputs.endpoint : '',              label: appConfigLabel, contentType: 'text/plain' }
+      #disable-next-line BCP318
+      { name: 'AZURE_SPEECH_ENDPOINT', value: deploySpeechService ? speechService.outputs.endpoint : '', label: appConfigLabel, contentType: 'text/plain' }
 
       // ── Connections ───────────────────────────────────────────────────────
       #disable-next-line BCP318
@@ -3038,6 +3226,7 @@ output DEPLOY_KEY_VAULT bool = deployKeyVault
 output DEPLOY_LOG_ANALYTICS bool = deployLogAnalytics
 output DEPLOY_APP_INSIGHTS bool = deployAppInsights
 output DEPLOY_SEARCH_SERVICE bool = deploySearchService
+output DEPLOY_SPEECH_SERVICE bool = deploySpeechService
 output DEPLOY_STORAGE_ACCOUNT bool = deployStorageAccount
 output DEPLOY_COSMOS_DB bool = deployCosmosDb
 output DEPLOY_CONTAINER_APPS bool = deployContainerApps
@@ -3053,3 +3242,11 @@ output ACR_TASK_AGENT_POOL string = _deployAcrTaskAgentPool ? acrTaskAgentPoolNa
 // ──────────────────────────────────────────────────────────────────────
 #disable-next-line BCP318
 output APP_CONFIG_ENDPOINT string = deployAppConfig ? appConfig.properties.endpoint : ''
+
+// Azure AI Speech (#35)
+#disable-next-line BCP318
+output AZURE_SPEECH_RESOURCE_ID string = deploySpeechService ? speechService.outputs.resourceId : ''
+#disable-next-line BCP318
+output AZURE_SPEECH_ENDPOINT string = deploySpeechService ? speechService.outputs.endpoint : ''
+output AZURE_SPEECH_REGION string = deploySpeechService ? _speechServiceLocation : ''
+output AZURE_SPEECH_RESOURCE_NAME string = deploySpeechService ? speechServiceName : ''
