@@ -581,18 +581,23 @@ var _firewallEssentialAuthFqdns = [
 ]
 var _firewallEssentialContainerFqdns = ['mcr.microsoft.com', '*.data.mcr.microsoft.com']
 // Platform-internal FQDNs required by the Container Apps Environment itself when egress
-// is forced through Azure Firewall (fixes #39). The per-pod IMDS sidecar that backs
-// IDENTITY_ENDPOINT / IDENTITY_HEADER proxies token requests through a Microsoft-managed
-// Service Bus / Event Hub namespace (`gsm*eh.servicebus.windows.net`) — without this rule,
-// every DefaultAzureCredential / ManagedIdentityCredential call from a Container App fails
-// at runtime with HTTP 500 "An unexpected error occured while fetching the AAD Token", with
-// no log entry indicating the firewall is the cause. Also includes ACA control-plane and
-// Azure Monitor / Log Analytics / Application Insights ingestion endpoints used by the
-// platform's diagnostics pipeline. Azure Firewall application-rule wildcards only match a
-// single label, so explicit wildcarded FQDNs are required (a generic `*.windows.net` does
-// NOT match `gsm123eh.servicebus.windows.net`).
+// is forced through Azure Firewall (fixes #39, #40). The per-pod IMDS sidecar that backs
+// IDENTITY_ENDPOINT / IDENTITY_HEADER has two independent legs that both need to traverse
+// the firewall: (a) a Microsoft-managed Service Bus / Event Hub namespace whose FQDN
+// matches `gsm*eh.servicebus.windows.net` (the broker leg, fixes #39); (b) the ACA token
+// endpoint at `control-{region}.identity.azure.net` (the token-endpoint leg, fixes #40).
+// Without BOTH allow rules, every DefaultAzureCredential / ManagedIdentityCredential call
+// from a Container App fails at runtime with HTTP 500 "An unexpected error occured while
+// fetching the AAD Token", with no log entry on the workload side indicating the firewall
+// is the cause. Also includes ACA control-plane and Azure Monitor / Log Analytics /
+// Application Insights ingestion endpoints used by the platform's diagnostics pipeline.
+// Azure Firewall application-rule wildcards only match a single label, so explicit
+// wildcarded FQDNs are required (a generic `*.windows.net` does NOT match
+// `gsm123eh.servicebus.windows.net`, and `*.azure.com` does NOT match
+// `control-swedencentral.identity.azure.net`).
 var _firewallEssentialPlatformFqdns = [
   '*.servicebus.windows.net'
+  '*.identity.azure.net'
   '*.azurecontainerapps.io'
   '*.azurecontainerapps.dev'
   '*.in.applicationinsights.azure.com'
@@ -1657,8 +1662,18 @@ module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (
     (_networkIsolation && useExistingVNet && deploySubnets) ? virtualNetworkSubnets : null
     #disable-next-line BCP321
     _networkIsolation ? privateDnsZones : null
+    // Serialize PE creation against the shared `pe-subnet` (fixes #41). The aggregator
+    // `privateEndpoints` module creates ~10 PEs against `pe-subnet` (already serialized
+    // internally via @batchSize(1)). This module also creates an inline blob PE on the
+    // same subnet via the AVM storage-account module's `privateEndpoints` parameter.
+    // Without this dependsOn, the inline PE NIC and the aggregator's PE NICs race the
+    // subnet update and ARM intermittently fails one of them with
+    // `ReferencedResourceNotProvisioned`.
+    #disable-next-line BCP321
+    _networkIsolation ? privateEndpoints : null
   ]
 }
+
 
 // 16.1 AI Foundry Configuration
 module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
@@ -1737,6 +1752,14 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     _networkIsolation ? privateDnsZones : null
     #disable-next-line BCP321
     (aiFoundryStorageAccountResourceId == '') ? aiFoundryStorageAccount : null
+    // Serialize AI Foundry's internal PE creation against the shared `pe-subnet`
+    // (fixes #41). The AVM ai-foundry module creates its own cog-svc PEs on the
+    // same subnet used by the `privateEndpoints` aggregator and by the inline blob
+    // PE in `aiFoundryStorageAccount`. Without this dependsOn, the AVM-internal PE
+    // NICs race the subnet update and ARM intermittently fails one of them with
+    // `ReferencedResourceNotProvisioned`.
+    #disable-next-line BCP321
+    _networkIsolation ? privateEndpoints : null
   ]
 }
 
