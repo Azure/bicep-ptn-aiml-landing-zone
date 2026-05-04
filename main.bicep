@@ -580,6 +580,29 @@ var _firewallEssentialAuthFqdns = [
   '*.applicationinsights.azure.com'
 ]
 var _firewallEssentialContainerFqdns = ['mcr.microsoft.com', '*.data.mcr.microsoft.com']
+// Platform-internal FQDNs required by the Container Apps Environment itself when egress
+// is forced through Azure Firewall (fixes #39). The per-pod IMDS sidecar that backs
+// IDENTITY_ENDPOINT / IDENTITY_HEADER proxies token requests through a Microsoft-managed
+// Service Bus / Event Hub namespace (`gsm*eh.servicebus.windows.net`) — without this rule,
+// every DefaultAzureCredential / ManagedIdentityCredential call from a Container App fails
+// at runtime with HTTP 500 "An unexpected error occured while fetching the AAD Token", with
+// no log entry indicating the firewall is the cause. Also includes ACA control-plane and
+// Azure Monitor / Log Analytics / Application Insights ingestion endpoints used by the
+// platform's diagnostics pipeline. Azure Firewall application-rule wildcards only match a
+// single label, so explicit wildcarded FQDNs are required (a generic `*.windows.net` does
+// NOT match `gsm123eh.servicebus.windows.net`).
+var _firewallEssentialPlatformFqdns = [
+  '*.servicebus.windows.net'
+  '*.azurecontainerapps.io'
+  '*.azurecontainerapps.dev'
+  '*.in.applicationinsights.azure.com'
+  '*.livediagnostics.monitor.azure.com'
+  '*.ingest.monitor.azure.com'
+  '*.monitor.azure.com'
+  '*.monitor.core.windows.net'
+  '*.opinsights.azure.com'
+  '*.loganalytics.io'
+]
 var _firewallEssentialGitHubFqdns = [
   'github.com'
   '*.github.com'
@@ -902,6 +925,15 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
               { protocolType: 'Https', port: 443 }
             ]
             targetFqdns: _firewallEssentialGitHubFqdns
+            sourceAddresses: ['*']
+          }
+          {
+            ruleType: 'ApplicationRule'
+            name: 'AllowContainerAppsPlatform'
+            protocols: [
+              { protocolType: 'Https', port: 443 }
+            ]
+            targetFqdns: _firewallEssentialPlatformFqdns
             sourceAddresses: ['*']
           }
           {
