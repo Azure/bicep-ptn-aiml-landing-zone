@@ -30,6 +30,7 @@
     "deployAppConfig":                      { "value": "true" },
     "deployAppInsights":                    { "value": "true" },
     "deployCosmosDb":                       { "value": "true" },
+    "enableCosmosAnalyticalStorage":        { "value": "${ENABLE_COSMOS_ANALYTICAL_STORAGE=false}" },
     "deployContainerApps":                  { "value": "true" },
     "deployContainerRegistry":              { "value": "true" },
     "deployContainerEnv":                   { "value": "true" },

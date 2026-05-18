@@ -453,6 +453,9 @@ param dbDatabaseThroughput int?
 @description('List of Cosmos DB containers to create. Each entry supports optional throughput and indexingPolicy via safe access.')
 param databaseContainersList array
 
+@description('Enable Synapse Link / Analytical Storage on the workload Cosmos DB account. Default is false because (a) Azure currently restricts enabling this on account creation in several region/subscription combinations and breaks provisioning, and (b) the default landing-zone topology does not deploy any Analytical Store consumer (Synapse Link, Fabric Mirroring). Set to true only when a downstream pipeline actively consumes the analytical store and the target region/subscription is known to allow it. Note: Azure does not permit toggling this flag on an existing Cosmos DB account; the value only takes effect at account creation.')
+param enableCosmosAnalyticalStorage bool = false
+
 // ----------------------------------------------------------------------
 // VM params
 // ----------------------------------------------------------------------
@@ -2422,7 +2425,7 @@ module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' =
     ]
     defaultConsistencyLevel: 'Session'
     capabilitiesToAdd: ['EnableServerless']
-    enableAnalyticalStorage: true
+    enableAnalyticalStorage: enableCosmosAnalyticalStorage
     enableFreeTier: false
     networkRestrictions: {
       publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
