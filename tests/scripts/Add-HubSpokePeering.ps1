@@ -58,11 +58,11 @@ $ErrorActionPreference = 'Stop'
 function Get-ResourceIdParts {
     param([Parameter(Mandatory)][string]$Id)
     $parts = $Id.TrimStart('/').Split('/')
-    if ($parts.Count -lt 9) { throw "Invalid resource ID: $Id" }
+    if ($parts.Count -lt 8) { throw "Invalid resource ID: $Id" }
     return @{
         SubscriptionId    = $parts[1]
         ResourceGroupName = $parts[3]
-        Name              = $parts[8]
+        Name              = $parts[7]
     }
 }
 

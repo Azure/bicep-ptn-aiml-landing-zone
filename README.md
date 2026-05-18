@@ -6,6 +6,26 @@ The Azure AI Landing Zone is an enterprise-scale, production-ready reference arc
 
 ![Architecture Diagram](media/Architecture%20Diagram.png)
 
+## What's new in v2.0.0
+
+v2.0.0 is a **breaking release** that introduces hub-and-spoke composability and granular reuse of platform resources for Application Landing Zone (ALZ) integrated topologies, while keeping the v1.x Zero Trust standalone experience unchanged. Highlights:
+
+- **Topology preset** — new `deploymentMode` parameter (`standalone` \| `ailz-integrated`) tags the deployment with operator intent
+- **IP allow-lists** — new `allowedIpRanges` parameter for "Zero Trust + named developer IPs" hybrid scenarios, applied uniformly to 7 PaaS services
+- **Decoupled jumpbox / Bastion / NAT Gateway** — split from the old monolithic `deployVM` flag, each independently controllable, each with a BYO `existingResourceId` variant
+- **Observability reuse** — bring your own Log Analytics workspace and Application Insights, including cross-subscription scenarios
+- **Granular BYO Private DNS** — 15 per-zone override parameters, plus `dnsZoneLinkSuffix` for multi-spoke shared-zone topologies
+- **Hub integration** — new spoke→hub VNet peering (created by `main.bicep`) and external-egress UDR via hub firewall/NVA, with helper script for the reverse-peering direction
+
+If you're **upgrading from v1.x**, read the **[v2.0.0 migration guide](docs/v2-migration.md)** — every breaking change is mapped to the new parameter(s) you need to set.
+
+If you're **deploying for the first time**, pick a runbook:
+
+- **[Runbook — Standalone deployment](docs/runbook-standalone.md)** — single subscription, AI LZ owns all networking and platform resources. Use this if you don't already have an ALZ.
+- **[Runbook — Hub-and-Spoke deployment](docs/runbook-hub-spoke.md)** — spoke in an existing ALZ, with hub-owned Firewall / Bastion / Log Analytics. Use this if your organization already operates an Azure Landing Zone.
+
+The "How to Deploy" section below remains accurate for the standalone case and the basic Zero Trust setup.
+
 ## How to Deploy
 
 Choose your preferred deployment method based on project requirements and environment constraints.
