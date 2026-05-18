@@ -204,6 +204,24 @@ param existingApplicationInsightsConnectionString string?
 @description('When `existingApplicationInsightsResourceId` is provided WITHOUT a matching `existingLogAnalyticsWorkspaceResourceId`, the deployment normally fails the pre-flight check (Gap 5 §4.13) because telemetry would split between the central AppInsights workspace and this deployment\'s own LAW. Set to `true` only if the split is intentional and accepted.')
 param allowMixedObservabilityWorkspaces bool = false
 
+@description('Gap 6 — IP address of an external network virtual appliance (typically the hub Azure Firewall private IP) that should receive the spoke 0.0.0.0/0 default route when no spoke-local firewall is deployed. Effective only when `deployAzureFirewall=false`, `networkIsolation=true`, and no `hubIntegrationExistingRouteTableResourceId` is provided. Use this in AI-LZ-integrated topologies where the hub provides centralized egress filtering.')
+param hubIntegrationEgressNextHopIp string?
+
+@description('Gap 6 — Resource ID of an existing Route Table to attach the spoke workload subnets to. When set, the deployment skips creation of its local route table and reuses this RT (assumed pre-configured with the correct default route). Required for Landing Zone-managed topologies where the platform team owns the spoke RT. Mutually exclusive with `hubIntegrationEgressNextHopIp` (which builds a local RT). When set, both `deployAzureFirewall` and any local default-route creation are suppressed.')
+param hubIntegrationExistingRouteTableResourceId string?
+
+@description('Gap 7 — Resource ID of the hub Virtual Network the spoke should peer with. When set and `hubIntegrationCreateHubPeering=true`, the deployment creates a spoke→hub VNet peering. The reverse (hub→spoke) peering is the operator\'s responsibility — typically handled by a platform team script (`tests/scripts/Add-HubSpokePeering.ps1` for our test harness). Hub VNet may live in a different subscription/RG; the peering resource itself lives in the spoke VNet so the spoke deployment has the rights to create it.')
+param hubIntegrationHubVnetResourceId string?
+
+@description('Gap 7 — When true and `hubIntegrationHubVnetResourceId` is set, the deployment creates the spoke→hub peering inline. Set to `false` to defer peering creation entirely to the platform team (both directions handled externally). Only effective when the spoke VNet is created by this deployment (`useExistingVNet=false`); with BYO VNet, peering management is the operator\'s responsibility.')
+param hubIntegrationCreateHubPeering bool = true
+
+@description('Gap 7 — `allowGatewayTransit` flag on the spoke→hub peering. Set to `true` when the spoke owns a VPN/ExpressRoute gateway that the hub should be allowed to use as transit. Defaults to `false` (hub-owned gateway is the standard topology).')
+param hubIntegrationPeeringAllowGatewayTransit bool = false
+
+@description('Gap 7 — `useRemoteGateways` flag on the spoke→hub peering. Set to `true` to route on-premises traffic from the spoke through the hub-owned VPN/ExpressRoute gateway. Requires the reverse hub→spoke peering to have `allowGatewayTransit=true` and a gateway provisioned in the hub. Defaults to `false` for the standalone topology.')
+param hubIntegrationPeeringUseRemoteGateways bool = false
+
 @description('Deploy an Azure Cognitive Search service for indexing and querying content. When disabled, search-related connections are skipped and search app configuration values resolve to empty values.')
 param deploySearchService bool = true
 
@@ -674,6 +692,46 @@ var _appInsightsInstrumentationKey = !empty(_appInsightsConnectionString)
 var _hasEffectiveLaw          = !empty(_lawResourceId)
 var _hasEffectiveAI           = !empty(_appInsightsResourceId)
 
+// ----------------------------------------------------------------------
+// Gap 6 — External egress / route table reuse
+// ----------------------------------------------------------------------
+// Three valid configurations are now supported for the spoke 0.0.0.0/0 default route:
+//   1. Standalone (deployAzureFirewall=true)                : local FW, local RT, route → local FW IP.
+//   2. AI-LZ-integrated, hub-FW shared                       : deployAzureFirewall=false +
+//                                                             hubIntegrationEgressNextHopIp set → local RT,
+//                                                             route → hub FW IP.
+//   3. AI-LZ-integrated, platform-team-owned RT              : hubIntegrationExistingRouteTableResourceId set →
+//                                                             no local RT, no local default route. The
+//                                                             platform team's RT is attached to spoke subnets
+//                                                             and is assumed to already define egress routing.
+// Any other combination is invalid and surfaced by the pre-flight script (Gap 9).
+var _hasExistingRouteTable = !empty(hubIntegrationExistingRouteTableResourceId ?? '')
+var _hasExternalEgress     = !empty(hubIntegrationEgressNextHopIp ?? '')
+var _createRouteTable      = _networkIsolation && !_hasExistingRouteTable
+#disable-next-line BCP318
+var _effectiveRouteTableId = _hasExistingRouteTable
+  ? hubIntegrationExistingRouteTableResourceId!
+  : (_createRouteTable ? routeTable.id : '')
+var _createDefaultRoute    = _createRouteTable && (deployAzureFirewall || _hasExternalEgress)
+#disable-next-line BCP318
+var _defaultRouteNextHopIp = deployAzureFirewall
+  ? (_networkIsolation ? azureFirewall!.properties.ipConfigurations[0].properties.privateIPAddress : '')
+  : (_hasExternalEgress ? hubIntegrationEgressNextHopIp! : '')
+
+// ----------------------------------------------------------------------
+// Gap 7 — Hub VNet peering (spoke side)
+// ----------------------------------------------------------------------
+// Spoke→hub peering is created inline when the spoke owns its VNet
+// (useExistingVNet=false) and the operator opts in. The hub VNet may
+// reside in a different subscription/RG; we parse its segments so the
+// peering resource (which lives under the spoke VNet) can reference
+// the remote VNet correctly. The reverse hub→spoke peering is the
+// operator's responsibility — see tests/scripts/Add-HubSpokePeering.ps1.
+var _hasHubVnet      = !empty(hubIntegrationHubVnetResourceId ?? '')
+var _createSpokeToHubPeering = _hasHubVnet && hubIntegrationCreateHubPeering && _networkIsolation && !useExistingVNet
+var _hubVnetSegs   = _hasHubVnet ? split(hubIntegrationHubVnetResourceId!, '/') : ['']
+var _hubVnetName   = length(_hubVnetSegs) >= 9 ? _hubVnetSegs[8] : ''
+
 // AMPLS (Azure Monitor Private Link Scope) and the related monitor/opinsights/automation
 // private DNS zones + private endpoint are only deployed when network isolation is on AND
 // the operator explicitly opts in via enablePrivateLogAnalytics AND we're creating our
@@ -979,8 +1037,10 @@ var _firewallAcrTaskOsPackageFqdns = [
   'dl.yarnpkg.com'
 ]
 
-// Route Table for egress traffic control through Azure Firewall
-resource routeTable 'Microsoft.Network/routeTables@2024-07-01' = if (_networkIsolation) {
+// Route Table for egress traffic control through Azure Firewall (or external NVA, Gap 6).
+// Created only when network isolation is on AND no existing RT is provided via
+// `hubIntegrationExistingRouteTableResourceId`.
+resource routeTable 'Microsoft.Network/routeTables@2024-07-01' = if (_createRouteTable) {
   name: '${const.abbrs.networking.routeTable}${resourceToken}'
   location: location
   tags: _tags
@@ -995,7 +1055,7 @@ var baseSubnets = [
         name: agentSubnetName
         addressPrefix: agentSubnetPrefix 
         delegation: 'Microsoft.app/environments'
-        routeTableResourceId: routeTable.id
+        routeTableResourceId: _effectiveRouteTableId
         serviceEndpoints: [
           'Microsoft.CognitiveServices'
         ]
@@ -1003,7 +1063,7 @@ var baseSubnets = [
       {
         name: peSubnetName
         addressPrefix: peSubnetPrefix 
-        routeTableResourceId: routeTable.id
+        routeTableResourceId: _effectiveRouteTableId
         serviceEndpoints: [
           'Microsoft.AzureCosmosDB'
         ]        
@@ -1041,7 +1101,7 @@ var baseSubnets = [
         name: jumpboxSubnetName
         addressPrefix: jumpboxSubnetPrefix 
         natGatewayResourceId: _effectiveNatGatewayId
-        routeTableResourceId: routeTable.id
+        routeTableResourceId: _effectiveRouteTableId
         delegation: ''
         serviceEndpoints : []
       }
@@ -1049,7 +1109,7 @@ var baseSubnets = [
         name: acaEnvironmentSubnetName
         addressPrefix: acaEnvironmentSubnetPrefix  
         delegation: 'Microsoft.app/environments'
-        routeTableResourceId: routeTable.id
+        routeTableResourceId: _effectiveRouteTableId
         serviceEndpoints: [
           'Microsoft.AzureCosmosDB'
         ]
@@ -1057,7 +1117,7 @@ var baseSubnets = [
       {
         name: devopsBuildAgentsSubnetName
         addressPrefix: devopsBuildAgentsSubnetPrefix 
-        routeTableResourceId: routeTable.id
+        routeTableResourceId: _effectiveRouteTableId
         delegation: ''
         serviceEndpoints : []
       }
@@ -1095,6 +1155,35 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_n
     tags: _tags
     subnets: subnets
   }
+}
+
+// Gap 7 — Spoke→hub VNet peering.
+// Lives under the locally-created spoke VNet; the existing resource
+// reference below ensures Bicep can attach the peering as a child without
+// the AVM module having to expose a peerings property.
+resource spokeVnetForPeering 'Microsoft.Network/virtualNetworks@2024-07-01' existing = if (_createSpokeToHubPeering) {
+  name: vnetName
+}
+
+resource spokeToHubPeering 'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2024-07-01' = if (_createSpokeToHubPeering) {
+  parent: spokeVnetForPeering
+  name: 'to-hub-${_hubVnetName}'
+  properties: {
+    allowVirtualNetworkAccess: true
+    // Required so the hub Azure Firewall (or any hub NVA) can forward spoke
+    // traffic on behalf of the spoke. Without this, asymmetric routing
+    // through the hub firewall breaks.
+    allowForwardedTraffic: true
+    allowGatewayTransit: hubIntegrationPeeringAllowGatewayTransit
+    useRemoteGateways: hubIntegrationPeeringUseRemoteGateways
+    remoteVirtualNetwork: {
+      #disable-next-line BCP318
+      id: hubIntegrationHubVnetResourceId!
+    }
+  }
+  dependsOn: [
+    virtualNetwork
+  ]
 }
 
 // Bastion Host
@@ -1402,14 +1491,16 @@ resource azureFirewall 'Microsoft.Network/azureFirewalls@2024-07-01' = if (deplo
   ]
 }
 
-// Default route through Azure Firewall
-resource defaultRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = if (deployAzureFirewall && _networkIsolation) {
+// Default route through Azure Firewall (local) or external NVA/hub firewall (Gap 6).
+// Skipped entirely when the operator brings their own Route Table via
+// `hubIntegrationExistingRouteTableResourceId` (we don't write into a foreign RT).
+resource defaultRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = if (_createDefaultRoute) {
   parent: routeTable
   name: 'default-to-firewall'
   properties: {
     addressPrefix: '0.0.0.0/0'
     nextHopType: 'VirtualAppliance'
-    nextHopIpAddress: azureFirewall!.properties.ipConfigurations[0].properties.privateIPAddress
+    nextHopIpAddress: _defaultRouteNextHopIp
   }
 }
 
