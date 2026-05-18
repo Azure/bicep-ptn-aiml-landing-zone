@@ -1,0 +1,64 @@
+name: bicep-validate
+
+on:
+  pull_request:
+    paths:
+      - 'main.bicep'
+      - 'modules/**'
+      - 'constants/**'
+      - 'main.parameters.json'
+      - 'scripts/Measure-MainJsonSize.ps1'
+      - '.github/workflows/bicep-validate.yml'
+  push:
+    branches:
+      - main
+      - 'v2.*-dev'
+    paths:
+      - 'main.bicep'
+      - 'modules/**'
+      - 'constants/**'
+      - 'main.parameters.json'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  build-and-measure:
+    name: bicep build + size gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bicep CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64 -o bicep
+          chmod +x bicep
+          sudo mv bicep /usr/local/bin/bicep
+          bicep --version
+
+      - name: Compile main.bicep and check size
+        shell: pwsh
+        run: |
+          # v2.0.0 baseline at branch creation: 4.589 MB.
+          # The "ratchet" approach: prevent regressions from the baseline now,
+          # tighten to the issue #58 acceptance target (3.5 MB working / 3.8 MB
+          # fail) once the compression phase lands. ArmHardCeilingMB is 5.0
+          # because the current 4.589 MB template DOES deploy successfully
+          # (modules get nested-deployed at runtime), so the docs' 4 MB limit
+          # applies per nested deployment, not the root JSON.
+          pwsh ./scripts/Measure-MainJsonSize.ps1 `
+            -WorkingBudgetMB 3.5 `
+            -FailThresholdMB 4.7 `
+            -ArmHardCeilingMB 5.0
+
+      - name: Upload main.json artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-json-${{ github.run_id }}
+          path: main.json
+          if-no-files-found: warn
+          retention-days: 14

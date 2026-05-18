@@ -422,3 +422,8 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Test harness — captured outputs from hub deployments (per-run)
+tests/hub/.outputs.json
+tests/hub/main.json
+
