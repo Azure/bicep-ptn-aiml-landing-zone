@@ -219,8 +219,43 @@ param deployContainerRegistry bool = true
 @description('Deploy the Container Apps environment (log ingestion, VNet integration, etc.).')
 param deployContainerEnv bool = true
 
-@description('Deploy a Virtual Machine (e.g., for jumpbox or specialized workloads).')
-param deployVM bool = true
+// ---------------------------------------------------------------------------
+// Hub-component deployment flags (Gap 4, issue #58)
+// ---------------------------------------------------------------------------
+// `deployVM` (v1.x) consolidated three independent deployments — jumpbox,
+// Bastion, and NAT Gateway — under one switch. v2.0.0 splits them so each
+// component can be controlled, reused (BYO) or skipped independently.
+//
+// Defaults are nullable. When null, the effective value is derived to match
+// v1.x behavior (everything deploys when `networkIsolation=true`). Set any
+// flag explicitly to override.
+//
+//   deployJumpbox      | jumpbox VM + CSE + RBAC + (optionally) VM Key Vault
+//   deployBastion      | spoke-side Azure Bastion + Bastion NSG + Bastion PIP
+//   deployNatGateway   | spoke NAT Gateway + NAT PIP for outbound egress
+//
+// Each component also accepts a matching `existing<Component>ResourceId` BYO
+// parameter. When the BYO ID is non-empty, the corresponding `deploy*` flag
+// defaults to `false` and the existing resource ID is consumed by downstream
+// wiring (RBAC, diagnostics, runbook docs).
+//
+@description('Deploy the jumpbox Virtual Machine (and its CSE + RBAC + optional VM Key Vault). When null, defaults to `networkIsolation` to match v1.x behavior. Set to `false` for AI LZ-integrated topologies where the operator connects via central tooling.')
+param deployJumpbox bool?
+
+@description('Deploy a spoke-side Azure Bastion + Bastion NSG + Bastion PIP. When null, defaults to `networkIsolation && deployJumpbox` (preserves v1.x behavior). Set to `false` when reusing a central hub Bastion via VNet peering (Gap 7).')
+param deployBastion bool?
+
+@description('Deploy a NAT Gateway + NAT PIP for outbound spoke egress. When null, defaults to `networkIsolation && deployJumpbox` (preserves v1.x behavior). Set to `false` when egress is centralized via Azure Firewall in the hub (Gap 6).')
+param deployNatGateway bool?
+
+@description('Resource ID of an existing Bastion to reuse (BYO). Informational — used by docs/runbooks. When non-empty, `deployBastion` defaults to `false`.')
+param existingBastionResourceId string?
+
+@description('Resource ID of an existing NAT Gateway to associate with the spoke subnets (BYO). When non-empty, `deployNatGateway` defaults to `false`.')
+param existingNatGatewayResourceId string?
+
+@description('Resource ID of an existing jumpbox VM (BYO). Informational — used by docs/runbooks for post-provision flows. When non-empty, `deployJumpbox` defaults to `false`.')
+param existingJumpboxResourceId string?
 
 @description('Deploy the virtual network subnets.')
 param deploySubnets bool = true
@@ -558,6 +593,19 @@ var _keyVaultIpRules     = [for ip in allowedIpRanges: { value: ip }]
 var _searchIpRules       = [for ip in allowedIpRanges: { value: ip }]
 var _cognitiveIpRules    = [for ip in allowedIpRanges: { value: ip }]
 var _cosmosIpRules       = allowedIpRanges
+// ---------------------------------------------------------------------------
+// Hub-component effective deployment derivations (Gap 4, issue #58)
+// ---------------------------------------------------------------------------
+// Nullable inputs coalesce to v1.x defaults so existing parameter files
+// (without the new flags) behave identically. BYO resource IDs flip the
+// default to `false` automatically — explicit `true/false` always wins.
+var _hasExistingJumpbox     = !empty(existingJumpboxResourceId ?? '')
+var _hasExistingBastion     = !empty(existingBastionResourceId ?? '')
+var _hasExistingNatGateway  = !empty(existingNatGatewayResourceId ?? '')
+var _deployJumpbox          = deployJumpbox    ?? (_networkIsolation && !_hasExistingJumpbox)
+var _deployBastion          = deployBastion    ?? (_networkIsolation && _deployJumpbox && !_hasExistingBastion)
+var _deployNatGateway       = deployNatGateway ?? (_networkIsolation && _deployJumpbox && !_hasExistingNatGateway)
+
 // AMPLS (Azure Monitor Private Link Scope) and the related monitor/opinsights/automation
 // private DNS zones + private endpoint are only deployed when network isolation is on AND
 // the operator explicitly opts in via enablePrivateLogAnalytics. This lets isolated
@@ -655,7 +703,7 @@ var _useCAppAPIKey  = empty(string(useCAppAPIKey))? false : bool(useCAppAPIKey)
 ///////////////////////////////////////////////////////////////////////////
 
 // Bastion NSG — restricts inbound 443 to trusted IPs only
-module bastionNsg 'modules/networking/bastion-nsg.bicep' = if (deployVM && _networkIsolation && deployNsgs) {
+module bastionNsg 'modules/networking/bastion-nsg.bicep' = if (_deployBastion && deployNsgs) {
   name: 'bastionNsgDeployment'
   params: {
     name: 'nsg-${vnetName}-${azureBastionSubnetName}'
@@ -902,7 +950,7 @@ var baseSubnets = [
         name: azureBastionSubnetName
         addressPrefix: azureBastionSubnetPrefix
         #disable-next-line BCP318
-        networkSecurityGroupResourceId: (deployVM && _networkIsolation && deployNsgs) ? bastionNsg!.outputs.id : ''
+        networkSecurityGroupResourceId: (_deployBastion && deployNsgs) ? bastionNsg!.outputs.id : ''
         delegation: ''
         serviceEndpoints : []
       }
@@ -987,7 +1035,7 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_n
 // audio/clipboard/device redirection, and SSH agent forwarding from inside the
 // spoke. Behavior-equivalent to the previous module call: same subnet
 // (AzureBastionSubnet), Standard static PIP, optional zone redundancy, tags.
-resource bastionPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (deployVM && networkIsolation) {
+resource bastionPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (_deployBastion) {
   name: '${const.abbrs.networking.publicIPAddress}bastion-${resourceToken}'
   location: location
   tags: _tags
@@ -1002,7 +1050,7 @@ resource bastionPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (
   }
 }
 
-resource testVmBastionHost 'Microsoft.Network/bastionHosts@2024-07-01' = if (deployVM && networkIsolation) {
+resource testVmBastionHost 'Microsoft.Network/bastionHosts@2024-07-01' = if (_deployBastion) {
   name: '${const.abbrs.security.bastion}testvm-${resourceToken}'
   location: location
   tags: _tags
@@ -1325,7 +1373,7 @@ resource testVmUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31'
 }
 
 // Test VM
-module testVm 'br/public:avm/res/compute/virtual-machine:0.15.0' = if (deployVM && _networkIsolation) {
+module testVm 'br/public:avm/res/compute/virtual-machine:0.15.0' = if (_deployJumpbox) {
   name: 'testVmDeployment'
   params: {
     name: _vmName
@@ -1377,7 +1425,7 @@ module testVm 'br/public:avm/res/compute/virtual-machine:0.15.0' = if (deployVM 
   ]
 }
 
-resource natPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (deployVM && _networkIsolation) {
+resource natPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (_deployNatGateway) {
   name: '${const.abbrs.networking.publicIPAddress}${const.abbrs.networking.natGateway}${resourceToken}'
   location: location
   sku: {
@@ -1396,7 +1444,7 @@ resource natPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (depl
 }
 
 #disable-next-line BCP081
-resource natGateway 'Microsoft.Network/natGateways@2024-10-01' = if (deployVM && _networkIsolation) {
+resource natGateway 'Microsoft.Network/natGateways@2024-10-01' = if (_deployNatGateway) {
   name: '${const.abbrs.networking.natGateway}${resourceToken}'
   location: location
   sku: {
@@ -1415,12 +1463,12 @@ resource natGateway 'Microsoft.Network/natGateways@2024-10-01' = if (deployVM &&
 // TestVM role assignments (consolidated into a single array-driven module call
 // to keep the compiled ARM template under the 4 MB deployment limit).
 // ---------------------------------------------------------------------------
-var _testVmPrincipalId = (deployVM && _networkIsolation)
+var _testVmPrincipalId = _deployJumpbox
   #disable-next-line BCP318
   ? (_useUAI ? testVmUAI.properties.principalId : testVm.outputs.systemAssignedMIPrincipalId!)
   : ''
 
-var _testVmRoles = (deployVM && _networkIsolation) ? concat(
+var _testVmRoles = _deployJumpbox ? concat(
   [
     // Reader on the resource group itself so the jumpbox SAMI can enumerate
     // ARM resources from inside the VNet (`az resource list`,
@@ -1571,7 +1619,7 @@ var _testVmRoles = (deployVM && _networkIsolation) ? concat(
   ] : []
 ) : []
 
-module assignTestVmRoles 'modules/security/resource-role-assignment.bicep' = if (deployVM && _networkIsolation) {
+module assignTestVmRoles 'modules/security/resource-role-assignment.bicep' = if (_deployJumpbox) {
   name: 'assignTestVmRoles'
   params: {
     name: 'assignTestVmRoles'
@@ -1580,7 +1628,7 @@ module assignTestVmRoles 'modules/security/resource-role-assignment.bicep' = if 
 }
 
 // Cosmos DB Account - Cosmos DB Built-in Data Contributor -> TestVm
-module assignCosmosDBCosmosDbBuiltInDataContributorTestVm 'modules/security/cosmos-data-plane-role-assignment.bicep' = if (deployVM && deployCosmosDb && _networkIsolation) {
+module assignCosmosDBCosmosDbBuiltInDataContributorTestVm 'modules/security/cosmos-data-plane-role-assignment.bicep' = if (_deployJumpbox && deployCosmosDb) {
   name: 'assignCosmosDBCosmosDbBuiltInDataContributorTestVm'
   params: {
     #disable-next-line BCP318
@@ -1595,7 +1643,7 @@ var _fileUris = [
   'https://raw.githubusercontent.com/Azure/bicep-ptn-aiml-landing-zone/refs/tags/${_manifest.ailz_tag}/install.ps1'
 ]
 
-resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (deployVM && deploySoftware && _networkIsolation) {
+resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (_deployJumpbox && deploySoftware) {
   name: '${_vmName}/cse'
   location: location
   properties: {

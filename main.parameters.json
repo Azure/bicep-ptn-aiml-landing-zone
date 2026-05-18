@@ -54,7 +54,12 @@
     "speechServiceSku":                     { "value": "S0" },
     "deployStorageAccount":                 { "value": "true" },
     "greenFieldDeployment":                 { "value": "true" },
-    "deployVM":                             { "value": "${DEPLOY_VM=true}" },
+    "deployJumpbox":                        { "value": "${DEPLOY_JUMPBOX=null}" },
+    "deployBastion":                        { "value": "${DEPLOY_BASTION=null}" },
+    "deployNatGateway":                     { "value": "${DEPLOY_NAT_GATEWAY=null}" },
+    "existingJumpboxResourceId":            { "value": "${EXISTING_JUMPBOX_RESOURCE_ID=null}" },
+    "existingBastionResourceId":            { "value": "${EXISTING_BASTION_RESOURCE_ID=null}" },
+    "existingNatGatewayResourceId":         { "value": "${EXISTING_NAT_GATEWAY_RESOURCE_ID=null}" },
     "deploySoftware":                       { "value": "true" },
     "deployPostgres":                       { "value": "false" },
 
