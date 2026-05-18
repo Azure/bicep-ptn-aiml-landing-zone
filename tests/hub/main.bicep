@@ -168,6 +168,13 @@ resource bastion 'Microsoft.Network/bastionHosts@2024-05-01' = if (deployBastion
     name: 'Standard'
   }
   properties: {
+    // Native client tunneling — required so operators can run
+    //   az network bastion ssh --name <bastion> --resource-group rg-ailz-hub \
+    //     --target-resource-id <jumpbox-resource-id> --auth-type AAD
+    // against a jumpbox in the peered spoke VNet from outside the portal.
+    // Without this, only the in-browser RDP/SSH session works, which prevents
+    // the post-provision automation flow from the operator workstation.
+    enableTunneling: true
     ipConfigurations: [
       {
         name: 'ipconfig1'

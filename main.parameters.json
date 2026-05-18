@@ -60,6 +60,7 @@
     "existingJumpboxResourceId":            { "value": "${EXISTING_JUMPBOX_RESOURCE_ID=null}" },
     "existingBastionResourceId":            { "value": "${EXISTING_BASTION_RESOURCE_ID=null}" },
     "existingNatGatewayResourceId":         { "value": "${EXISTING_NAT_GATEWAY_RESOURCE_ID=null}" },
+    "deployVM":                             { "value": "${DEPLOY_VM=null}" },
     "deploySoftware":                       { "value": "true" },
     "deployPostgres":                       { "value": "false" },
 

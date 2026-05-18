@@ -257,6 +257,9 @@ param existingNatGatewayResourceId string?
 @description('Resource ID of an existing jumpbox VM (BYO). Informational — used by docs/runbooks for post-provision flows. When non-empty, `deployJumpbox` defaults to `false`.')
 param existingJumpboxResourceId string?
 
+@description('DEPRECATED (v2.0.0). Legacy v1.x consolidated switch for jumpbox + Bastion + NAT Gateway. Provided as a transitional fallback so v1.x parameter files continue to deploy unmodified — explicit `deployJumpbox` / `deployBastion` / `deployNatGateway` values ALWAYS take precedence over this flag. Will be REMOVED in v3.0.0; migrate to the three component-specific flags.')
+param deployVM bool?
+
 @description('Deploy the virtual network subnets.')
 param deploySubnets bool = true
 
@@ -602,9 +605,26 @@ var _cosmosIpRules       = allowedIpRanges
 var _hasExistingJumpbox     = !empty(existingJumpboxResourceId ?? '')
 var _hasExistingBastion     = !empty(existingBastionResourceId ?? '')
 var _hasExistingNatGateway  = !empty(existingNatGatewayResourceId ?? '')
-var _deployJumpbox          = deployJumpbox    ?? (_networkIsolation && !_hasExistingJumpbox)
-var _deployBastion          = deployBastion    ?? (_networkIsolation && _deployJumpbox && !_hasExistingBastion)
-var _deployNatGateway       = deployNatGateway ?? (_networkIsolation && _deployJumpbox && !_hasExistingNatGateway)
+
+// Legacy fallback (v1.x compatibility): when `deployVM` is non-null, it acts
+// as a global default for all three new flags so existing parameter files
+// (e.g. GPT-RAG's manifest-driven overlay) keep working unmodified. Explicit
+// new flags ALWAYS win — `deployVM` is purely a fallback layer. Slated for
+// removal in v3.0.0; emits a deployment-time warning when consumed.
+var _legacyDeployVMSet      = !(deployVM == null)
+#disable-next-line BCP318
+var _legacyDeployVMValue    = _legacyDeployVMSet ? deployVM! : false
+var _deployJumpbox          = deployJumpbox    ?? (_legacyDeployVMSet ? (_legacyDeployVMValue && _networkIsolation && !_hasExistingJumpbox)    : (_networkIsolation && !_hasExistingJumpbox))
+var _deployBastion          = deployBastion    ?? (_legacyDeployVMSet ? (_legacyDeployVMValue && _networkIsolation && _deployJumpbox && !_hasExistingBastion)    : (_networkIsolation && _deployJumpbox && !_hasExistingBastion))
+var _deployNatGateway       = deployNatGateway ?? (_legacyDeployVMSet ? (_legacyDeployVMValue && _networkIsolation && _deployJumpbox && !_hasExistingNatGateway) : (_networkIsolation && _deployJumpbox && !_hasExistingNatGateway))
+
+// Effective NAT Gateway ID — when we deploy our own NAT GW, use that. When
+// the operator BYO'd one, use theirs. Otherwise empty (subnet leaves
+// natGateway unset). Wired into `baseSubnets[jumpbox].natGatewayResourceId`
+// so both code paths (greenfield + useExistingVNet) attach the subnet
+// to the NAT GW.
+#disable-next-line BCP318
+var _effectiveNatGatewayId  = _deployNatGateway ? natGateway.id : (_hasExistingNatGateway ? existingNatGatewayResourceId! : '')
 
 // AMPLS (Azure Monitor Private Link Scope) and the related monitor/opinsights/automation
 // private DNS zones + private endpoint are only deployed when network isolation is on AND
@@ -971,7 +991,7 @@ var baseSubnets = [
       {
         name: jumpboxSubnetName
         addressPrefix: jumpboxSubnetPrefix 
-        natGatewayResourceId: natGateway.id
+        natGatewayResourceId: _effectiveNatGatewayId
         routeTableResourceId: routeTable.id
         delegation: ''
         serviceEndpoints : []
