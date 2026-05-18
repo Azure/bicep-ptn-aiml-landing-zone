@@ -87,6 +87,13 @@ param appConfigLabel string = 'ai-lz'
 @description('Enable network isolation for the deployment. This will restrict public access to resources and require private endpoints where applicable.')
 param networkIsolation bool = false
 
+@description('Gap 8 — Deployment topology preset. Required to surface deployment intent explicitly. Allowed values: `standalone` (default — self-contained spoke, own firewall/bastion/NAT GW; suitable for sandbox or single-team subscriptions) or `ailz-integrated` (spoke designed to plug into an Azure Landing Zone-managed hub; consumer is expected to provide `hubIntegrationHubVnetResourceId`, `hubIntegrationEgressNextHopIp` and/or `hubIntegrationExistingRouteTableResourceId`, BYO Private DNS overrides, and optionally `existingLogAnalyticsWorkspaceResourceId` for centralized observability). The value is captured as a `deploymentMode` tag on the resource group so platform teams can audit deployment posture. The preset does NOT automatically override explicit operator flags; it primarily documents intent and powers the pre-flight script (Gap 9, follow-up release).')
+@allowed([
+  'standalone'
+  'ailz-integrated'
+])
+param deploymentMode string = 'standalone'
+
 @description('Optional. When non-empty, opens each services public surface restricted to these CIDRs via native `ipRules` / `networkAcls.ipRules`. Empty (default) means no public allow-list. Applied to Storage, Key Vault, Cosmos DB, AI Search, Container Registry, and the AI Foundry / Cognitive Services accounts. App Configuration and Application Insights do not expose native ipRules and ignore this parameter (documented in docs/v2-migration.md). When `networkIsolation=true` AND `allowedIpRanges` is non-empty, services are switched to `publicNetworkAccess=Enabled` so the IP rules can take effect (defense-in-depth alongside private endpoints).')
 param allowedIpRanges string[] = []
 
@@ -647,7 +654,8 @@ param storageAccountContainersList array
 
 var _manifest = loadJsonContent('./manifest.json')
 var _azdTags = { 'azd-env-name': environmentName }
-var _tags = union(_azdTags, deploymentTags)
+var _modeTags = { deploymentMode: deploymentMode, 'ai-lz-version': 'v2.0.0' }
+var _tags = union(_azdTags, _modeTags, deploymentTags)
 
 // Derive the list of additional Git repositories to clone onto the jumpbox
 // directly from `manifest.json#components`. Consumers that use this landing
