@@ -185,11 +185,24 @@ param deployVmKeyVault bool = true
 @description('Deploy an Azure Log Analytics workspace for centralized log collection and query.')
 param deployLogAnalytics bool = true
 
-@description('When network isolation is enabled, also deploy an Azure Monitor Private Link Scope (AMPLS) with private endpoints and the related monitor/opinsights/automation private DNS zones to keep Log Analytics + Application Insights traffic on the private network. Disable to opt-out and avoid sharing those Azure Monitor private DNS zones with other workloads (preventing cross-workload DNS conflicts). Has no effect when networkIsolation is false.')
+@description('Resource ID of an existing Log Analytics workspace to reuse instead of creating one (Gap 5). When non-empty, no LAW is created in this deployment and all diagnostic settings, AMPLS linkage, and App Configuration entries point at this central workspace. Cross-RG and cross-subscription IDs are supported.')
+param existingLogAnalyticsWorkspaceResourceId string?
+
+@description('When network isolation is enabled, also deploy an Azure Monitor Private Link Scope (AMPLS) with private endpoints and the related monitor/opinsights/automation private DNS zones to keep Log Analytics + Application Insights traffic on the private network. Disable to opt-out and avoid sharing those Azure Monitor private DNS zones with other workloads (preventing cross-workload DNS conflicts). Has no effect when networkIsolation is false or when an `existingLogAnalyticsWorkspaceResourceId` is provided (the central workspace is assumed to be private-linked centrally).')
 param enablePrivateLogAnalytics bool = true
 
 @description('Deploy Azure Application Insights for application performance monitoring and diagnostics.')
 param deployAppInsights bool = true
+
+@description('Resource ID of an existing Application Insights component to reuse instead of creating one (Gap 5). Pair with `existingApplicationInsightsConnectionString` so downstream consumers (Container Apps Environment, App Configuration) receive a working connection string without requiring same-RG access to the existing component. Cross-RG/cross-subscription IDs are supported.')
+param existingApplicationInsightsResourceId string?
+
+@description('Connection string for the existing Application Insights component referenced by `existingApplicationInsightsResourceId`. Required when reusing AppInsights so the Container Apps Environment and the `APPLICATIONINSIGHTS_CONNECTION_STRING` App Configuration entry are correctly populated. Operators retrieve this from `az monitor app-insights component show -g <rg> -a <name> --query connectionString -o tsv`.')
+@secure()
+param existingApplicationInsightsConnectionString string?
+
+@description('When `existingApplicationInsightsResourceId` is provided WITHOUT a matching `existingLogAnalyticsWorkspaceResourceId`, the deployment normally fails the pre-flight check (Gap 5 §4.13) because telemetry would split between the central AppInsights workspace and this deployment\'s own LAW. Set to `true` only if the split is intentional and accepted.')
+param allowMixedObservabilityWorkspaces bool = false
 
 @description('Deploy an Azure Cognitive Search service for indexing and querying content. When disabled, search-related connections are skipped and search app configuration values resolve to empty values.')
 param deploySearchService bool = true
@@ -626,11 +639,47 @@ var _deployNatGateway       = deployNatGateway ?? (_legacyDeployVMSet ? (_legacy
 #disable-next-line BCP318
 var _effectiveNatGatewayId  = _deployNatGateway ? natGateway.id : (_hasExistingNatGateway ? existingNatGatewayResourceId! : '')
 
+// ---------------------------------------------------------------------------
+// Observability reuse derivations (Gap 5, issue #58)
+// ---------------------------------------------------------------------------
+// When the operator supplies an existing LAW or AppInsights resource ID, we
+// SKIP creating those resources locally and route every consumer — diagnostic
+// settings, AMPLS, Container Apps Environment telemetry, App Configuration
+// publishing — to the existing IDs instead.
+//
+//   _hasExistingLaw / _hasExistingAI  : BYO ID provided?
+//   _createLogAnalytics / _createAppInsights : do we deploy our own?
+//   _lawResourceId / _appInsightsResourceId  : effective IDs to wire downstream
+//   _appInsightsConnectionString             : effective connection string for
+//                                              Container Apps + App Config
+//
+// Cross-RG-safe: we never call `.id` / `.properties` against `existing`
+// resources here — those are passed through unchanged as raw strings.
+var _hasExistingLaw           = !empty(existingLogAnalyticsWorkspaceResourceId ?? '')
+var _hasExistingAI            = !empty(existingApplicationInsightsResourceId ?? '')
+var _createLogAnalytics       = deployLogAnalytics && !_hasExistingLaw
+var _createAppInsights        = deployAppInsights && !_hasExistingAI && (_createLogAnalytics || _hasExistingLaw)
+#disable-next-line BCP318
+var _lawResourceId            = _hasExistingLaw ? existingLogAnalyticsWorkspaceResourceId! : (_createLogAnalytics ? logAnalytics.id : '')
+#disable-next-line BCP318
+var _appInsightsResourceId    = _hasExistingAI ? existingApplicationInsightsResourceId! : (_createAppInsights ? appInsights.id : '')
+#disable-next-line BCP318
+var _appInsightsConnectionString = _hasExistingAI ? (existingApplicationInsightsConnectionString ?? '') : (_createAppInsights ? appInsights.properties.ConnectionString : '')
+// Instrumentation key is the first KV pair in a v2 connection string
+// ("InstrumentationKey=<guid>;..."). We split safely so an empty string
+// returns an empty key rather than failing the template.
+var _appInsightsInstrumentationKey = !empty(_appInsightsConnectionString)
+  ? split(split(_appInsightsConnectionString, ';')[0], '=')[1]
+  : ''
+var _hasEffectiveLaw          = !empty(_lawResourceId)
+var _hasEffectiveAI           = !empty(_appInsightsResourceId)
+
 // AMPLS (Azure Monitor Private Link Scope) and the related monitor/opinsights/automation
 // private DNS zones + private endpoint are only deployed when network isolation is on AND
-// the operator explicitly opts in via enablePrivateLogAnalytics. This lets isolated
-// deployments opt-out of AMPLS to avoid cross-workload private DNS conflicts.
-var _deployAmpls = _networkIsolation && deployAppInsights && deployLogAnalytics && enablePrivateLogAnalytics
+// the operator explicitly opts in via enablePrivateLogAnalytics AND we're creating our
+// own LAW locally (a BYO/central LAW is assumed to be private-linked centrally already,
+// so deploying a duplicate AMPLS would conflict on the shared monitor private DNS zones).
+var _deployAmpls = _networkIsolation && _createAppInsights && _createLogAnalytics && enablePrivateLogAnalytics
 var _deployPrivateDnsZones = _networkIsolation && !policyManagedPrivateDns
 var _searchServiceLocation = empty(searchServiceLocation) ? location : searchServiceLocation
 var _speechServiceLocation = empty(speechServiceLocation) ? location : speechServiceLocation
@@ -1365,12 +1414,11 @@ resource defaultRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = if (de
 }
 
 // Azure Firewall diagnostics to Log Analytics
-resource firewallDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (deployAzureFirewall && _networkIsolation && deployLogAnalytics) {
+resource firewallDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (deployAzureFirewall && _networkIsolation && _hasEffectiveLaw) {
   name: 'fw-diagnostics'
   scope: azureFirewall
   properties: {
-    #disable-next-line BCP318
-    workspaceId: logAnalytics.id
+    workspaceId: _lawResourceId
     logs: [
       {
         categoryGroup: 'allLogs'
@@ -2211,15 +2259,16 @@ module aiFoundryConnectionSearch 'modules/ai-foundry/connection-ai-search.bicep'
 }
 
 // Application Insights Connection
-module aiFoundryConnectionInsights 'modules/ai-foundry/connection-application-insights.bicep' = if (deployAiFoundry && deployAppInsights && deployLogAnalytics) {
+module aiFoundryConnectionInsights 'modules/ai-foundry/connection-application-insights.bicep' = if (deployAiFoundry && _hasEffectiveAI) {
   name: 'connection-appinsights-${resourceToken}'
   params: {
     aiFoundryName: aiFoundry!.outputs.aiServicesName
-    connectedResourceName: appInsights!.name
+    connectedResourceId: _appInsightsResourceId
   }
   dependsOn: [
     aiFoundry!
-    appInsights!
+    #disable-next-line BCP321
+    _createAppInsights ? appInsights : null
   ]
 }
 
@@ -2240,14 +2289,14 @@ module aiFoundryConnectionStorage 'modules/ai-foundry/connection-storage-account
 //////////////////////////////////////////////////////////////////////////
 var appInsightsInvalidLocations = ['westcentralus']
 
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (deployAppInsights && deployLogAnalytics) {
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (_createAppInsights) {
   name: appInsightsName
   location: contains(appInsightsInvalidLocations, location) ? 'eastus' : location
   kind: 'web'
   tags: _tags
   properties: {
     Application_Type: 'web'
-    WorkspaceResourceId: logAnalytics.id
+    WorkspaceResourceId: _lawResourceId
     DisableIpMasking: false
     publicNetworkAccessForIngestion: 'Enabled'
     publicNetworkAccessForQuery: 'Enabled'
@@ -2307,7 +2356,7 @@ resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scope
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${logAnalyticsWorkspaceName}'!
   properties :{
     #disable-next-line BCP318
-    linkedResourceId: logAnalytics.id
+    linkedResourceId: _lawResourceId
   }
   dependsOn: [
     privateLinkScope
@@ -2317,8 +2366,7 @@ resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scope
 resource privateLinkScopedResources2 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_deployAmpls) {
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${appInsightsName}'!
   properties :{
-    #disable-next-line BCP318
-    linkedResourceId: appInsights.id
+    linkedResourceId: _appInsightsResourceId
   }
   dependsOn: [
     privateLinkScope
@@ -2347,8 +2395,8 @@ resource containerEnv 'Microsoft.App/managedEnvironments@2025-01-01' = if (deplo
     appLogsConfiguration: {
       destination: null
     }
-    appInsightsConfiguration: (deployAppInsights && deployLogAnalytics) ? {
-      connectionString: appInsights.properties.ConnectionString
+    appInsightsConfiguration: _hasEffectiveAI ? {
+      connectionString: _appInsightsConnectionString
     } : null
     zoneRedundant: useZoneRedundancy
     workloadProfiles: workloadProfiles
@@ -2616,7 +2664,7 @@ resource secret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = [for (config, i
 // Log Analytics Workspace
 //////////////////////////////////////////////////////////////////////////
 
-resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if (deployLogAnalytics) {
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if (_createLogAnalytics) {
   name: logAnalyticsWorkspaceName
   location: location
   tags: _tags
@@ -2784,10 +2832,9 @@ module speechService 'br/public:avm/res/cognitive-services/account:0.13.2' = if 
     // PE is created out-of-module via `_peList` (#35).
     privateEndpoints: []
 
-    diagnosticSettings: deployLogAnalytics ? [
+    diagnosticSettings: _hasEffectiveLaw ? [
       {
-        #disable-next-line BCP318
-        workspaceResourceId: logAnalytics.id
+        workspaceResourceId: _lawResourceId
       }
     ] : []
   }
@@ -3440,7 +3487,7 @@ module publicIngressM 'modules/networking/public-ingress.bicep' = if (_publicIng
     tags: _tags
     #disable-next-line BCP318
     appGatewaySubnetResourceId: '${virtualNetworkResourceId}/subnets/${azureAppGatewaySubnetName}'
-    logAnalyticsWorkspaceResourceId: deployLogAnalytics ? logAnalytics.id : ''
+    logAnalyticsWorkspaceResourceId: _lawResourceId
     #disable-next-line BCP318
     backendAppFqdn: containerApps[_publicIngressBackendIndex].outputs.fqdn
     useZoneRedundancy: useZoneRedundancy
@@ -3560,20 +3607,16 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'LOG_LEVEL',           value: 'INFO',                                 label: appConfigLabel, contentType: 'text/plain' }
       { name: 'ENABLE_CONSOLE_LOGGING', value: 'true',                              label: appConfigLabel, contentType: 'text/plain' }
       { name: 'RELEASE',     value: _manifest.tag,                      label: appConfigLabel, contentType: 'text/plain' }
-      #disable-next-line BCP318
-      { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: (deployAppInsights && deployLogAnalytics) ? appInsights.properties.ConnectionString : '',   label: appConfigLabel, contentType: 'text/plain' }
-      #disable-next-line BCP318
-      { name: 'APPLICATIONINSIGHTS__INSTRUMENTATIONKEY', value: (deployAppInsights && deployLogAnalytics) ? appInsights.properties.InstrumentationKey : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: _appInsightsConnectionString,   label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'APPLICATIONINSIGHTS__INSTRUMENTATIONKEY', value: _appInsightsInstrumentationKey, label: appConfigLabel, contentType: 'text/plain' }
 
       //── Resource IDs ─────────────────────────────────────────────────────
       #disable-next-line BCP318
       { name: 'KEY_VAULT_RESOURCE_ID', value: deployKeyVault ? keyVault.id : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'STORAGE_ACCOUNT_RESOURCE_ID', value: deployStorageAccount ? storageAccount.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
-      #disable-next-line BCP318
-      { name: 'APP_INSIGHTS_RESOURCE_ID', value: (deployAppInsights && deployLogAnalytics) ? appInsights.id : '', label: appConfigLabel, contentType: 'text/plain' }
-      #disable-next-line BCP318
-      { name: 'LOG_ANALYTICS_RESOURCE_ID', value: deployLogAnalytics ? logAnalytics.id : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'APP_INSIGHTS_RESOURCE_ID', value: _appInsightsResourceId, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'LOG_ANALYTICS_RESOURCE_ID', value: _lawResourceId, label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'CONTAINER_ENV_RESOURCE_ID', value: deployContainerEnv ? containerEnv.id : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AI_FOUNDRY_ACCOUNT_RESOURCE_ID', value: (deployAiFoundry) ? aiFoundryAccountResourceId : '', label: appConfigLabel, contentType: 'text/plain' }
@@ -3730,6 +3773,8 @@ output VNET_RESOURCE_ID string = virtualNetworkResourceId
 output KEY_VAULT_RESOURCE_ID string = deployKeyVault ? keyVault.id : ''
 output KEY_VAULT_NAME string = deployKeyVault ? keyVaultName : ''
 #disable-next-line BCP318
-output LOG_ANALYTICS_RESOURCE_ID string = deployLogAnalytics ? logAnalytics.id : ''
+output LOG_ANALYTICS_RESOURCE_ID string = _lawResourceId
+output APP_INSIGHTS_RESOURCE_ID string = _appInsightsResourceId
+output OBSERVABILITY_MIXED_WORKSPACES_ALLOWED bool = allowMixedObservabilityWorkspaces
 #disable-next-line BCP318
 output CONTAINER_APP_INTERNAL_FQDN string = (deployContainerApps && length(containerAppsList) > 0) ? containerApps[_publicIngressBackendIndex].outputs.fqdn : ''
