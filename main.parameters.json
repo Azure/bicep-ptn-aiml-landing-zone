@@ -14,6 +14,7 @@
     "principalId":                         { "value": "${AZURE_PRINCIPAL_ID}" },
 
     "networkIsolation":                    { "value": "${NETWORK_ISOLATION}" },
+    "allowedIpRanges":                     { "value": [] },
     "privateEndpointLocation":             { "value": "${AZURE_PE_LOCATION}" },
     "privateEndpointResourceGroupName":    { "value": "${AZURE_PE_RESOURCE_GROUP_NAME}" },
     "useUAI":                              { "value": "${USE_UAI}" },

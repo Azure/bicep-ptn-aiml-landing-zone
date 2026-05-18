@@ -87,6 +87,9 @@ param appConfigLabel string = 'ai-lz'
 @description('Enable network isolation for the deployment. This will restrict public access to resources and require private endpoints where applicable.')
 param networkIsolation bool = false
 
+@description('Optional. When non-empty, opens each services public surface restricted to these CIDRs via native `ipRules` / `networkAcls.ipRules`. Empty (default) means no public allow-list. Applied to Storage, Key Vault, Cosmos DB, AI Search, Container Registry, and the AI Foundry / Cognitive Services accounts. App Configuration and Application Insights do not expose native ipRules and ignore this parameter (documented in docs/v2-migration.md). When `networkIsolation=true` AND `allowedIpRanges` is non-empty, services are switched to `publicNetworkAccess=Enabled` so the IP rules can take effect (defense-in-depth alongside private endpoints).')
+param allowedIpRanges string[] = []
+
 @description('''When set to true, Private DNS Zones and DNS zone groups will NOT be created by this module.
 Use this option in environments where Azure Policy automatically manages Private DNS Zone linking for private endpoints
 (e.g., CAF Enterprise-Scale Platform Landing Zone). Creating DNS zones in those environments causes conflicts with
@@ -526,6 +529,35 @@ var _extraRepoTags  = [for c in _manifestComponents: c.?tag ?? 'main']
 var _extraRepoNames = [for c in _manifestComponents: c.?name ?? replace(last(split(c.repo, '/')), '.git', '')]
 
 var _networkIsolation = empty(string(networkIsolation)) ? false : bool(networkIsolation)
+
+// -----------------------------------------------------------------------------
+// Public network access derivation (Gap 1, issue #58)
+// -----------------------------------------------------------------------------
+// `publicNetworkAccess` for every workload service is now derived from two
+// flat inputs rather than coupled directly to `_networkIsolation`:
+//
+//   _applyIpRules:        true when the operator provided one or more CIDRs.
+//   _publicNetworkAccess: 'Enabled' when the topology is public OR an
+//                         IP allow-list is in effect; otherwise 'Disabled'.
+//
+// Two parameters cover all four scenarios documented in issue #58:
+//
+//   networkIsolation=true,  allowedIpRanges=[]      -> Private only
+//   networkIsolation=true,  allowedIpRanges=[CIDR]  -> Private + public allow-list
+//   networkIsolation=false, allowedIpRanges=[]      -> Public
+//   networkIsolation=false, allowedIpRanges=[CIDR]  -> Public restricted to listed IPs
+//
+// Per-service rule arrays are pre-shaped because each Azure RP exposes a
+// slightly different schema (Storage/ACR use `{value, action}`, KV/Search/
+// Cognitive use `{value}`, Cosmos accepts a flat string[]).
+var _applyIpRules        = !empty(allowedIpRanges)
+var _publicNetworkAccess = (!_networkIsolation || _applyIpRules) ? 'Enabled' : 'Disabled'
+var _storageIpRules      = [for ip in allowedIpRanges: { value: ip, action: 'Allow' }]
+var _acrIpRules          = [for ip in allowedIpRanges: { value: ip, action: 'Allow' }]
+var _keyVaultIpRules     = [for ip in allowedIpRanges: { value: ip }]
+var _searchIpRules       = [for ip in allowedIpRanges: { value: ip }]
+var _cognitiveIpRules    = [for ip in allowedIpRanges: { value: ip }]
+var _cosmosIpRules       = allowedIpRanges
 // AMPLS (Azure Monitor Private Link Scope) and the related monitor/opinsights/automation
 // private DNS zones + private endpoint are only deployed when network isolation is on AND
 // the operator explicitly opts in via enablePrivateLogAnalytics. This lets isolated
@@ -1889,6 +1921,7 @@ module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (
     tags: _tags
     skuName: aiFoundryStorageSku
     disablePublicNetworkAccess: _networkIsolation
+    allowedIpRanges: allowedIpRanges
     privateEndpointSubnetResourceId: _networkIsolation ? _peSubnetId : ''
     blobPrivateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneBlobId : ''
   }
@@ -2283,9 +2316,13 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-pr
     userAssignedIdentities: _useUAI ? { '${containerRegistryUAI.id}': {} } : null
   }
   properties: {
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: _publicNetworkAccess
     zoneRedundancy: useZoneRedundancy ? 'Enabled' : 'Disabled'
     dataEndpointEnabled: _networkIsolation
+    networkRuleSet: _applyIpRules ? {
+      defaultAction: 'Deny'
+      ipRules: _acrIpRules
+    } : null
     policies: {
       exportPolicy: {
         status: 'enabled'
@@ -2435,7 +2472,8 @@ module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' =
     enableAnalyticalStorage: enableCosmosAnalyticalStorage
     enableFreeTier: false
     networkRestrictions: {
-      publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+      publicNetworkAccess: _publicNetworkAccess
+      ipRules: _cosmosIpRules
       virtualNetworkRules: _networkIsolation ? [
         {
           subnetResourceId: _peSubnetId
@@ -2486,7 +2524,12 @@ resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' = if (deployKeyVault) {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 90
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: _publicNetworkAccess
+    networkAcls: _applyIpRules ? {
+      bypass: 'AzureServices'
+      defaultAction: 'Deny'
+      ipRules: _keyVaultIpRules
+    } : null
   }
 }
 
@@ -2537,7 +2580,11 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
   params: {
     name: searchServiceName
     location: _searchServiceLocation
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: _publicNetworkAccess
+    networkRuleSet: _applyIpRules ? {
+      bypass: 'AzureServices'
+      ipRules: _searchIpRules
+    } : null
     tags: _tags
 
     // SKU & capacity
@@ -2588,7 +2635,11 @@ module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' =
   params: {
     name: aiFoundrySearchServiceName
     location: _searchServiceLocation
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: _publicNetworkAccess
+    networkRuleSet: _applyIpRules ? {
+      bypass: 'AzureServices'
+      ipRules: _searchIpRules
+    } : null
     tags: _tags
 
     // SKU & capacity (aligned with application search defaults; override for heavier workloads)
@@ -2647,8 +2698,12 @@ module speechService 'br/public:avm/res/cognitive-services/account:0.13.2' = if 
     // Pinning it to the account name keeps the FQDN deterministic.
     customSubDomainName: speechServiceName
 
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
-    networkAcls: {
+    publicNetworkAccess: _publicNetworkAccess
+    networkAcls: _applyIpRules ? {
+      defaultAction: 'Deny'
+      bypass: 'AzureServices'
+      ipRules: _cognitiveIpRules
+    } : {
       defaultAction: 'Allow'
       bypass: 'AzureServices'
     }
@@ -2679,7 +2734,7 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = if (d
   params: {
     name: storageAccountName
     location: location
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: _publicNetworkAccess
     skuName: 'Standard_LRS'
     kind: 'StorageV2'
     allowBlobPublicAccess: false
@@ -2688,7 +2743,8 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = if (d
     networkAcls: {
       bypass: 'AzureServices'
       virtualNetworkRules: []
-      defaultAction: 'Allow'
+      ipRules: _storageIpRules
+      defaultAction: _applyIpRules ? 'Deny' : 'Allow'
     }
     tags: _tags
     blobServices: {
@@ -3265,7 +3321,11 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2024-05-01' =
       authenticationMode: 'Pass-through'
       privateLinkDelegation: _networkIsolation ? 'Enabled' : 'Disabled'
     }
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    // Note: App Configuration does not expose `networkAcls.ipRules` like the
+    // other workload services, so `allowedIpRanges` is intentionally ignored
+    // here. The public surface still tracks `_publicNetworkAccess` so the
+    // service follows the same Enabled/Disabled logic as the rest of the stack.
+    publicNetworkAccess: _publicNetworkAccess
     disableLocalAuth: false
   }
 }
