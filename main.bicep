@@ -98,6 +98,68 @@ When false (default), the module creates and manages all Private DNS Zones and l
 Requires networkIsolation to be true to have any effect.''')
 param policyManagedPrivateDns bool = false
 
+// ----------------------------------------------------------------------
+// Gap 2 — BYO Private DNS Zones (granular per-namespace overrides)
+// ----------------------------------------------------------------------
+// For each Private DNS zone the landing zone normally creates, an
+// `existingPrivateDnsZone<Namespace>ResourceId` param accepts a full
+// resource ID. When provided:
+//   * The zone is NOT created by this deployment.
+//   * The zone is NOT linked from the spoke VNet (assumed pre-linked via
+//     the hub or another mechanism; cross-RG linking is an operator task
+//     in v2.0.0 — see docs/v2-migration.md).
+//   * The provided resource ID is used directly in every Private
+//     Endpoint DNS Zone Group that consumes the zone, so PE→FQDN
+//     resolution still works against the shared zone.
+// `policyManagedPrivateDns=true` continues to win — when it is set,
+// neither creation nor linking happens for any zone regardless of these
+// BYO params (the pre-flight script flags this as a misconfiguration).
+
+@description('Gap 2 — Resource ID of an existing `privatelink.cognitiveservices.azure.com` Private DNS Zone to reuse (Azure AI Foundry / Cognitive Services PE DNS). When set, the local zone is not created. Pre-link the zone to the spoke VNet (or rely on hub→spoke peering + hub-side link) — automatic spoke linking is not performed.')
+param existingPrivateDnsZoneCogSvcsResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.openai.azure.com` Private DNS Zone to reuse (Azure OpenAI PE DNS).')
+param existingPrivateDnsZoneOpenAiResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.services.ai.azure.com` Private DNS Zone to reuse (AI Services / Foundry PE DNS).')
+param existingPrivateDnsZoneAiServicesResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.search.windows.net` Private DNS Zone to reuse (Azure AI Search PE DNS).')
+param existingPrivateDnsZoneSearchResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.documents.azure.com` Private DNS Zone to reuse (Azure Cosmos DB PE DNS).')
+param existingPrivateDnsZoneCosmosResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.blob.<storage suffix>` Private DNS Zone to reuse (Azure Storage Blob PE DNS).')
+param existingPrivateDnsZoneBlobResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.vaultcore.azure.net` Private DNS Zone to reuse (Azure Key Vault PE DNS).')
+param existingPrivateDnsZoneKeyVaultResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.azconfig.io` Private DNS Zone to reuse (Azure App Configuration PE DNS).')
+param existingPrivateDnsZoneAppConfigResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.<region>.azurecontainerapps.io` Private DNS Zone to reuse (Azure Container Apps PE DNS). Region-specific zone — must match the deployment region.')
+param existingPrivateDnsZoneContainerAppsResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.azurecr.io` Private DNS Zone to reuse (Azure Container Registry PE DNS).')
+param existingPrivateDnsZoneAcrResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.monitor.azure.com` Private DNS Zone to reuse (Azure Monitor Private Link Scope PE DNS).')
+param existingPrivateDnsZoneAzureMonitorResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.oms.opinsights.azure.com` Private DNS Zone to reuse (OMS Log Analytics PE DNS).')
+param existingPrivateDnsZoneOmsOpsInsightsResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.ods.opinsights.azure.com` Private DNS Zone to reuse (ODS Log Analytics ingestion PE DNS).')
+param existingPrivateDnsZoneOdsOpsInsightsResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.agentsvc.azure.automation.net` Private DNS Zone to reuse (Azure Monitor agent service PE DNS).')
+param existingPrivateDnsZoneAzureAutomationResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.applicationinsights.io` Private DNS Zone to reuse. Only consumed when `enablePrivateLogAnalytics=true` and AMPLS is created locally; otherwise this BYO ID is ignored.')
+param existingPrivateDnsZoneAppInsightsResourceId string?
+
 @description('The Azure region where private endpoints will be created. Defaults to the main deployment location. Use this when your VNet is in a different region than the resources.')
 param privateEndpointLocation string = ''
 
@@ -1835,33 +1897,48 @@ resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (_de
 var _dnsZonesTargetRg = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
 var _dnsZonesLinkSuffix = useExistingVNet ? '-byon' : ''
 
+// Gap 2 — Per-zone BYO flags (true ⇒ skip local creation for that zone).
+var _byoZoneCogSvcs        = !empty(existingPrivateDnsZoneCogSvcsResourceId ?? '')
+var _byoZoneOpenAi         = !empty(existingPrivateDnsZoneOpenAiResourceId ?? '')
+var _byoZoneAiServices     = !empty(existingPrivateDnsZoneAiServicesResourceId ?? '')
+var _byoZoneSearch         = !empty(existingPrivateDnsZoneSearchResourceId ?? '')
+var _byoZoneCosmos         = !empty(existingPrivateDnsZoneCosmosResourceId ?? '')
+var _byoZoneBlob           = !empty(existingPrivateDnsZoneBlobResourceId ?? '')
+var _byoZoneKeyVault       = !empty(existingPrivateDnsZoneKeyVaultResourceId ?? '')
+var _byoZoneAppConfig      = !empty(existingPrivateDnsZoneAppConfigResourceId ?? '')
+var _byoZoneContainerApps  = !empty(existingPrivateDnsZoneContainerAppsResourceId ?? '')
+var _byoZoneAcr            = !empty(existingPrivateDnsZoneAcrResourceId ?? '')
+var _byoZoneAppInsights    = !empty(existingPrivateDnsZoneAppInsightsResourceId ?? '')
+var _byoZoneAzureMonitor   = !empty(existingPrivateDnsZoneAzureMonitorResourceId ?? '')
+var _byoZoneOmsOpInsights  = !empty(existingPrivateDnsZoneOmsOpsInsightsResourceId ?? '')
+var _byoZoneOdsOpInsights  = !empty(existingPrivateDnsZoneOdsOpsInsightsResourceId ?? '')
+var _byoZoneAzureAutomation= !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '')
+
 var _dnsZonesList = _deployPrivateDnsZones ? concat(
-  [
-    { dnsName: 'privatelink.cognitiveservices.azure.com', virtualNetworkLinkName: '${vnetName}-cogsvcs-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.openai.azure.com',            virtualNetworkLinkName: '${vnetName}-openai-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.services.ai.azure.com',       virtualNetworkLinkName: '${vnetName}-aiservices-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.search.windows.net',          virtualNetworkLinkName: '${vnetName}-search-std-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.documents.azure.com',         virtualNetworkLinkName: '${vnetName}-cosmos-std-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${vnetName}-blob-std-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${vnetName}-kv-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${vnetName}-appcfg-link${_dnsZonesLinkSuffix}' }
-  ],
-  deployContainerApps ? [
+  _byoZoneCogSvcs       ? [] : [ { dnsName: 'privatelink.cognitiveservices.azure.com', virtualNetworkLinkName: '${vnetName}-cogsvcs-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneOpenAi        ? [] : [ { dnsName: 'privatelink.openai.azure.com',            virtualNetworkLinkName: '${vnetName}-openai-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneAiServices    ? [] : [ { dnsName: 'privatelink.services.ai.azure.com',       virtualNetworkLinkName: '${vnetName}-aiservices-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneSearch        ? [] : [ { dnsName: 'privatelink.search.windows.net',          virtualNetworkLinkName: '${vnetName}-search-std-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneCosmos        ? [] : [ { dnsName: 'privatelink.documents.azure.com',         virtualNetworkLinkName: '${vnetName}-cosmos-std-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneBlob          ? [] : [ { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${vnetName}-blob-std-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneKeyVault      ? [] : [ { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${vnetName}-kv-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneAppConfig     ? [] : [ { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${vnetName}-appcfg-link${_dnsZonesLinkSuffix}' } ],
+  (deployContainerApps && !_byoZoneContainerApps) ? [
     { dnsName: 'privatelink.${location}.azurecontainerapps.io', virtualNetworkLinkName: '${vnetName}-containerapps-link${_dnsZonesLinkSuffix}' }
   ] : [],
-  deployContainerRegistry ? [
+  (deployContainerRegistry && !_byoZoneAcr) ? [
     { dnsName: 'privatelink.${acrDnsSuffix}',                         virtualNetworkLinkName: '${vnetName}-containerregistry-link${_dnsZonesLinkSuffix}' }
   ] : [],
-  _deployAmpls ? [
-    { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.monitor.azure.com',                       virtualNetworkLinkName: '${vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.oms.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.ods.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.agentsvc.azure.automation.net',           virtualNetworkLinkName: '${vnetName}-azure-automation-link${_dnsZonesLinkSuffix}' }
-  ] : []
+  _deployAmpls ? concat(
+    _byoZoneAppInsights     ? [] : [ { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneAzureMonitor    ? [] : [ { dnsName: 'privatelink.monitor.azure.com',           virtualNetworkLinkName: '${vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneOmsOpInsights   ? [] : [ { dnsName: 'privatelink.oms.opinsights.azure.com',    virtualNetworkLinkName: '${vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneOdsOpInsights   ? [] : [ { dnsName: 'privatelink.ods.opinsights.azure.com',    virtualNetworkLinkName: '${vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneAzureAutomation ? [] : [ { dnsName: 'privatelink.agentsvc.azure.automation.net', virtualNetworkLinkName: '${vnetName}-azure-automation-link${_dnsZonesLinkSuffix}' } ]
+  ) : []
 ) : []
 
-module privateDnsZones 'modules/networking/private-dns-zones.bicep' = if (_deployPrivateDnsZones) {
+module privateDnsZones 'modules/networking/private-dns-zones.bicep' = if (_deployPrivateDnsZones && !empty(_dnsZonesList)) {
   name: 'dep-private-dns-zones'
   params: {
     zones: _dnsZonesList
@@ -2085,20 +2162,20 @@ module privateEndpoints 'modules/networking/private-endpoints.bicep' = if (_netw
 
 var _dnsZonesSubscriptionId = useExistingVNet && !sideBySideDeploy ? varExistingVnetSubscriptionId : subscription().subscriptionId
 var _dnsZonesResourceGroupName = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-var _dnsZoneCogSvcsId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.cognitiveservices.azure.com')
-var _dnsZoneOpenAiId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.openai.azure.com')
-var _dnsZoneAiServicesId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.services.ai.azure.com')
-var _dnsZoneSearchId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.search.windows.net')
-var _dnsZoneCosmosId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.documents.azure.com')
-var _dnsZoneBlobId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.blob.${environment().suffixes.storage}')
-var _dnsZoneKeyVaultId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')
-var _dnsZoneAppConfigId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.azconfig.io')
-var _dnsZoneContainerAppsId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.${location}.azurecontainerapps.io')
-var _dnsZoneAcrId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.${acrDnsSuffix}')
-var _dnsZoneAzureMonitorId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.monitor.azure.com')
-var _dnsZoneOmsOpsInsightsId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.oms.opinsights.azure.com')
-var _dnsZoneOdsOpsInsightsId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.ods.opinsights.azure.com')
-var _dnsZoneAzureAutomationId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.agentsvc.azure.automation.net')
+var _dnsZoneCogSvcsId         = !empty(existingPrivateDnsZoneCogSvcsResourceId ?? '')         ? existingPrivateDnsZoneCogSvcsResourceId!         : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.cognitiveservices.azure.com')
+var _dnsZoneOpenAiId          = !empty(existingPrivateDnsZoneOpenAiResourceId ?? '')          ? existingPrivateDnsZoneOpenAiResourceId!          : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.openai.azure.com')
+var _dnsZoneAiServicesId      = !empty(existingPrivateDnsZoneAiServicesResourceId ?? '')      ? existingPrivateDnsZoneAiServicesResourceId!      : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.services.ai.azure.com')
+var _dnsZoneSearchId          = !empty(existingPrivateDnsZoneSearchResourceId ?? '')          ? existingPrivateDnsZoneSearchResourceId!          : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.search.windows.net')
+var _dnsZoneCosmosId          = !empty(existingPrivateDnsZoneCosmosResourceId ?? '')          ? existingPrivateDnsZoneCosmosResourceId!          : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.documents.azure.com')
+var _dnsZoneBlobId            = !empty(existingPrivateDnsZoneBlobResourceId ?? '')            ? existingPrivateDnsZoneBlobResourceId!            : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.blob.${environment().suffixes.storage}')
+var _dnsZoneKeyVaultId        = !empty(existingPrivateDnsZoneKeyVaultResourceId ?? '')        ? existingPrivateDnsZoneKeyVaultResourceId!        : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')
+var _dnsZoneAppConfigId       = !empty(existingPrivateDnsZoneAppConfigResourceId ?? '')       ? existingPrivateDnsZoneAppConfigResourceId!       : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.azconfig.io')
+var _dnsZoneContainerAppsId   = !empty(existingPrivateDnsZoneContainerAppsResourceId ?? '')   ? existingPrivateDnsZoneContainerAppsResourceId!   : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.${location}.azurecontainerapps.io')
+var _dnsZoneAcrId             = !empty(existingPrivateDnsZoneAcrResourceId ?? '')             ? existingPrivateDnsZoneAcrResourceId!             : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.${acrDnsSuffix}')
+var _dnsZoneAzureMonitorId    = !empty(existingPrivateDnsZoneAzureMonitorResourceId ?? '')    ? existingPrivateDnsZoneAzureMonitorResourceId!    : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.monitor.azure.com')
+var _dnsZoneOmsOpsInsightsId  = !empty(existingPrivateDnsZoneOmsOpsInsightsResourceId ?? '')  ? existingPrivateDnsZoneOmsOpsInsightsResourceId!  : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.oms.opinsights.azure.com')
+var _dnsZoneOdsOpsInsightsId  = !empty(existingPrivateDnsZoneOdsOpsInsightsResourceId ?? '')  ? existingPrivateDnsZoneOdsOpsInsightsResourceId!  : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.ods.opinsights.azure.com')
+var _dnsZoneAzureAutomationId = !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '') ? existingPrivateDnsZoneAzureAutomationResourceId! : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.agentsvc.azure.automation.net')
 
 //AI Foundry Account User Managed Identity
 resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI) {
