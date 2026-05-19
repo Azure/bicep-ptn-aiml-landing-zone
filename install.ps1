@@ -33,7 +33,12 @@ Param (
   # Tags default to "main"; names default to the repo URL basename.
   [string] $ExtraRepoUrls  = '',
   [string] $ExtraRepoTags  = '',
-  [string] $ExtraRepoNames = ''
+  [string] $ExtraRepoNames = '',
+
+  # Optional: install Docker Desktop on the jumpbox.
+  # Defaults to 'false'. Set to 'true' to install Docker Desktop with WSL 2 backend.
+  # Note: Docker Desktop requires a paid Docker Subscription above ~250 employees / ~$10M revenue.
+  [string] $DeployDocker = 'false'
 )
 
 Start-Transcript -Path C:\WindowsAzure\Logs\CMFAI_CustomScriptExtension.txt -Append
@@ -368,27 +373,69 @@ try {
 
 
 # ------------------------------
-# Docker intentionally NOT installed on this jumpbox.
+# Docker Desktop installation (optional)
 #
-# Rationale (see issue #14 — ACR Task agent pool for NI image builds):
-#   - Windows Server's Moby engine cannot run privileged Linux containers required
-#     by BuildKit, so `docker buildx` against linux/amd64 images never worked here.
-#   - Docker Desktop is not supported on Windows Server and requires a paid Docker
-#     Subscription above ~250 employees / ~$10M revenue.
-#   - Image builds now run in the ACR Tasks agent pool deployed alongside ACR
-#     (Bicep param: deployAcrTaskAgentPool). See the ACR_TASK_AGENT_POOL azd output.
+# By default Docker is NOT installed on this jumpbox (see issue #14).
+# When $DeployDocker is 'true', Docker Desktop is installed with WSL 2
+# backend in silent/unattended mode.
 #
-# To build and push images from this jumpbox (or any client with ARM egress):
+# Note: Docker Desktop requires a paid Docker Subscription above
+# ~250 employees / ~$10M revenue.
+#
+# When Docker is not installed, image builds should use the ACR Tasks
+# agent pool deployed alongside ACR (Bicep param: deployAcrTaskAgentPool).
+# To build and push images:
 #   az acr build -r <acr> --agent-pool <ACR_TASK_AGENT_POOL> -t myapp:latest -f Dockerfile .
-#
 # To pause billing between builds:
 #   az acr agentpool update -r <acr> -n <ACR_TASK_AGENT_POOL> --count 0
 # ------------------------------
-Write-Host "`n==================== IMAGE BUILD GUIDANCE ====================" -ForegroundColor Cyan
-Write-Host "Docker is NOT installed on this jumpbox by design."
-Write-Host "Use ACR Tasks agent pool for image builds:"
-Write-Host "  az acr build -r <acr> --agent-pool <pool-name> -t myapp:latest -f Dockerfile ."
-Write-Host "==============================================================`n" -ForegroundColor Cyan
+if ($DeployDocker -eq 'true') {
+    Write-Host "`n--- Installing Docker Desktop (silent, WSL 2 backend) ---"
+    try {
+        $installerUrl  = 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe'
+        $installerPath = 'C:\temp\DockerDesktopInstaller.exe'
+        New-Item -ItemType Directory -Path 'C:\temp' -Force | Out-Null
+
+        Write-Host "Downloading Docker Desktop installer..."
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
+        if (-not (Test-Path $installerPath)) {
+            throw "Docker Desktop installer download failed"
+        }
+        $size = [math]::Round((Get-Item $installerPath).Length / 1MB, 1)
+        Write-Host "Downloaded: $size MB"
+
+        # Run the installer with flags:
+        #   --quiet           : suppress installer GUI
+        #   --accept-license  : pre-accept Docker Subscription Service Agreement
+        #   --backend=wsl-2   : use WSL 2 backend
+        #   --always-run-service : start com.docker.service automatically
+        Write-Host "Running installer (this may take a few minutes)..."
+        Start-Process $installerPath -Wait -ArgumentList 'install', '--quiet', '--accept-license', '--backend=wsl-2', '--always-run-service'
+        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
+            throw "Docker Desktop installer failed (exit code $LASTEXITCODE)"
+        }
+
+        # Clean up installer
+        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+
+        # Refresh PATH after install
+        $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('PATH', 'User')
+
+        if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            throw "Docker not found in PATH after installation"
+        }
+        Write-Host "Docker Desktop installed: $(docker --version)" -ForegroundColor Green
+    } catch {
+        Write-Warning "Docker Desktop installation failed: $_. You may need to install it manually."
+    }
+} else {
+    Write-Host "`n==================== IMAGE BUILD GUIDANCE ====================" -ForegroundColor Cyan
+    Write-Host "Docker is NOT installed on this jumpbox by design."
+    Write-Host "Use ACR Tasks agent pool for image builds:"
+    Write-Host "  az acr build -r <acr> --agent-pool <pool-name> -t myapp:latest -f Dockerfile ."
+    Write-Host "==============================================================`n" -ForegroundColor Cyan
+}
 
 
 # ------------------------------
