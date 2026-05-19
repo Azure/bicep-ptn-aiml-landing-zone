@@ -6,26 +6,28 @@ The Azure AI Landing Zone is an enterprise-scale, production-ready reference arc
 
 ![Architecture Diagram](media/Architecture%20Diagram.png)
 
-## What's new in v2.0.0
+## What's new in v2
 
-v2.0.0 is a **breaking release** that introduces hub-and-spoke composability and granular reuse of platform resources for Application Landing Zone (ALZ) integrated topologies, while keeping the v1.x Zero Trust standalone experience unchanged. Highlights:
+The v2 line adds two things that matter most for everyday use:
 
-- **Topology preset** — new `deploymentMode` parameter (`standalone` \| `ailz-integrated`) tags the deployment with operator intent
-- **IP allow-lists** — new `allowedIpRanges` parameter for "Zero Trust + named developer IPs" hybrid scenarios, applied uniformly to 7 PaaS services
-- **Decoupled jumpbox / Bastion / NAT Gateway** — split from the old monolithic `deployVM` flag, each independently controllable, each with a BYO `existingResourceId` variant
-- **Observability reuse** — bring your own Log Analytics workspace and Application Insights, including cross-subscription scenarios
-- **Granular BYO Private DNS** — 15 per-zone override parameters, plus `dnsZoneLinkSuffix` for multi-spoke shared-zone topologies
-- **Hub integration** — new spoke→hub VNet peering (created by `main.bicep`) and external-egress UDR via hub firewall/NVA, with helper script for the reverse-peering direction
-- **Pre-flight validation** — new `scripts/Invoke-PreflightChecks.ps1` runs automatically as a `preprovision` hook to catch parameter mistakes (BYO resource missing, CIDR overlap, conflicting flags) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
+1. **A topology switch** — set `deploymentMode` to one of:
+    - **`standalone`** — the AI Landing Zone provisions everything it needs (VNet, private endpoints, Bastion, jumpbox, NAT Gateway, observability). Best for sandboxes, evaluations, and teams without a corporate hub.
+    - **`ailz-integrated`** — the AI Landing Zone deploys only the **spoke** (VNet + private endpoints + AI services) and peers into a hub VNet you already operate, **reusing** the hub's Firewall, Bastion, Private DNS zones, and Log Analytics workspace. Best for production inside an existing Azure Landing Zone.
+2. **Granular reuse of existing resources** — every platform service can be brought from the outside via an `existing*ResourceId` parameter (cross-subscription IDs are accepted): Log Analytics, Application Insights, Private DNS zones (per zone, 15 available), hub VNet, jumpbox, Bastion, NAT Gateway, route table.
 
-If you're **upgrading from v1.x**, read the **[v2.0.0 migration guide](docs/v2-migration.md)** — every breaking change is mapped to the new parameter(s) you need to set.
+A handful of other quality-of-life additions:
 
-If you're **deploying for the first time**, pick a runbook:
+- **`allowedIpRanges`** — let named CIDRs reach the data plane of Storage, Key Vault, Cosmos DB, AI Search, ACR, AI Foundry, and App Configuration without disabling private endpoints. Use this when developers need to query the workload from their laptops without routing through Bastion.
+- **Decoupled hub components** — `deployJumpbox`, `deployBastion`, and `deployNatGateway` are now independent flags. No more all-or-nothing `deployVM`.
+- **Hub integration helpers** — `hubIntegration.hubVnetResourceId` creates the spoke→hub peering for you; `hubIntegration.egressNextHopIp` routes spoke egress through your hub firewall / NVA.
+- **Pre-flight validation** — `scripts/Invoke-PreflightChecks.ps1` runs automatically as an `azd preprovision` hook and catches the usual mistakes (CIDR overlap, undersized subnets, missing BYO resource IDs, conflicting flags) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
 
-- **[Runbook — Standalone deployment](docs/runbook-standalone.md)** — single subscription, AI LZ owns all networking and platform resources. Use this if you don't already have an ALZ.
-- **[Runbook — Hub-and-Spoke deployment](docs/runbook-hub-spoke.md)** — spoke in an existing ALZ, with hub-owned Firewall / Bastion / Log Analytics. Use this if your organization already operates an Azure Landing Zone.
+**Pick a runbook to deploy:**
 
-The "How to Deploy" section below remains accurate for the standalone case and the basic Zero Trust setup.
+- **[Standalone deployment](docs/runbook-standalone.md)** — single subscription, AI LZ owns all networking and platform resources.
+- **[Hub-and-spoke deployment](docs/runbook-hub-spoke.md)** — spoke inside an existing Landing Zone, hub provides the platform.
+
+If you're upgrading from v1.x, see the **[migration guide](docs/v2-migration.md)** — it shows what changed in v2 and the parameters you may need to update.
 
 ## How to Deploy
 

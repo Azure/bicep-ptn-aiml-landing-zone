@@ -11,7 +11,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [v2.0.0] - 2026-05-18
 
-> v2.0.0 is a **breaking release** that introduces hub-and-spoke composability, granular reuse of platform resources, IP allow-lists, and a deployment-mode preset, while keeping the Zero Trust topology that v1.x operators already use. See [docs/v2-migration.md](docs/v2-migration.md) for the full upgrade path, [docs/runbook-hub-spoke.md](docs/runbook-hub-spoke.md) for the hub-and-spoke walkthrough, and [docs/runbook-standalone.md](docs/runbook-standalone.md) for the simpler single-subscription scenario. Tracking issue: [#58](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/58).
+> v2.0.0 is a **major release** that introduces hub-and-spoke composability, granular reuse of platform resources, IP allow-lists, and a deployment-mode preset. The Zero Trust topology that v1.x operators already use keeps working. See [docs/v2-migration.md](docs/v2-migration.md) for the upgrade path, [docs/runbook-hub-spoke.md](docs/runbook-hub-spoke.md) for the hub-and-spoke walkthrough, and [docs/runbook-standalone.md](docs/runbook-standalone.md) for the simpler single-subscription scenario. Tracking issue: [#58](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/58).
 
 ### Breaking Changes
 

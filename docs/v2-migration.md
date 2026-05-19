@@ -1,14 +1,14 @@
-# Migrating from v1.x to v2.0.0
+# Migrating from v1.x to v2
 
-This document walks you through upgrading an existing AI Landing Zone deployment, or a downstream accelerator that consumes this repo as a submodule, from the v1.x line to **v2.0.0**.
+This document walks you through upgrading an existing AI Landing Zone deployment, or a downstream accelerator that consumes this repo as a submodule, from the v1.x line to **v2**.
 
-v2.0.0 is a **breaking release** (see [issue #58](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/58)) that introduces hub-and-spoke composability, granular reuse of platform resources, IP allow-lists, and a deployment-mode preset, while keeping the Zero Trust topology that v1.x operators already use.
+v2 is a **major release** (see [issue #58](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/58)) that introduces hub-and-spoke composability, granular reuse of platform resources, IP allow-lists, and a deployment-mode preset. The Zero Trust topology that v1.x operators already use keeps working.
 
 > If you are deploying for the first time, you do **not** need this document — go straight to the [Standalone runbook](./runbook-standalone.md) or the [Hub-and-Spoke runbook](./runbook-hub-spoke.md).
 
 ---
 
-## 1. Why v2.0.0?
+## 1. Why v2?
 
 v1.x was designed for the **standalone** scenario: a customer points `azd provision` at an empty subscription, the template builds everything — VNet, Firewall, DNS zones, jumpbox, Bastion, App Insights, Log Analytics, the application stack — and the customer accesses the result.
 
@@ -49,7 +49,7 @@ Internally, every v2.0.0 parameter has either a sensible default that reproduces
 
 ---
 
-## 3. Breaking changes that need operator action
+## 3. Things that need attention when upgrading
 
 ### 3.1. `deployVM` is split into three flags
 
