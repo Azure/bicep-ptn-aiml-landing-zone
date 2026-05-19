@@ -247,16 +247,91 @@ For an existing v1.x deployment that you want to bring to v2.0.0:
 4. **Decide on egress** — keep the spoke Azure Firewall (no change) or switch to hub-managed egress (§3.5).
 5. **Decide on Private DNS** — keep spoke-owned zones (no change) or reuse hub zones (§3.6).
 6. **Set `DEPLOYMENT_MODE`** to match your topology — `standalone` or `ailz-integrated` (defaults to `standalone`).
-7. **Run `azd provision`** and verify the deployment plan against the change set you expected.
-8. **For hub-and-spoke**, after the spoke provision completes, run `tests/scripts/Add-HubSpokePeering.ps1` from a workstation with access to the hub RG to create the reverse peering.
+7. **Run the pre-flight script** (see §6) — it catches parameter mistakes before `azd provision` does. Skipping it is supported via `PREFLIGHT_SKIP=true` but not recommended for first-time ALZ-integrated deployments.
+8. **Run `azd provision`** and verify the deployment plan against the change set you expected.
+9. **For hub-and-spoke**, after the spoke provision completes, run `tests/scripts/Add-HubSpokePeering.ps1` from a workstation with access to the hub RG to create the reverse peering.
 
 If you encounter unexpected resource creation (e.g., a duplicate DNS zone), it usually means a BYO env var is unset where it should have been set — re-run with the missing override.
 
 ---
 
-## 6. Known limitations carried forward to v2.1.x
+## 6. Pre-flight validation script
 
-- The **pre-flight script** (`scripts/Invoke-PreflightChecks.ps1`) that validates BYO assumptions before provisioning is planned for v2.1.0. Until then, errors surface during `azd provision` rather than ahead of time.
-- The advisory `allowMixedObservabilityWorkspaces` parameter exists and is published as an output, but no validation enforces it yet — it's reserved for the v2.1.0 pre-flight.
+v2.0.0 ships a read-only pre-flight script — **`scripts/Invoke-PreflightChecks.ps1`** — that validates the effective parameter set **before** `azd provision` reaches Azure Resource Manager. It catches the class of mistakes that otherwise surface as deep, late, hard-to-debug ARM errors.
+
+### What it checks
+
+| Category | Checks |
+|---|---|
+| **Tooling** | `az`, `azd`, pwsh 7+ on PATH; logged in to Azure |
+| **Parameter resolution** | Unresolved `${VAR}` substitutions; missing required values |
+| **Topology consistency** | `policyManagedPrivateDns=true` + any BYO `existingPrivateDnsZone*ResourceId` set (conflict); `hubIntegrationEgressNextHopIp` + `hubIntegrationExistingRouteTableResourceId` set together (mutually exclusive); `deployAzureFirewall=true` + external egress IP (likely-unintended); `deploymentMode=ailz-integrated` declared without any hub-integration parameters; `existingApplicationInsightsResourceId` set without a connection string (will fail); `existingApplicationInsightsResourceId` without a matching `existingLogAnalyticsWorkspaceResourceId` unless `allowMixedObservabilityWorkspaces=true`; `networkIsolation=true` with no jumpbox/Bastion/allow-list ingress (you'd lock yourself out) |
+| **IP allow-list** | CIDR format validation; `0.0.0.0/0` warning |
+| **Local CIDR sanity** | Subnet prefixes contained in the VNet; no subnet-to-subnet overlap; each subnet at or above its minimum size (Bastion /26, Firewall /26, PE /27, jumpbox /29, ACA env /27 — /23 recommended for workload-profile ACA) |
+| **BYO VNet (when `useExistingVNet=true`)** | VNet exists; required subnets (`agent`, `pe`, `acaEnvironment`, `jumpbox`, `AzureBastionSubnet`, `AzureFirewallSubnet`) present when `deploySubnets=false`; ACA env subnet has `Microsoft.App/environments` delegation under network isolation |
+| **BYO Private DNS** | Each `existingPrivateDnsZone*ResourceId` points at a zone whose name matches the expected `privatelink.<namespace>` convention; zone exists in Azure |
+| **BYO observability** | `existingLogAnalyticsWorkspaceResourceId`, `existingApplicationInsightsResourceId`, `existingBastionResourceId`, `existingNatGatewayResourceId`, `hubIntegrationExistingRouteTableResourceId` exist in Azure |
+| **Hub VNet overlap** | When `hubIntegrationHubVnetResourceId` is set, the spoke's `vnetAddressPrefixes` do not overlap any of the hub's address prefixes (peering would fail) |
+
+### How it runs
+
+The script is wired into `azure.yaml` as a `preprovision` hook, so it runs automatically on every `azd provision`. You can also run it standalone at any time:
+
+```pwsh
+pwsh ./scripts/Invoke-PreflightChecks.ps1
+```
+
+Useful flags:
+
+| Flag | Purpose |
+|---|---|
+| `-Strict` | Treat warnings as failures (exit 2). Recommended in CI. |
+| `-SkipAzureLookups` | Skip every Azure CLI call. Use for offline / CI scenarios where you only want the deterministic checks. |
+| `-Skip` | Skip every check. Identical to `PREFLIGHT_SKIP=true`. Emergency bypass. |
+| `-AzdEnv <name>` | Read env values from a specific azd env (otherwise current default). |
+| `-ParametersFile <path>` | Override parameters file path. |
+
+### Bypass / opt-out
+
+If you intentionally need to skip the hook (e.g., temporarily during a complex rollback), set `PREFLIGHT_SKIP=true` in your environment:
+
+```pwsh
+$env:PREFLIGHT_SKIP = 'true'
+azd provision
+```
+
+### Submodule consumers
+
+The repo's submodule-consumer pattern means `azd` reads the **consumer's** `azure.yaml`, not this repo's — so the default preprovision hook is invoked only for direct consumers. For submodule consumers, copy this snippet into the consumer's `azure.yaml`:
+
+```yaml
+hooks:
+  preprovision:
+    posix:
+      shell: pwsh
+      run: ./infra/scripts/Invoke-PreflightChecks.ps1
+      continueOnError: false
+      interactive: true
+    windows:
+      shell: pwsh
+      run: ./infra/scripts/Invoke-PreflightChecks.ps1
+      continueOnError: false
+      interactive: true
+```
+
+(Adjust `./infra/` to wherever the submodule is mounted.)
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | All checks passed (possibly with warnings; warnings are non-fatal unless `-Strict`) |
+| `1` | At least one fatal finding — fix before provisioning |
+| `2` | Only warnings were raised AND `-Strict` was specified |
+
+---
+
+## 7. Known limitations carried forward to v2.1.x
+
 - `deploymentMode` does not yet auto-derive other flags. Set them explicitly.
 - The `deployVM` legacy umbrella flag is retained for v2.x; expected removal in v3.0.0.

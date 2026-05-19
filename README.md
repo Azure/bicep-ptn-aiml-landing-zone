@@ -16,6 +16,7 @@ v2.0.0 is a **breaking release** that introduces hub-and-spoke composability and
 - **Observability reuse** — bring your own Log Analytics workspace and Application Insights, including cross-subscription scenarios
 - **Granular BYO Private DNS** — 15 per-zone override parameters, plus `dnsZoneLinkSuffix` for multi-spoke shared-zone topologies
 - **Hub integration** — new spoke→hub VNet peering (created by `main.bicep`) and external-egress UDR via hub firewall/NVA, with helper script for the reverse-peering direction
+- **Pre-flight validation** — new `scripts/Invoke-PreflightChecks.ps1` runs automatically as a `preprovision` hook to catch parameter mistakes (BYO resource missing, CIDR overlap, conflicting flags) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
 
 If you're **upgrading from v1.x**, read the **[v2.0.0 migration guide](docs/v2-migration.md)** — every breaking change is mapped to the new parameter(s) you need to set.
 
