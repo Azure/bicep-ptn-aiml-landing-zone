@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v2.0.2] - 2026-05-19
+
+### Fixed
+
+- **AI Foundry-bundled sub-modules emit invalid Private Endpoints under `networkIsolation=false`** (regression introduced in v2.0.0): `main.bicep` passed `varPeSubnetId` unconditionally as `privateEndpointSubnetResourceId` to the top-level `aiFoundry` module. `varPeSubnetId` is derived as `'${virtualNetworkResourceId}/subnets/pe-subnet'` regardless of `_networkIsolation`; when `_networkIsolation=false` the spoke VNet is not deployed, `virtualNetworkResourceId` resolves to `''`, and `varPeSubnetId` collapses to the bogus literal string `'/subnets/pe-subnet'`. The four AI Foundry-bundled sub-modules (`modules/ai-foundry/foundry/modules/{keyVault,aiSearch,storageAccount,cosmosDb}.bicep`) each derive `var privateNetworkingEnabled = !empty(privateEndpointSubnetResourceId)` (truthy on the garbage string) and emit invalid `privateEndpoints` iterators whose `subnetResourceId` is the malformed string. ARM template validation fails with `InvalidTemplate: 'databaseAccount_privateEndpoints[0]' / 'keyVault_privateEndpoints[0]' ... 'reference' is not valid: all function arguments should be string literals.`. The failure is deterministic and surfaces **after** the AI Foundry account, all model deployments, the AI Foundry-bundled Search and Storage, all workload Container Apps, and the workload AI Search have already been created, leaving the resource group in a half-deployed state. **Fix**: `main.bicep` now mirrors the existing sibling pattern at the `aiFoundryStorageAccount` call site — `privateEndpointSubnetResourceId: _networkIsolation ? varPeSubnetId : ''`. When network isolation is off, all four bundled sub-modules see an empty subnet ID, `privateNetworkingEnabled` evaluates `false`, and no PE iterators are emitted. No behavior change for the `_networkIsolation=true` topology. Tracking issue: [#63](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/63).
+
 ## [v2.0.1] - 2026-05-19
 
 ### Fixed
