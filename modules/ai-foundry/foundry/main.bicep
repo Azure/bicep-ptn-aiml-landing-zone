@@ -291,7 +291,7 @@ module foundryAccountPrivateEndpoint 'br/public:avm/res/network/private-endpoint
 }
 
 module foundryAccountPrivateEndpointWithoutDns 'br/public:avm/res/network/private-endpoint:0.11.0' = if (!empty(privateEndpointSubnetResourceId) && !empty(aiFoundryConfiguration.?networking) && !hasAllFoundryPrivateDnsZoneIds) {
-  name: take('module.account.pe.${resourcesName}', 64)
+  name: take('module.account.pe.nodns.${resourcesName}', 64)
   params: {
     name: 'pep-${foundryAccount.outputs.name}-account'
     location: location
