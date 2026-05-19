@@ -2250,7 +2250,17 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     location: location
     tags: deploymentTags
 
-    privateEndpointSubnetResourceId: varPeSubnetId
+    // Gate this on `_networkIsolation` to mirror the sibling `aiFoundryStorageAccount`
+    // module at L2220. When network isolation is off, the spoke VNet is not deployed,
+    // `virtualNetworkResourceId` resolves to '', and `varPeSubnetId` collapses to the
+    // bogus literal '/subnets/pe-subnet'. Passing that down to the four AI Foundry-
+    // bundled sub-modules (Cosmos, Key Vault, AI Search, Storage) makes each one's
+    // `privateNetworkingEnabled = !empty(privateEndpointSubnetResourceId)` evaluate
+    // true (the string is non-empty but invalid), and ARM template validation fails
+    // with `databaseAccount_privateEndpoints[0]` / `keyVault_privateEndpoints[0]` ...
+    // `'reference' is not valid: all function arguments should be string literals.`.
+    // See issue #63 for the full diagnosis.
+    privateEndpointSubnetResourceId: _networkIsolation ? varPeSubnetId : ''
 
     aiFoundryConfiguration: {
       accountName: aiFoundryAccountName
