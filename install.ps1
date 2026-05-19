@@ -35,9 +35,12 @@ Param (
   [string] $ExtraRepoTags  = '',
   [string] $ExtraRepoNames = '',
 
-  # Optional: install Docker Desktop on the jumpbox.
-  # Defaults to 'false'. Set to 'true' to install Docker Desktop with WSL 2 backend.
-  # Note: Docker Desktop requires a paid Docker Subscription above ~250 employees / ~$10M revenue.
+  # Optional: install Docker Engine (via WSL 2 + Ubuntu) on the jumpbox.
+  # Defaults to 'false'. Set to 'true' to install WSL 2 with Ubuntu and
+  # Docker Engine (Moby) inside it for Linux container builds.
+  # This approach works on Windows Server 2025+ (native WSL 2 support) and
+  # avoids Docker Desktop entirely — no Docker Desktop license required.
+  # The VM must support nested virtualization (Dsv3/Dsv4/Dsv5 or equivalent).
   [string] $DeployDocker = 'false'
 )
 
@@ -372,15 +375,21 @@ try {
 }
 
 
-# ------------------------------
-# Docker Desktop installation (optional)
+# ---------------------------------------------------------------------------
+# Docker Engine installation via WSL 2 + Ubuntu (optional)
 #
 # By default Docker is NOT installed on this jumpbox (see issue #14).
-# When $DeployDocker is 'true', Docker Desktop is installed with WSL 2
-# backend in silent/unattended mode.
+# When $DeployDocker is 'true', Docker Engine (Moby) is installed inside a
+# WSL 2 Ubuntu instance. This provides full Linux container build capability
+# from the Windows command prompt via `wsl docker ...`.
 #
-# Note: Docker Desktop requires a paid Docker Subscription above
-# ~250 employees / ~$10M revenue.
+# This approach works on Windows Server 2025+ which has native WSL 2 support
+# (wsl --install). It avoids Docker Desktop entirely, so no Docker Desktop
+# license is required — Docker Engine (Moby) is free and open-source.
+#
+# Requirements:
+#   - VM SKU with nested virtualization (Dsv3/Dsv4/Dsv5 or equivalent)
+#   - Windows Server 2025 Datacenter Azure Edition (or Windows 11 Enterprise)
 #
 # When Docker is not installed, image builds should use the ACR Tasks
 # agent pool deployed alongside ACR (Bicep param: deployAcrTaskAgentPool).
@@ -388,46 +397,85 @@ try {
 #   az acr build -r <acr> --agent-pool <ACR_TASK_AGENT_POOL> -t myapp:latest -f Dockerfile .
 # To pause billing between builds:
 #   az acr agentpool update -r <acr> -n <ACR_TASK_AGENT_POOL> --count 0
-# ------------------------------
+# ---------------------------------------------------------------------------
 if ($DeployDocker -eq 'true') {
-    Write-Host "`n--- Installing Docker Desktop (silent, WSL 2 backend) ---"
+    Write-Host "`n--- Installing Docker Engine via WSL 2 + Ubuntu ---"
     try {
-        $installerUrl  = 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe'
-        $installerPath = 'C:\temp\DockerDesktopInstaller.exe'
-        New-Item -ItemType Directory -Path 'C:\temp' -Force | Out-Null
+        # Step 1: Install WSL 2 with Ubuntu.
+        # Windows Server 2025 supports `wsl --install` natively.
+        # The CSE runs as SYSTEM so admin privileges are satisfied.
+        Write-Host "Installing WSL 2 with Ubuntu..."
+        wsl --install --distribution Ubuntu --no-launch
+        wsl --update
+        wsl --set-default-version 2
 
-        Write-Host "Downloading Docker Desktop installer..."
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
-        if (-not (Test-Path $installerPath)) {
-            throw "Docker Desktop installer download failed"
+        # Step 2: Initialize the Ubuntu distro (creates default root user
+        # for non-interactive CSE context) and wait for it to be ready.
+        Write-Host "Initializing Ubuntu distro..."
+        wsl --distribution Ubuntu -- echo "WSL Ubuntu initialized"
+
+        # Step 3: Install Docker Engine inside WSL Ubuntu.
+        # Uses the official Docker apt repository (https://docs.docker.com/engine/install/ubuntu/).
+        Write-Host "Installing Docker Engine inside WSL Ubuntu..."
+        wsl --distribution Ubuntu -- bash -c @'
+set -e
+export DEBIAN_FRONTEND=noninteractive
+
+# Install prerequisites
+apt-get update -qq
+apt-get install -y -qq ca-certificates curl gnupg >/dev/null
+
+# Add Docker official GPG key and repository
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+
+# Install Docker Engine
+apt-get update -qq
+apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+
+# Start Docker daemon
+service docker start
+
+# Verify
+docker --version
+echo "Docker Engine installed successfully inside WSL Ubuntu"
+'@
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Docker Engine installation inside WSL failed (exit=$LASTEXITCODE)"
         }
-        $size = [math]::Round((Get-Item $installerPath).Length / 1MB, 1)
-        Write-Host "Downloaded: $size MB"
 
-        # Run the installer with flags:
-        #   --quiet           : suppress installer GUI
-        #   --accept-license  : pre-accept Docker Subscription Service Agreement
-        #   --backend=wsl-2   : use WSL 2 backend
-        #   --always-run-service : start com.docker.service automatically
-        Write-Host "Running installer (this may take a few minutes)..."
-        Start-Process $installerPath -Wait -ArgumentList 'install', '--quiet', '--accept-license', '--backend=wsl-2', '--always-run-service'
-        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
-            throw "Docker Desktop installer failed (exit code $LASTEXITCODE)"
+        # Step 4: Create a Windows-side wrapper so `docker` works from
+        # PowerShell / cmd without prefixing `wsl`.
+        $wrapperDir = 'C:\tools\docker-wsl'
+        New-Item -ItemType Directory -Path $wrapperDir -Force | Out-Null
+        @'
+@echo off
+wsl --distribution Ubuntu -- docker %*
+'@ | Set-Content -Path "$wrapperDir\docker.cmd" -Encoding ASCII
+        @'
+@echo off
+wsl --distribution Ubuntu -- docker compose %*
+'@ | Set-Content -Path "$wrapperDir\docker-compose.cmd" -Encoding ASCII
+
+        # Add wrapper dir to PATH
+        try {
+            $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+            if ($machinePath -notlike "*$wrapperDir*") {
+                [Environment]::SetEnvironmentVariable('Path', "$machinePath;$wrapperDir", 'Machine')
+            }
+        } catch {
+            Write-Warning "Failed to add $wrapperDir to MACHINE Path: $_"
         }
+        $env:PATH = "$wrapperDir;$env:PATH"
 
-        # Clean up installer
-        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
-
-        # Refresh PATH after install
-        $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('PATH', 'User')
-
-        if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-            throw "Docker not found in PATH after installation"
-        }
-        Write-Host "Docker Desktop installed: $(docker --version)" -ForegroundColor Green
+        # Verify from Windows side
+        $dockerVer = wsl --distribution Ubuntu -- docker --version
+        Write-Host "Docker Engine (WSL): $dockerVer" -ForegroundColor Green
     } catch {
-        Write-Warning "Docker Desktop installation failed: $_. You may need to install it manually."
+        Write-Warning "Docker Engine (WSL) installation failed: $_. You may need to install it manually."
     }
 } else {
     Write-Host "`n==================== IMAGE BUILD GUIDANCE ====================" -ForegroundColor Cyan
