@@ -2250,7 +2250,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     location: location
     tags: deploymentTags
 
-    privateEndpointSubnetResourceId: varPeSubnetId
+    privateEndpointSubnetResourceId: _networkIsolation ? varPeSubnetId : ''
 
     aiFoundryConfiguration: {
       accountName: aiFoundryAccountName

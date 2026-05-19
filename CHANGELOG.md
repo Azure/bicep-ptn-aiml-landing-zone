@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v2.0.2] - 2026-05-19
+
+### Fixed
+
+- **AI Foundry sub-modules (Cosmos DB, Key Vault, AI Search, Storage Account) emit invalid private endpoints when network isolation is off** (regression manifests in v2.0.0+): `main.bicep` L2253 passed `varPeSubnetId` unconditionally as `privateEndpointSubnetResourceId` to the `aiFoundry` module, but `varPeSubnetId` is derived as `'${virtualNetworkResourceId}/subnets/pe-subnet'` regardless of `_networkIsolation`. When `_networkIsolation=false` the spoke VNet is not deployed, `virtualNetworkResourceId` resolves to `''`, and `varPeSubnetId` becomes the bogus literal string `'/subnets/pe-subnet'`. Inside `modules/ai-foundry/foundry/main.bicep` this value is propagated to four child sub-modules (`keyVault.bicep` L110-127, `aiSearch.bicep` L129-141, `storageAccount.bicep` L143-180, `cosmosDb.bicep` L182-194), each of which derives `var privateNetworkingEnabled = !empty(privateEndpointSubnetResourceId)` (truthy on the garbage string) and then passes a 1-element `privateEndpoints` array to its underlying AVM module. The AVM modules emit a `privateEndpoints` resource iterator whose `subnetResourceId` is the invalid string, and ARM template validation fails mid-deployment with `InvalidTemplate: 'databaseAccount_privateEndpoints[0]' / 'keyVault_privateEndpoints[0]' ... 'reference' is not valid: all function arguments should be string literals.'` after Search, Storage, Container Apps, and the AI Foundry account+model deployments have already been created. **Fix**: L2253 now mirrors the L2220 pattern (`aiFoundryStorageAccount`'s call to its own AVM storage-account module): `_networkIsolation ? varPeSubnetId : ''`. When network isolation is off, all four AI Foundry-bundled sub-modules see an empty `privateEndpointSubnetResourceId`, `privateNetworkingEnabled` evaluates to false, and no PE iterators are emitted. No behavior change under `_networkIsolation=true`. Reproduced in `swedencentral` with default GPT-RAG umbrella parameters; resolved by this fix in a fresh `azd provision`.
+
 ## [v2.0.1] - 2026-05-19
 
 ### Fixed
