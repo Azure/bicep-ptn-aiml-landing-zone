@@ -168,6 +168,12 @@ The agent pool can be disabled entirely with `deployAcrTaskAgentPool=false` if b
 
 When `networkIsolation=true`, egress from the jumpbox and workload subnets is forced through the default Azure Firewall. The landing zone codifies the FQDNs required by the default `install.ps1` bootstrap and by the ACR Tasks agent pool. The set is split by purpose so you can audit or trim it:
 
+- ACR Tasks control plane and registry: `*.azurecr.io`, `*.data.azurecr.io`, and Azure Storage queue/blob/table FQDNs.
+- Language/runtime feeds: Python.org, PyPI, npm.
+- OS package feeds: Debian, Ubuntu, Yarn, and `packages.microsoft.com` for Microsoft-supported Linux packages such as `msodbcsql18`.
+
+If your application build needs additional HTTPS endpoints, add them to the `additionalAcrTaskBuildFqdns` array parameter. The values are appended to the ACR Tasks HTTPS runtime rule only when `networkIsolation`, `deployAzureFirewall`, `deployAcrTaskAgentPool`, and `extendFirewallForAcrTaskBuilds` are all enabled, and are scoped to the `devops-build-agents-subnet`.
+
 | Rule | Source subnet | FQDN group | Used by |
 | --- | --- | --- | --- |
 | `AllowMicrosoftContainerRegistry` | `*` | `mcr.microsoft.com`, `*.data.mcr.microsoft.com` | ACA/agents/ACR Tasks pulling Microsoft base images |

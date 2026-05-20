@@ -38,6 +38,7 @@
     "deployNsgs":                           { "value": "true" },
     "deployAzureFirewall":                  { "value": "${DEPLOY_AZURE_FIREWALL}" },
     "deployAcrTaskAgentPool":               { "value": "${DEPLOY_ACR_TASK_AGENT_POOL=false}" },
+    "additionalAcrTaskBuildFqdns":           { "value": [] },
     "bastionAllowedSourceIPs":              { "value": [] },
     "bastionSkuName":                       { "value": "${BASTION_SKU_NAME=Standard}" },
     "bastionEnableTunneling":               { "value": "${BASTION_ENABLE_TUNNELING=false}" },

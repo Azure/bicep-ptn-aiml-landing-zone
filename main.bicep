@@ -393,6 +393,9 @@ param extendFirewallForJumpboxBootstrap bool = true
 @description('When true, extends the Azure Firewall Policy with the FQDN allow-list required for ACR Tasks builds running inside the build-agents subnet to fetch language packages (npm, PyPI) and OS packages (Debian/Ubuntu apt repos, yarn). Only effective when networkIsolation, deployAzureFirewall and deployAcrTaskAgentPool are all enabled. Disable if you manage egress centrally or pre-bake all dependencies into the builder base image.')
 param extendFirewallForAcrTaskBuilds bool = true
 
+@description('Additional FQDNs to allow from the ACR Tasks build-agent subnet when extendFirewallForAcrTaskBuilds is true. Use this for application-specific build dependencies that are not part of the landing-zone default allow-list.')
+param additionalAcrTaskBuildFqdns array = []
+
 @description('List of trusted source IP CIDRs allowed to connect to the Bastion public IP on port 443. When empty, all internet inbound to port 443 is denied by default.')
 param bastionAllowedSourceIPs array = []
 
@@ -1098,9 +1101,11 @@ var _firewallAcrTaskFqdns = _deployAcrTaskAgentPool ? [
 
 // OS package repositories used by Debian/Ubuntu-based builder images during
 // `apt-get` steps in ACR Tasks runs. Scoped to devopsBuildAgentsSubnetPrefix
-// via `AllowAcrTaskOsPackages`. Language registries (npm/PyPI/python.org) are
-// reused from `_firewallDevRuntimeFqdns` via `AllowAcrTaskDevRuntimes`.
-// See issue #20.
+// via `AllowAcrTaskOsPackages`. Includes packages.microsoft.com because
+// Microsoft-supported Linux packages such as msodbcsql18 are common build-time
+// dependencies for solution accelerators. Language registries (npm/PyPI/python.org)
+// are reused from `_firewallDevRuntimeFqdns` via `AllowAcrTaskDevRuntimes`.
+// See issues #20 and #68.
 #disable-next-line no-hardcoded-env-urls
 var _firewallAcrTaskOsPackageFqdns = [
   'deb.debian.org'
@@ -1108,6 +1113,7 @@ var _firewallAcrTaskOsPackageFqdns = [
   'archive.ubuntu.com'
   'security.ubuntu.com'
   'dl.yarnpkg.com'
+  'packages.microsoft.com'
 ]
 
 // Route Table for egress traffic control through Azure Firewall (or external NVA, Gap 6).
@@ -1448,7 +1454,7 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
             protocols: [
               { protocolType: 'Https', port: 443 }
             ]
-            targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? _firewallDevRuntimeFqdns : []
+            targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? union(_firewallDevRuntimeFqdns, additionalAcrTaskBuildFqdns) : []
             sourceAddresses: [devopsBuildAgentsSubnetPrefix]
           }
           {

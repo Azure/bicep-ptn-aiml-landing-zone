@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **ACR Task build egress extension point**: new `additionalAcrTaskBuildFqdns` array parameter appends solution-specific HTTPS FQDNs to the ACR Tasks build-agent runtime rule, scoped to `devops-build-agents-subnet` and gated by `networkIsolation`, `deployAzureFirewall`, `deployAcrTaskAgentPool`, and `extendFirewallForAcrTaskBuilds`.
+
+### Fixed
+
+- **ACR Task builds needing Microsoft Linux package feeds** ([#68](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/68)): `packages.microsoft.com` is now part of the default ACR Tasks OS package allow-list so Dockerfiles can install Microsoft-supported packages such as `msodbcsql18` under network isolation without manual firewall edits.
+
 ## [v2.0.2] - 2026-05-19
 
 ### Fixed
