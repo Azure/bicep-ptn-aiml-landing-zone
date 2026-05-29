@@ -44,6 +44,12 @@
     Skip all checks. Equivalent to setting `$env:PREFLIGHT_SKIP='true'`.
     Provided as an emergency escape hatch for the `azd` preprovision hook.
 
+.PARAMETER SkipRegional
+    Skip only the regional-readiness block (provider/location support,
+    jumpbox VM SKU availability, AI model quota, transient capacity warnings).
+    Equivalent to setting `$env:LZ_PREFLIGHT_REGIONAL_SKIP='true'`. All other
+    deterministic checks still run.
+
 .EXAMPLE
     pwsh ./scripts/Invoke-PreflightChecks.ps1
 
@@ -68,7 +74,8 @@ param(
     [string]$ParametersFile,
     [switch]$Strict,
     [switch]$SkipAzureLookups,
-    [switch]$Skip
+    [switch]$Skip,
+    [switch]$SkipRegional
 )
 
 $ErrorActionPreference = 'Stop'
@@ -713,7 +720,309 @@ function Test-AzureResources {
 }
 
 # --------------------------------------------------------------------------
-# Reporting
+# Regional readiness (live, optional) — issue #72
+# --------------------------------------------------------------------------
+#
+# Validates that the target region(s) and subscription can actually host the
+# resources the landing zone is about to provision. Catches the "azd up returns
+# an opaque ARM error 25 minutes in" class of failures by surfacing them as
+# pre-flight findings:
+#
+#   * Subscription drift — `az` CLI default subscription does not match the
+#     subscription recorded in the azd environment. Only fires when run from a
+#     `preprovision` hook (i.e. an azd env is present).
+#   * Provider/location support — for each resource type the landing zone
+#     provisions, confirm the provider lists the chosen region as supported.
+#   * Transient regional capacity — known to fail at provision time with
+#     `InsufficientResourcesAvailable` (Search) or `ServiceUnavailable`
+#     (Cosmos DB) even when the region is listed as supported; raised as WARN.
+#   * Jumpbox VM SKU availability — when a jumpbox is requested, confirm the
+#     requested VM size is offered (and not restricted) in the region for the
+#     current subscription.
+#   * AI model quota — for each entry in `modelDeploymentList`, call
+#     `az cognitiveservices usage list --location <region>` and verify the
+#     requested capacity fits in the available quota.
+#
+# Everything in this block is **read-only** and **non-blocking on WARN**. The
+# whole block is skipped when `-SkipRegional`, `-SkipAzureLookups`, or
+# `$env:LZ_PREFLIGHT_REGIONAL_SKIP=true` is set.
+# --------------------------------------------------------------------------
+
+function Get-NormalizedLocation {
+    param([string]$Location)
+    if ([string]::IsNullOrWhiteSpace($Location)) { return '' }
+    return (($Location -replace '[^A-Za-z0-9]', '').ToLowerInvariant())
+}
+
+function Invoke-AzCliRaw {
+    # Like Invoke-AzCli, but accepts callers that append their own '-o json' and
+    # tolerates az subcommands that print warnings to stderr.
+    param([string[]]$Arguments)
+    try {
+        $out = & az @Arguments 2>$null
+        if ($LASTEXITCODE -eq 0 -and $out) {
+            return ($out -join "`n" | ConvertFrom-Json)
+        }
+        return $null
+    }
+    catch {
+        return $null
+    }
+}
+
+function Test-ProviderLocation {
+    param(
+        [Parameter(Mandatory)] [string]$ProviderNamespace,
+        [Parameter(Mandatory)] [string]$ResourceType,
+        [Parameter(Mandatory)] [string]$Location,
+        [Parameter(Mandatory)] [string]$DisplayName,
+        [Parameter(Mandatory)] [string]$CodePrefix
+    )
+    if ([string]::IsNullOrWhiteSpace($Location)) {
+        Add-Finding -Severity WARN -Code "${CodePrefix}_NO_LOCATION" `
+            -Message "$DisplayName provider/location check skipped: no location resolved from parameters."
+        return
+    }
+    $provider = Invoke-AzCliRaw -Arguments @('provider', 'show', '--namespace', $ProviderNamespace, '-o', 'json')
+    if (-not $provider) {
+        Add-Finding -Severity WARN -Code "${CodePrefix}_PROVIDER_LOOKUP" `
+            -Message "Could not query provider $ProviderNamespace for $DisplayName." `
+            -Hint "Ensure 'az' is logged in and the provider is registered (az provider register --namespace $ProviderNamespace)."
+        return
+    }
+    if ($provider.registrationState -and $provider.registrationState -ne 'Registered') {
+        Add-Finding -Severity FAIL -Code "${CodePrefix}_PROVIDER_UNREG" `
+            -Message "Provider $ProviderNamespace ($DisplayName) is '$($provider.registrationState)', not 'Registered'." `
+            -Hint "Run: az provider register --namespace $ProviderNamespace"
+        return
+    }
+    $rt = @($provider.resourceTypes | Where-Object { $_.resourceType -eq $ResourceType } | Select-Object -First 1)
+    if (-not $rt) {
+        Add-Finding -Severity WARN -Code "${CodePrefix}_RT_MISSING" `
+            -Message "Provider $ProviderNamespace did not report resource type $ResourceType."
+        return
+    }
+    $target = Get-NormalizedLocation $Location
+    $supported = @($rt.locations | ForEach-Object { Get-NormalizedLocation $_ }) -contains $target
+    if (-not $supported) {
+        Add-Finding -Severity FAIL -Code "${CodePrefix}_NOT_IN_REGION" `
+            -Message "$DisplayName is not listed as supported in region '$Location' for this subscription." `
+            -Hint "Pick a supported region or remove this resource from the deployment."
+    }
+}
+
+function Test-VmSku {
+    param(
+        [Parameter(Mandatory)] [string]$Location,
+        [Parameter(Mandatory)] [string]$VmSize
+    )
+    if ([string]::IsNullOrWhiteSpace($Location) -or [string]::IsNullOrWhiteSpace($VmSize)) { return }
+    $skus = Invoke-AzCliRaw -Arguments @('vm', 'list-skus', '--location', $Location, '--size', $VmSize, '--all', '-o', 'json')
+    if (-not $skus) {
+        Add-Finding -Severity WARN -Code 'JUMPBOX_VM_LOOKUP' `
+            -Message "Could not query VM SKU '$VmSize' availability in $Location." `
+            -Hint "Run 'az vm list-skus --location $Location --size $VmSize --all' to investigate."
+        return
+    }
+    $match = @($skus | Where-Object { $_.name -eq $VmSize } | Select-Object -First 1)
+    if (-not $match) {
+        Add-Finding -Severity FAIL -Code 'JUMPBOX_VM_NOT_FOUND' `
+            -Message "Jumpbox VM size '$VmSize' is not offered in region '$Location'." `
+            -Hint "Pick a different vmSize (AZURE_VM_SIZE) or a region that offers this SKU."
+        return
+    }
+    $restrictions = @()
+    if ($match.PSObject.Properties.Name -contains 'restrictions' -and $match.restrictions) {
+        $restrictions = @($match.restrictions | Where-Object { $_ })
+    }
+    if ($restrictions.Count -gt 0) {
+        $msgs = $restrictions | ForEach-Object {
+            $reason = if ($_.reasonCode) { $_.reasonCode } else { 'Restricted' }
+            "$reason ($($_.type): $($_.values -join ','))"
+        }
+        Add-Finding -Severity FAIL -Code 'JUMPBOX_VM_RESTRICTED' `
+            -Message "Jumpbox VM size '$VmSize' is restricted in '${Location}': $($msgs -join '; ')." `
+            -Hint "Pick a different vmSize or request a quota increase."
+    }
+}
+
+function Test-ModelQuota {
+    param(
+        [Parameter(Mandatory)] $ModelDeployments,
+        [Parameter(Mandatory)] [string]$Location
+    )
+    if ([string]::IsNullOrWhiteSpace($Location)) { return }
+    $deployments = @($ModelDeployments | Where-Object { $_ -ne $null })
+    if ($deployments.Count -eq 0) { return }
+
+    $usage = Invoke-AzCliRaw -Arguments @('cognitiveservices', 'usage', 'list', '--location', $Location, '-o', 'json')
+    if (-not $usage) {
+        Add-Finding -Severity WARN -Code 'MODEL_QUOTA_LOOKUP' `
+            -Message "Could not read Cognitive Services usage/quota for '$Location'." `
+            -Hint "Run 'az cognitiveservices usage list --location $Location' and verify Microsoft.CognitiveServices is registered."
+        return
+    }
+
+    $failures = @()
+    foreach ($d in $deployments) {
+        # Only OpenAI-format deployments report quota via usage list
+        $fmt = $null
+        if ($d.PSObject.Properties.Name -contains 'model' -and $d.model) {
+            $fmt = $d.model.format
+        }
+        if ($fmt -ne 'OpenAI') { continue }
+
+        $modelName = [string]$d.model.name
+        $skuName = [string]$d.sku.name
+        $capacity = [double]$d.sku.capacity
+        $quotaName = "OpenAI.$skuName.$modelName"
+
+        $quota = @($usage | Where-Object { $_.name.value -eq $quotaName } | Select-Object -First 1)
+        if (-not $quota) {
+            $failures += "No quota entry '$quotaName' in $Location."
+            continue
+        }
+        $available = [double]$quota.limit - [double]$quota.currentValue
+        if ($available -lt $capacity) {
+            $failures += "$quotaName needs $capacity, $available available (used $($quota.currentValue) / limit $($quota.limit))."
+        }
+        else {
+            Add-Finding -Severity PASS -Code 'MODEL_QUOTA_OK' `
+                -Message "Quota OK for ${modelName} (${skuName}) in ${Location}: $available available, $capacity requested."
+        }
+    }
+
+    if ($failures.Count -gt 0) {
+        Add-Finding -Severity FAIL -Code 'MODEL_QUOTA_INSUFFICIENT' `
+            -Message ("Insufficient AI model quota in '${Location}': " + ($failures -join ' ')) `
+            -Hint "Request a quota increase (https://aka.ms/oai/quotaincrease), reduce sku.capacity in modelDeploymentList, or set AZURE_AI_FOUNDRY_LOCATION to a region with available quota."
+    }
+}
+
+function Test-RegionalReadiness {
+    param([hashtable]$P)
+
+    if ($SkipAzureLookups) { return }
+    if ($SkipRegional -or $env:LZ_PREFLIGHT_REGIONAL_SKIP -eq 'true' -or $env:LZ_PREFLIGHT_REGIONAL_SKIP -eq '1') {
+        Add-Finding -Severity INFO -Code 'REGIONAL_SKIPPED' `
+            -Message "Regional readiness checks skipped (LZ_PREFLIGHT_REGIONAL_SKIP=true)."
+        return
+    }
+    if (-not (Get-Command az -ErrorAction SilentlyContinue)) { return }
+
+    # Subscription consistency: only when invoked from an azd context where the
+    # azd env recorded a subscription. When run standalone (no azd env, or no
+    # AZURE_SUBSCRIPTION_ID in it), skip without complaint.
+    $envValues = Get-AzdEnvValues
+    $azdSubId = if ($envValues.ContainsKey('AZURE_SUBSCRIPTION_ID')) { $envValues['AZURE_SUBSCRIPTION_ID'] } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($azdSubId)) {
+        $account = Invoke-AzCliRaw -Arguments @('account', 'show', '-o', 'json')
+        if (-not $account) {
+            Add-Finding -Severity FAIL -Code 'AZ_LOGIN_REQUIRED' `
+                -Message "Azure CLI is not logged in." `
+                -Hint "Run 'az login' (and 'az account set --subscription $azdSubId') before deploying."
+        }
+        elseif ($account.id -ne $azdSubId) {
+            Add-Finding -Severity FAIL -Code 'AZ_SUB_DRIFT' `
+                -Message "Azure CLI is using subscription '$($account.id)' but the azd environment expects '$azdSubId'." `
+                -Hint "Run: az account set --subscription $azdSubId"
+        }
+    }
+
+    # Resolve locations from the effective parameter set, falling back to the
+    # primary `location` when service-specific overrides are empty.
+    $location = Get-StringValue $P['location']
+    $aiFoundryLocation = Get-StringValue $P['aiFoundryLocation']
+    $cosmosLocation = Get-StringValue $P['cosmosLocation']
+    if ([string]::IsNullOrWhiteSpace($aiFoundryLocation)) { $aiFoundryLocation = $location }
+    if ([string]::IsNullOrWhiteSpace($cosmosLocation)) { $cosmosLocation = $location }
+
+    if ([string]::IsNullOrWhiteSpace($location)) {
+        Add-Finding -Severity WARN -Code 'REGIONAL_NO_LOCATION' `
+            -Message "Regional readiness checks skipped: 'location' is empty." `
+            -Hint "Set AZURE_LOCATION in the azd environment (azd env set AZURE_LOCATION <region>)."
+        return
+    }
+
+    # Feature-flag resolution. Default-on flags follow main.parameters.json:
+    # deployAiFoundry/deployCosmosDb/deployContainerApps/deployContainerEnv default true.
+    # deploySearchService is gated by an env var; treat empty as true (matches the file default).
+    $deployAiFoundry = ConvertTo-Bool (if ($null -ne $P['deployAiFoundry']) { $P['deployAiFoundry'] } else { $true })
+    $deployCosmos = ConvertTo-Bool (if ($null -ne $P['deployCosmosDb']) { $P['deployCosmosDb'] } else { $true })
+    $deployContainerApps = ConvertTo-Bool (if ($null -ne $P['deployContainerApps']) { $P['deployContainerApps'] } else { $true })
+    $deployContainerEnv = ConvertTo-Bool (if ($null -ne $P['deployContainerEnv']) { $P['deployContainerEnv'] } else { $true })
+    $searchRaw = Get-StringValue $P['deploySearchService']
+    $deploySearch = if ([string]::IsNullOrWhiteSpace($searchRaw)) { $true } else { ConvertTo-Bool $searchRaw }
+    $deployKeyVault = ConvertTo-Bool (if ($null -ne $P['deployKeyVault']) { $P['deployKeyVault'] } else { $true })
+    $deployStorage = ConvertTo-Bool (if ($null -ne $P['deployStorageAccount']) { $P['deployStorageAccount'] } else { $true })
+    $deployAppConfig = ConvertTo-Bool (if ($null -ne $P['deployAppConfig']) { $P['deployAppConfig'] } else { $true })
+    $deployLogAnalytics = ConvertTo-Bool (if ($null -ne $P['deployLogAnalytics']) { $P['deployLogAnalytics'] } else { $true })
+
+    # Provider/location support
+    if ($deploySearch) {
+        Test-ProviderLocation -ProviderNamespace 'Microsoft.Search' -ResourceType 'searchServices' `
+            -Location $location -DisplayName 'Azure AI Search' -CodePrefix 'SEARCH'
+        Add-Finding -Severity WARN -Code 'SEARCH_CAPACITY' `
+            -Message "Azure AI Search transient regional capacity (InsufficientResourcesAvailable) is not exposed by any pre-create quota API; this preflight validates provider/location support only." `
+            -Hint "If provisioning fails with InsufficientResourcesAvailable, retry in a different region — see https://azure.github.io/AI-Landing-Zones/bicep/regional-considerations/."
+    }
+    if ($deployCosmos) {
+        Test-ProviderLocation -ProviderNamespace 'Microsoft.DocumentDB' -ResourceType 'databaseAccounts' `
+            -Location $cosmosLocation -DisplayName 'Azure Cosmos DB' -CodePrefix 'COSMOS'
+        Add-Finding -Severity WARN -Code 'COSMOS_CAPACITY' `
+            -Message "Cosmos DB transient regional capacity (ServiceUnavailable on high-demand regions) is not exposed by a pre-create quota API; this preflight validates provider/location support only." `
+            -Hint "If provisioning fails with ServiceUnavailable, retry in a different region — see https://azure.github.io/AI-Landing-Zones/bicep/regional-considerations/."
+    }
+    if ($deployContainerApps -or $deployContainerEnv) {
+        Test-ProviderLocation -ProviderNamespace 'Microsoft.App' -ResourceType 'managedEnvironments' `
+            -Location $location -DisplayName 'Azure Container Apps Environment' -CodePrefix 'ACA'
+        Add-Finding -Severity WARN -Code 'ACA_WORKLOAD_PROFILE_CAPACITY' `
+            -Message "Container Apps workload profiles (D-series/E-series) occasionally hit transient capacity limits in popular regions; this preflight validates provider/location support only." `
+            -Hint "If environment creation fails on workload-profile capacity, retry or fall back to the Consumption profile."
+    }
+    if ($deployAiFoundry) {
+        Test-ProviderLocation -ProviderNamespace 'Microsoft.CognitiveServices' -ResourceType 'accounts' `
+            -Location $aiFoundryLocation -DisplayName 'Azure AI Foundry / Cognitive Services' -CodePrefix 'AIFOUNDRY'
+    }
+    if ($deployKeyVault) {
+        Test-ProviderLocation -ProviderNamespace 'Microsoft.KeyVault' -ResourceType 'vaults' `
+            -Location $location -DisplayName 'Azure Key Vault' -CodePrefix 'KV'
+    }
+    if ($deployStorage) {
+        Test-ProviderLocation -ProviderNamespace 'Microsoft.Storage' -ResourceType 'storageAccounts' `
+            -Location $location -DisplayName 'Azure Storage' -CodePrefix 'STORAGE'
+    }
+    if ($deployAppConfig) {
+        Test-ProviderLocation -ProviderNamespace 'Microsoft.AppConfiguration' -ResourceType 'configurationStores' `
+            -Location $location -DisplayName 'Azure App Configuration' -CodePrefix 'APPCONFIG'
+    }
+    if ($deployLogAnalytics) {
+        Test-ProviderLocation -ProviderNamespace 'Microsoft.OperationalInsights' -ResourceType 'workspaces' `
+            -Location $location -DisplayName 'Log Analytics' -CodePrefix 'LAW'
+        Test-ProviderLocation -ProviderNamespace 'Microsoft.Insights' -ResourceType 'components' `
+            -Location $location -DisplayName 'Application Insights' -CodePrefix 'APPI'
+    }
+
+    # Jumpbox VM SKU. deployJumpbox / deployVM are bool? — null means "follow the
+    # legacy umbrella". Treat any truthy value as opt-in.
+    $deployJump = ConvertTo-Bool $P['deployJumpbox']
+    $deployVmLegacy = ConvertTo-Bool $P['deployVM']
+    if ($deployJump -or $deployVmLegacy) {
+        $vmSize = Get-StringValue $P['vmSize']
+        if (-not [string]::IsNullOrWhiteSpace($vmSize)) {
+            Test-VmSku -Location $location -VmSize $vmSize
+        }
+    }
+
+    # Model quota
+    if ($deployAiFoundry) {
+        $models = $P['modelDeploymentList']
+        if ($models) {
+            Test-ModelQuota -ModelDeployments $models -Location $aiFoundryLocation
+        }
+    }
+}
+
 # --------------------------------------------------------------------------
 
 function Write-FindingsReport {
@@ -773,6 +1082,7 @@ Test-Topology -P $effective
 Test-AllowedIpRanges -P $effective
 Test-LocalCidrSanity -P $effective
 Test-AzureResources -P $effective
+Test-RegionalReadiness -P $effective
 
 $exitCode = Write-FindingsReport
 exit $exitCode

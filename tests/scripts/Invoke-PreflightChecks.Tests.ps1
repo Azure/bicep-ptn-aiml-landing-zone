@@ -220,6 +220,49 @@ Test-LocalCidrSanity -P @{
 Assert-True 'No CIDR findings on default layout' ((@($script:Findings).Count) -eq 0)
 
 # --------------------------------------------------------------------------
+Write-Host 'Regional readiness: Get-NormalizedLocation' -ForegroundColor Cyan
+Assert-True 'Normalize "East US 2" -> eastus2' ((Get-NormalizedLocation 'East US 2') -eq 'eastus2')
+Assert-True 'Normalize empty -> empty' ((Get-NormalizedLocation '') -eq '')
+
+# --------------------------------------------------------------------------
+Write-Host 'Regional readiness: env-var skip emits REGIONAL_SKIPPED INFO' -ForegroundColor Cyan
+Reset-Findings
+$env:LZ_PREFLIGHT_REGIONAL_SKIP = 'true'
+$script:SkipAzureLookups = $false
+$script:SkipRegional = $false
+try {
+    Test-RegionalReadiness -P @{ location = 'eastus2' }
+}
+finally {
+    Remove-Item Env:LZ_PREFLIGHT_REGIONAL_SKIP -ErrorAction SilentlyContinue
+}
+Assert-True 'REGIONAL_SKIPPED INFO present' (Test-FindingPresent 'REGIONAL_SKIPPED')
+Assert-True 'Only one finding emitted under skip' (@($script:Findings).Count -eq 1)
+
+# --------------------------------------------------------------------------
+Write-Host 'Regional readiness: -SkipAzureLookups suppresses block entirely' -ForegroundColor Cyan
+Reset-Findings
+$script:SkipAzureLookups = $true
+try {
+    Test-RegionalReadiness -P @{ location = 'eastus2'; deployAiFoundry = $true; modelDeploymentList = @() }
+}
+finally {
+    $script:SkipAzureLookups = $false
+}
+Assert-True 'No findings emitted under SkipAzureLookups' (@($script:Findings).Count -eq 0)
+
+# --------------------------------------------------------------------------
+Write-Host 'Regional readiness: missing location emits REGIONAL_NO_LOCATION WARN' -ForegroundColor Cyan
+Reset-Findings
+# Stub az lookups so we don't actually call the CLI.
+function Invoke-AzCliRaw { param([string[]]$Arguments) return $null }
+function Get-AzdEnvValues { return @{} }
+$script:SkipAzureLookups = $false
+$script:SkipRegional = $false
+Test-RegionalReadiness -P @{ location = '' }
+Assert-True 'REGIONAL_NO_LOCATION WARN raised' (Test-FindingPresent 'REGIONAL_NO_LOCATION')
+
+# --------------------------------------------------------------------------
 Write-Host ''
 Write-Host ("Tests run: $script:TestsRun  Failures: $script:TestFailures") -ForegroundColor Cyan
 
