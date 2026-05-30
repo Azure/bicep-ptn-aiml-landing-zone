@@ -9,6 +9,10 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 - **ACR Task build egress extension point**: new `additionalAcrTaskBuildFqdns` array parameter appends solution-specific HTTPS FQDNs to the ACR Tasks build-agent runtime rule, scoped to `devops-build-agents-subnet` and gated by `networkIsolation`, `deployAzureFirewall`, `deployAcrTaskAgentPool`, and `extendFirewallForAcrTaskBuilds`.
 
+### Changed
+
+- **Foundry-bundled AI Search default `replicaCount` lowered from `3` to `1`** in `modules/ai-foundry/foundry/modules/aiSearch.bicep`. The 3-replica default was inherited from the AVM Foundry reference and is the threshold for Azure AI Search's read/write SLA, but is overkill for the typical landing-zone bootstrap workload and roughly triples the Search bill (Standard SKU ~$245/mo per replica × partition, i.e. ~$735/mo for 3r×1p vs ~$245/mo for 1r×1p — a recurring ~$490/mo savings on every deployment that includes the Agent Service). The new default matches the workload AI Search service (`main.bicep` already used `replicaCount: 1` / `partitionCount: 1` for the workload Search). Operators who need the read/write SLA can scale the Search service back up to 3 replicas in-place from the portal/CLI with no data loss; bringing existing v2.0.x deployments in line with the new default is a non-destructive in-place scale-down. No template parameter contract is changed.
+
 ### Fixed
 
 - **ACR Task builds needing Microsoft Linux package feeds** ([#68](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/68)): `packages.microsoft.com` is now part of the default ACR Tasks OS package allow-list so Dockerfiles can install Microsoft-supported packages such as `msodbcsql18` under network isolation without manual firewall edits.
