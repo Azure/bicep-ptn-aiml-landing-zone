@@ -5,6 +5,8 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.0.5] - 2026-05-30
+
 ### Added
 
 - **ACR Task build egress extension point**: new `additionalAcrTaskBuildFqdns` array parameter appends solution-specific HTTPS FQDNs to the ACR Tasks build-agent runtime rule, scoped to `devops-build-agents-subnet` and gated by `networkIsolation`, `deployAzureFirewall`, `deployAcrTaskAgentPool`, and `extendFirewallForAcrTaskBuilds`.
