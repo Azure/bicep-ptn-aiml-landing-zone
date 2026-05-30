@@ -47,7 +47,7 @@
     "deployMcp":                            { "value": "${DEPLOY_MCP=true}" },
     "deployGroundingWithBing":              { "value": "${DEPLOY_GROUNDING_WITH_BING=false}" },
     "deployKeyVault":                       { "value": "${DEPLOY_KEY_VAULT=true}" },
-    "deployVmKeyVault":                     { "value": "${DEPLOY_VM_KEY_VAULT}" },
+    "deployVmKeyVault":                     { "value": "${DEPLOY_VM_KEY_VAULT=false}" },
     "deployLogAnalytics":                   { "value": "${DEPLOY_LOG_ANALYTICS=true}" },
     "enablePrivateLogAnalytics":            { "value": "${ENABLE_PRIVATE_LOG_ANALYTICS=true}" },
     "deploySearchService":                  { "value": "${DEPLOY_SEARCH_SERVICE=true}" },

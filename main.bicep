@@ -252,7 +252,7 @@ param deployAppConfig bool = true
 param deployKeyVault bool = true
 
 @description('Deploy an Azure Key Vault to securely store VM secrets, keys, and certificates.')
-param deployVmKeyVault bool = true
+param deployVmKeyVault bool = false
 
 @description('Deploy an Azure Log Analytics workspace for centralized log collection and query.')
 param deployLogAnalytics bool = true
