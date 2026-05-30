@@ -5,6 +5,8 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.0.6] - 2026-05-30
+
 ### Changed
 
 - **`deployVmKeyVault` default flipped from `true` to `false`** in `main.bicep` and `main.parameters.json` (`${DEPLOY_VM_KEY_VAULT=false}`). The parameter is declared and surfaced as the `DEPLOY_VM_KEY_VAULT` output but does not currently gate any resource in the template — so the previous `true` default never actually produced a VM-side Key Vault and only created a misleading signal for downstream tooling. The output is preserved so existing consumers reading `azd env get-values` continue to receive a value; only the default changes.
