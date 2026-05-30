@@ -947,16 +947,20 @@ function Test-RegionalReadiness {
     # Feature-flag resolution. Default-on flags follow main.parameters.json:
     # deployAiFoundry/deployCosmosDb/deployContainerApps/deployContainerEnv default true.
     # deploySearchService is gated by an env var; treat empty as true (matches the file default).
-    $deployAiFoundry = ConvertTo-Bool (if ($null -ne $P['deployAiFoundry']) { $P['deployAiFoundry'] } else { $true })
-    $deployCosmos = ConvertTo-Bool (if ($null -ne $P['deployCosmosDb']) { $P['deployCosmosDb'] } else { $true })
-    $deployContainerApps = ConvertTo-Bool (if ($null -ne $P['deployContainerApps']) { $P['deployContainerApps'] } else { $true })
-    $deployContainerEnv = ConvertTo-Bool (if ($null -ne $P['deployContainerEnv']) { $P['deployContainerEnv'] } else { $true })
+    # Note: PowerShell does not accept `if` as an expression inside `(...)` when
+    # used as a command/function argument — the parser treats `if` as a command
+    # name and fails with "The term 'if' is not recognized...". Wrap with the
+    # subexpression operator `$(...)` so the if-expression is evaluated first.
+    $deployAiFoundry = ConvertTo-Bool $(if ($null -ne $P['deployAiFoundry']) { $P['deployAiFoundry'] } else { $true })
+    $deployCosmos = ConvertTo-Bool $(if ($null -ne $P['deployCosmosDb']) { $P['deployCosmosDb'] } else { $true })
+    $deployContainerApps = ConvertTo-Bool $(if ($null -ne $P['deployContainerApps']) { $P['deployContainerApps'] } else { $true })
+    $deployContainerEnv = ConvertTo-Bool $(if ($null -ne $P['deployContainerEnv']) { $P['deployContainerEnv'] } else { $true })
     $searchRaw = Get-StringValue $P['deploySearchService']
     $deploySearch = if ([string]::IsNullOrWhiteSpace($searchRaw)) { $true } else { ConvertTo-Bool $searchRaw }
-    $deployKeyVault = ConvertTo-Bool (if ($null -ne $P['deployKeyVault']) { $P['deployKeyVault'] } else { $true })
-    $deployStorage = ConvertTo-Bool (if ($null -ne $P['deployStorageAccount']) { $P['deployStorageAccount'] } else { $true })
-    $deployAppConfig = ConvertTo-Bool (if ($null -ne $P['deployAppConfig']) { $P['deployAppConfig'] } else { $true })
-    $deployLogAnalytics = ConvertTo-Bool (if ($null -ne $P['deployLogAnalytics']) { $P['deployLogAnalytics'] } else { $true })
+    $deployKeyVault = ConvertTo-Bool $(if ($null -ne $P['deployKeyVault']) { $P['deployKeyVault'] } else { $true })
+    $deployStorage = ConvertTo-Bool $(if ($null -ne $P['deployStorageAccount']) { $P['deployStorageAccount'] } else { $true })
+    $deployAppConfig = ConvertTo-Bool $(if ($null -ne $P['deployAppConfig']) { $P['deployAppConfig'] } else { $true })
+    $deployLogAnalytics = ConvertTo-Bool $(if ($null -ne $P['deployLogAnalytics']) { $P['deployLogAnalytics'] } else { $true })
 
     # Provider/location support
     if ($deploySearch) {
