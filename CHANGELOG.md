@@ -13,6 +13,12 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 - **ACR Task builds needing Microsoft Linux package feeds** ([#68](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/68)): `packages.microsoft.com` is now part of the default ACR Tasks OS package allow-list so Dockerfiles can install Microsoft-supported packages such as `msodbcsql18` under network isolation without manual firewall edits.
 
+## [v2.0.4] - 2026-05-29
+
+### Fixed
+
+- **Preflight regional readiness aborts with `The term 'if' is not recognized`** (regression introduced in v2.0.3): `scripts/Invoke-PreflightChecks.ps1` `Test-RegionalReadiness` used the pattern `ConvertTo-Bool (if (...) { ... } else { $true })` to resolve nine default-on `deploy*` feature flags. PowerShell does not accept `if` as an expression inside `(...)` when used as a command/function argument — the parser tries to invoke `if` as a command and fails with `CommandNotFoundException`. Result: `azd provision` (and any standalone `pwsh Invoke-PreflightChecks.ps1`) terminated immediately after the "Parameters file" banner with a confusing stack trace, before any regional checks could run, blocking every consumer of v2.0.3 (including [Azure/gpt-rag](https://github.com/Azure/GPT-RAG)). **Fix**: wrap the conditional with the subexpression operator `$(if (...) { ... } else { $true })` for all nine flags (`deployAiFoundry`, `deployCosmosDb`, `deployContainerApps`, `deployContainerEnv`, `deployKeyVault`, `deployStorageAccount`, `deployAppConfig`, `deployLogAnalytics`; `deploySearchService` was already correctly written as a bare assignment). Behaviour of the checks is unchanged; only the parser path is corrected.
+
 ## [v2.0.3] - 2026-05-29
 
 ### Added
