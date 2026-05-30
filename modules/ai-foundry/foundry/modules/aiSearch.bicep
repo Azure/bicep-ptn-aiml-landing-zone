@@ -59,7 +59,7 @@ module aiSearch 'br/public:avm/res/search/search-service:0.11.1' = if (empty(exi
         }
     sku: 'standard'
     partitionCount: 1
-    replicaCount: 3
+    replicaCount: 1
     roleAssignments: roleAssignments
     privateEndpoints: privateNetworkingEnabled
       ? [
