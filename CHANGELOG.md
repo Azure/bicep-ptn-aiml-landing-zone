@@ -5,6 +5,12 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.0.8] - 2026-05-31
+
+### Fixed
+
+- **ZTA: `DefaultRuleCollectionGroup` deployment rejected with `BadRequest: "The request is invalid."`** ([#80](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/80)). Azure Firewall validates `ApplicationRule.targetFqdns` at ARM request-validation time and rejects any rule whose `targetFqdns` array is empty — the entire rule collection group creation fails in ~0.3s with no operation logged, leaving the firewall with zero rules. This regression hit any consumer that disabled one of the optional egress extensions, including the most common GPT-RAG ZTA path where `deployAcrTaskAgentPool=false` (default) made `AllowAcrTasks`, `AllowAcrTaskDevRuntimes`, and `AllowAcrTaskOsPackages` ship with `targetFqdns: []`. The same shape also failed when `extendFirewallForJumpboxBootstrap=false` (all four jumpbox rules empty). With the firewall empty, the `aca-environment-subnet` UDR (`0.0.0.0/0 → AzFW`) silently blocked MCR, which then surfaced as the `azd provision` "Container App creation failed: GET mcr.microsoft.com: EOF" symptom that v2.0.7's `dependsOn` ordering fix tried to address. Wrapped the rule list in `filter(..., rule => !empty(rule.targetFqdns))` so the ARM payload only ever contains application rules with at least one FQDN target. Each rule definition is preserved verbatim — the only behavioural change is that rules whose feature flag resolved to "no targets" are omitted from the payload instead of being submitted as empty. Basic mode (`networkIsolation=false`) and topologies that do not deploy a local firewall are unaffected because the rule collection group is conditional on `deployAzureFirewall && _networkIsolation`. The `dependsOn` fix from v2.0.7 is retained as defence-in-depth: even with a valid RCG payload, container apps must still wait for the rules to land before MCR is reachable.
+
 ## [v2.0.7] - 2026-05-30
 
 ### Fixed

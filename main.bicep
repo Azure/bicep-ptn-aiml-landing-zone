@@ -1365,7 +1365,15 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
         action: {
           type: 'Allow'
         }
-        rules: [
+        // Azure Firewall rejects ApplicationRules whose targetFqdns is an empty
+        // array with `BadRequest: "The request is invalid."` at the ARM
+        // request-validation layer (no rule-collection-group operation is even
+        // created). Build the full set of rules below, then filter out any
+        // whose targetFqdns ended up empty due to disabled feature flags
+        // (e.g. deployJumpbox=false, deployAcrTaskAgentPool=false). This keeps
+        // every rule definition co-located while ensuring the ARM payload only
+        // ever contains rules with at least one FQDN target.
+        rules: filter([
           {
             ruleType: 'ApplicationRule'
             name: 'AllowMicrosoftContainerRegistry'
@@ -1467,7 +1475,7 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
             targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? _firewallAcrTaskOsPackageFqdns : []
             sourceAddresses: [devopsBuildAgentsSubnetPrefix]
           }
-        ]
+        ], rule => !empty(rule.targetFqdns))
       }
     ]
   }
