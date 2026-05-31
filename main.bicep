@@ -2748,6 +2748,16 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
       containerEnv!                   
       privateDnsZones
       privateEndpoints
+      // Issue #78 — under network isolation the aca-environment-subnet UDR
+      // routes 0.0.0.0/0 to Azure Firewall. The ACA control plane validates
+      // the placeholder image (`_containerDummyImageName`, MCR) at create
+      // time. Without this dependency the container apps race the firewall
+      // rule collection group and the MCR pull is denied (EOF), which
+      // aborts the whole provision before the firewall rules ever land.
+      // The reference is to a conditional resource; in Basic mode
+      // (`deployAzureFirewall=false` or `networkIsolation=false`) the
+      // dependency is simply absent.
+      firewallPolicyDefaultRuleCollectionGroup
     ]
   }
 ]

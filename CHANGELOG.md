@@ -5,6 +5,12 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.0.7] - 2026-05-30
+
+### Fixed
+
+- **ZTA: Container App creation no longer races the firewall MCR allow rule** ([#78](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/78)). Under `networkIsolation=true` + `deployAzureFirewall=true`, the `aca-environment-subnet` UDR forces all egress through the firewall, and the ACA control plane validates the placeholder image (`mcr.microsoft.com/dotnet/samples:aspnetapp-9.0`) at create time. The Container Apps module previously did not depend on `firewallPolicyDefaultRuleCollectionGroup`, so Bicep created the apps in parallel with the rule collection group; the MCR pull was denied (`GET https://mcr.microsoft.com/v2/: EOF`) and the whole `azd provision` aborted before the firewall rules ever landed. Added the missing dependency so the `AllowMicrosoftContainerRegistry` application rule is in place before any container app is created. Basic mode (`networkIsolation=false`) and AI-LZ-integrated topologies that do not deploy a local firewall are unaffected because the referenced resource is conditional.
+
 ## [v2.0.6] - 2026-05-30
 
 ### Changed
