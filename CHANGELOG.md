@@ -5,6 +5,12 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.0.10] - 2026-06-01
+
+### Fixed
+
+- **Windows jumpbox CSE script remains parseable under Windows PowerShell 5.1**. The `v2.0.9` timeout fix added optional-step budget warnings that used a Unicode em dash inside double-quoted strings. The CSE executes `install.ps1` with Windows PowerShell 5.1, which can read UTF-8-without-BOM scripts through the system ANSI code page; the em dash bytes were mis-decoded before parsing and caused an `Unexpected token` parser failure near the Python PATH update. Those warning strings now use ASCII hyphens, preserving the `v2.0.9` wall-clock budget and watchdog behavior while keeping the script parseable on the jumpbox.
+
 ## [v2.0.9] - 2026-06-01
 
 ### Fixed

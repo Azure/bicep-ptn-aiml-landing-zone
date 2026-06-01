@@ -304,7 +304,7 @@ Write-Host "`n--- Installing Python $pythonVersion (embeddable distribution) ---
 # scripts need it). Skip it when the wall-clock budget is low so it cannot push
 # the extension past the 90-minute platform timeout (issue #82).
 if (-not (Test-BudgetAtLeast 240)) {
-    Write-Warning "Skipping Python install — only $(Get-RemainingBudgetSec)s of CSE budget left. Install it manually on the jumpbox if a consumer script requires it."
+    Write-Warning "Skipping Python install - only $(Get-RemainingBudgetSec)s of CSE budget left. Install it manually on the jumpbox if a consumer script requires it."
 } else {
 try {
     if (Test-Path $pythonRoot) {
@@ -403,7 +403,7 @@ $winAcmeDownloadUrl  = "https://github.com/win-acme/win-acme/releases/download/v
 
 Write-Host "`n--- Installing win-acme (ACME client) ---"
 if (-not (Test-BudgetAtLeast 180)) {
-    Write-Warning "Skipping win-acme install — only $(Get-RemainingBudgetSec)s of CSE budget left. Run the certificate runbook later or install win-acme manually from the jumpbox."
+    Write-Warning "Skipping win-acme install - only $(Get-RemainingBudgetSec)s of CSE budget left. Run the certificate runbook later or install win-acme manually from the jumpbox."
 } else {
     $wacsStaging = Join-Path $env:TEMP ("win-acme-staging-{0}" -f [guid]::NewGuid().ToString('N'))
     $wacsZip     = Join-Path $env:TEMP $winAcmeAssetName
@@ -704,7 +704,7 @@ foreach ($repo in $manifest.components) {
     $tag      = $repo.tag
 
     if (-not (Test-BudgetAtLeast 240)) {
-        write-warning "Skipping remaining component repos (including '$repoName') — only $(Get-RemainingBudgetSec)s of CSE budget left. Clone them manually on the jumpbox if needed."
+        write-warning "Skipping remaining component repos (including '$repoName') - only $(Get-RemainingBudgetSec)s of CSE budget left. Clone them manually on the jumpbox if needed."
         break
     }
 
@@ -759,7 +759,7 @@ if (-not [string]::IsNullOrWhiteSpace($ExtraRepoUrls)) {
         $name = if ($i -lt $extraNames.Count -and $extraNames[$i]) { $extraNames[$i] } else { (($url -split '/')[-1]) -replace '\.git$','' }
 
         if (-not (Test-BudgetAtLeast 240)) {
-            write-warning "Skipping remaining extra repos (including '$name') — only $(Get-RemainingBudgetSec)s of CSE budget left. Clone them manually on the jumpbox if needed."
+            write-warning "Skipping remaining extra repos (including '$name') - only $(Get-RemainingBudgetSec)s of CSE budget left. Clone them manually on the jumpbox if needed."
             break
         }
 
