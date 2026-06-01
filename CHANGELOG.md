@@ -5,6 +5,8 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.0.9] - 2026-06-01
+
 ### Fixed
 
 - **ZTA: Jumpbox Windows CSE no longer times out with `VMExtensionProvisioningTimeout`** ([#82](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/82)). The Windows `CustomScriptExtension` that runs `install.ps1` has a fixed 90-minute platform provisioning timeout that cannot be extended from the extension definition. Several bootstrap operations were unbounded and their cumulative worst-case wall time could exceed 90 minutes under Zero Trust (where all jumpbox egress traverses the Azure Firewall and feeds can be slow or transiently blocked) — most significantly the Chocolatey package installs, which inherited Chocolatey's **default 2700s (45 min) per-package** execution timeout (5 packages → up to ~225 min on their own). When the script was still running at minute 90, ARM failed the extension with "the extension did not report a message," even though every other resource had provisioned successfully. `install.ps1` is now self-limiting:
@@ -15,7 +17,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
   - win-acme is now staged into a temp directory and only swapped into `C:\tools\win-acme` after a successful download + version check, and its failure is non-fatal (a previously working install is left intact) — it is a certificate convenience tool, not a dependency of any other resource.
   - Routed the component/extra repo "update existing" path (previously an unbounded `git fetch --all` / `git checkout`, a real re-run hang risk given `forceUpdateTag`) through the bounded `Invoke-GitCloneWithTimeout` helper.
 
-  No Bicep parameter contract changes. Because `install.ps1` is fetched from the tag pinned in `manifest.json#ailz_tag`, this fix only takes effect for deployments once a new tag containing it is published and `ailz_tag` is bumped to that tag.
+  No Bicep parameter contract changes. Because `install.ps1` is fetched from the tag pinned in `manifest.json#ailz_tag`, this release also bumps `manifest.json#ailz_tag` (and `tag`) from `v2.0.0` to `v2.0.9` so the fixed script is actually fetched by the jumpbox CSE. Previously the pin was never advanced past `v2.0.0`, so every deployment ran the original `install.ps1` regardless of the template version in use.
 
 ## [v2.0.8] - 2026-05-31
 
