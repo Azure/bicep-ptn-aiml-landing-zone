@@ -574,6 +574,14 @@ function Invoke-GitCloneWithTimeout {
         [int]$LowSpeedLimitBps = 1000,
         [int]$MaxAttempts      = 2
     )
+    $gitExe = (Get-Command git.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)
+    if (-not $gitExe) {
+        $gitExe = 'C:\Program Files\Git\cmd\git.exe'
+    }
+    if (-not (Test-Path $gitExe)) {
+        throw "FATAL: git.exe was not found. Expected Chocolatey Git at '$gitExe'."
+    }
+
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         Write-Host "[clone] attempt ${attempt}/${MaxAttempts}: $Url (tag=$Tag) -> $Destination (timeout=${TimeoutSec}s)"
         if (Test-Path $Destination) {
@@ -581,7 +589,7 @@ function Invoke-GitCloneWithTimeout {
         }
 
         $job = Start-Job -ScriptBlock {
-            param($u, $t, $d, $lim, $tsec)
+            param($git, $u, $t, $d, $lim, $tsec)
             # No TTY in Start-Job: silence any chance of an interactive prompt.
             $env:GIT_TERMINAL_PROMPT      = '0'
             $env:GCM_INTERACTIVE          = 'Never'
@@ -595,9 +603,11 @@ function Invoke-GitCloneWithTimeout {
             # *deletes* the variable instead of setting it to empty, so git
             # aborted with `missing config value GIT_CONFIG_VALUE_0` before any
             # network I/O. The `-c` flag avoids that footgun entirely (#34).
-            & git -c credential.helper= clone -b $t --depth 1 --no-tags $u $d 2>&1
-            "__GIT_EXIT__:$LASTEXITCODE"   # surface the real exit code
-        } -ArgumentList $Url, $Tag, $Destination, $LowSpeedLimitBps, $LowSpeedTimeSec
+            $gitOutput = & $git -c credential.helper= clone -b $t --depth 1 --no-tags $u $d 2>&1 | ForEach-Object { $_.ToString() }
+            $gitExit = $LASTEXITCODE
+            $gitOutput | ForEach-Object { Write-Output $_ }
+            "__GIT_EXIT__:$gitExit"   # surface the real exit code
+        } -ArgumentList $gitExe, $Url, $Tag, $Destination, $LowSpeedLimitBps, $LowSpeedTimeSec
 
         $finished = Wait-Job $job -Timeout $TimeoutSec
         if (-not $finished) {

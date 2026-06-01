@@ -5,6 +5,12 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.0.11] - 2026-06-01
+
+### Fixed
+
+- **Git clone watchdog captures native stderr as text**. The jumpbox clone wrapper now stringifies `git clone` output inside the background job before returning it to the parent PowerShell session. This prevents benign native stderr such as `Cloning into ...` from surfacing as a PowerShell job error record and causing the Custom Script Extension to fail even when the clone succeeds.
+
 ## [v2.0.10] - 2026-06-01
 
 ### Fixed
