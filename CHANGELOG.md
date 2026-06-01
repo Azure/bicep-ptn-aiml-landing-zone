@@ -5,6 +5,18 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Fixed
+
+- **ZTA: Jumpbox Windows CSE no longer times out with `VMExtensionProvisioningTimeout`** ([#82](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/82)). The Windows `CustomScriptExtension` that runs `install.ps1` has a fixed 90-minute platform provisioning timeout that cannot be extended from the extension definition. Several bootstrap operations were unbounded and their cumulative worst-case wall time could exceed 90 minutes under Zero Trust (where all jumpbox egress traverses the Azure Firewall and feeds can be slow or transiently blocked) — most significantly the Chocolatey package installs, which inherited Chocolatey's **default 2700s (45 min) per-package** execution timeout (5 packages → up to ~225 min on their own). When the script was still running at minute 90, ARM failed the extension with "the extension did not report a message," even though every other resource had provisioned successfully. `install.ps1` is now self-limiting:
+  - Added `--execution-timeout=600` to the Chocolatey args (10 min/package cap).
+  - Bounded the Chocolatey bootstrap download/install and every `Invoke-WebRequest` (Python embeddable zip, `get-pip.py`, win-acme) with explicit timeouts.
+  - Added a new `Invoke-NativeWithTimeout` process-tree watchdog and wired it around `azd auth login --managed-identity` and `azd init` so a hung azd network call cannot keep the extension in `Transitioning`.
+  - Introduced an overall wall-clock budget (~75 min) that **skips OPTIONAL steps** (Python, win-acme, component/extra repo clones) when little budget remains, while keeping **CORE steps fatal** (Chocolatey, `git`/`azure-cli`/`azd`, the main LZ repo clone, `azd auth login`, `azd init`) so the CSE only reports success when the jumpbox is actually usable. Critical Chocolatey package failures now `throw` instead of being silently swallowed as warnings.
+  - win-acme is now staged into a temp directory and only swapped into `C:\tools\win-acme` after a successful download + version check, and its failure is non-fatal (a previously working install is left intact) — it is a certificate convenience tool, not a dependency of any other resource.
+  - Routed the component/extra repo "update existing" path (previously an unbounded `git fetch --all` / `git checkout`, a real re-run hang risk given `forceUpdateTag`) through the bounded `Invoke-GitCloneWithTimeout` helper.
+
+  No Bicep parameter contract changes. Because `install.ps1` is fetched from the tag pinned in `manifest.json#ailz_tag`, this fix only takes effect for deployments once a new tag containing it is published and `ailz_tag` is bumped to that tag.
+
 ## [v2.0.8] - 2026-05-31
 
 ### Fixed

@@ -1889,6 +1889,19 @@ var _fileUris = [
   'https://raw.githubusercontent.com/Azure/bicep-ptn-aiml-landing-zone/refs/tags/${_manifest.ailz_tag}/install.ps1'
 ]
 
+// Windows CustomScriptExtension has a FIXED 90-minute platform provisioning
+// timeout (`VMExtensionProvisioningTimeout`) that cannot be extended from the
+// extension definition — there is no supported `timeout` setting here. Under
+// Zero Trust all jumpbox egress traverses the Azure Firewall, so package feeds
+// and external downloads can be slow or transiently blocked. `install.ps1` is
+// therefore self-limiting: it caps every network operation and tracks an
+// overall wall-clock budget (~75 min) so it always reports a terminal status
+// before the 90-minute cap, skipping OPTIONAL steps (Python, win-acme,
+// component/extra repos) under low budget while keeping CORE steps fatal. See
+// issue #82. NOTE: this script is fetched from the tag pinned in
+// `manifest.json#ailz_tag` (and passed as `-release`), so a fix to install.ps1
+// only takes effect once a new tag containing it is published AND `ailz_tag`
+// is bumped to that tag.
 resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (_deployJumpbox && deploySoftware) {
   name: '${_vmName}/cse'
   location: location
