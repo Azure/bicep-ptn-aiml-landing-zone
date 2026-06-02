@@ -5,6 +5,12 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.0.13] - 2026-06-02
+
+### Fixed
+
+- **Foundry Agent Service v2 Cosmos data-plane permissions.** The AI Foundry project managed identity now receives Cosmos DB Built-in Data Contributor assignments for the capability-host containers used by declarative/versioned agents: `agent-definitions-v1` and `run-state-v1`. These containers back `AIProjectClient.agents.create_version()` / `PromptAgentDefinition` agent definitions and run state. Without these assignments, new deployments that use the Foundry Agent Service v2 agent API can fail with Cosmos DB `403` errors even though the legacy thread/entity stores are accessible.
+
 ## [v2.0.12] - 2026-06-01
 
 ### Fixed
