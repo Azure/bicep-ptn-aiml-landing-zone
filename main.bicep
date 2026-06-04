@@ -435,7 +435,7 @@ param modelDeploymentList array
 // Container Apps params
 // ----------------------------------------------------------------------
 
-@description('List of container apps to create')
+@description('List of container apps to create. Dapr is opt-in per app through `dapr.enabled=true`; apps without a `dapr` object deploy with Dapr disabled.')
 param containerAppsList array
 
 @description('Workload profiles.')
@@ -2296,12 +2296,13 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
       ingressTransport: 'auto'
       ingressAllowInsecure: false
 
-      dapr: {
+      dapr: app.?dapr.?enabled == true ? {
         enabled: true
-        appId: app.service_name
-        appPort: int(app.?target_port ?? 8080)
-        appProtocol: 'http'
-      }
+        appId: app.?dapr.?appId ?? app.service_name
+        appPort: int(app.?dapr.?appPort ?? app.?target_port ?? 8080)
+        appProtocol: app.?dapr.?appProtocol ?? 'http'
+        enableApiLogging: app.?dapr.?enableApiLogging ?? false
+      } : null
 
       managedIdentities: {
         systemAssigned: (_useUAI) ? false : true
