@@ -5,6 +5,12 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.0.14] - 2026-06-04
+
+### Changed
+
+- **Dapr is now opt-in per Container App** (addresses #86): Container Apps no longer receive Dapr configuration automatically. Apps can enable Dapr explicitly through `containerAppsList[].dapr.enabled=true`, with optional per-app overrides for `appId`, `appPort`, `appProtocol`, and `enableApiLogging`. This makes external app deployments avoid unnecessary Dapr sidecars by default while allowing GPT-RAG and other Dapr-dependent workloads to preserve service invocation by declaring Dapr explicitly.
+
 ## [v2.0.13] - 2026-06-02
 
 ### Fixed
