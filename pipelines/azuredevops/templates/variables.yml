@@ -11,14 +11,15 @@ variables:
   # Name of the Azure Resource Manager service connection configured
   # in Project Settings > Service connections. Must have Contributor +
   # User Access Administrator roles on the target subscription.
-  azureServiceConnectionDev: 'azure-ailz-service-connection-alican'
-  azureServiceConnectionTest: 'azure-ailz-service-connection-busra'
-  azureServiceConnectionProd: 'azure-ailz-service-connection-shaurabh28650'
+  azureServiceConnectionDev: ''
+  azureServiceConnectionTest: ''
+  azureServiceConnectionProd: ''
 
   # ── Azure region ────────────────────────────────────────────────────────
   # Azure region where resources will be deployed.
   # Must support all services in the template (AI Foundry, Container Apps, etc.).
-  location: 'francecentral'
+  # example: francecentral, westeurope, northeurope, etc.
+  location: ''
 
   # ── Bicep / template paths ─────────────────────────────────────────────
   # Relative path to the Bicep entry point (used for lint/build steps).
@@ -29,7 +30,7 @@ variables:
   # Bicep parameter and to generate deterministic resource names.
   # azd handles resource group creation, parameter filtering, and
   # principal ID resolution automatically.
-  environmentName: 'ailz-bicep-v212'
+  environmentName: 'ailz-bicep'
 
   # ── Deployment mode ─────────────────────────────────────────────────────
   # Controls whether to deploy with network isolation (Zero Trust) or not.
