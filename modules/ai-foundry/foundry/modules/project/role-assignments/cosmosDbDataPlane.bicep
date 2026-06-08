@@ -12,11 +12,17 @@ resource cosmosDb 'Microsoft.DocumentDB/databaseAccounts@2025-04-15' existing = 
   scope: resourceGroup()
 }
 
-// NOTE: these are containers that are automatically created by the capability host for the project workspace
+// NOTE: these are containers that are automatically created by the capability host for the project workspace.
+// The thread/entity stores back the legacy Assistants-style agents; ``agent-definitions-v1`` and
+// ``run-state-v1`` back the new Foundry declarative/versioned agents (AIProjectClient.agents.create_version
+// + PromptAgentDefinition). All five must be granted so create-once/versioned agents can read their
+// definition and persist run state (otherwise create_version / run_stream return a Cosmos 403).
 var cosmosContainerNameSuffixes = [
   'thread-message-store'
   'system-thread-message-store'
   'agent-entity-store'
+  'agent-definitions-v1'
+  'run-state-v1'
 ]
 
 var cosmosDefaultSqlRoleDefinitionId = resourceId(
