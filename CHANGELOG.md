@@ -5,6 +5,10 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Fixed
+
+- **AI Foundry inference-only deployments no longer create Agent Service dependencies** ([#88](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/88), [#84](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/84)). `deployAAfAgentSvc` now controls the Agent Service Standard Setup and its associated AI Search, Storage, Cosmos DB, and Key Vault resources through the AI Foundry wrapper's `includeAssociatedResources` flag. `deployAiFoundry=true` with `deployAAfAgentSvc=false` deploys the Foundry account, project, and model deployments for hosted inference only, while `deploySearchService` remains scoped to the workload/RAG Search service.
+
 ## [v2.0.14] - 2026-06-04
 
 ### Changed

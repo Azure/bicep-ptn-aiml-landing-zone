@@ -211,7 +211,15 @@ azd env set AZURE_SEARCH_LOCATION eastus    # spoke is in eastus2
 
 The Private Endpoint stays in the spoke VNet (eastus2); only the Search service itself lives in eastus. This validates the v2.0 "cross-region PE" scenario without any code changes.
 
-### 6.9. Sanity check
+### 6.9. Optional: Foundry inference-only
+
+```pwsh
+azd env set DEPLOY_AAF_AGENT_SVC false
+```
+
+Use this when the spoke only needs AI Foundry hosted model inference. The AI Foundry account, project, and model deployments remain enabled, while the Agent Service Standard Setup and its associated AI Search, Storage, Cosmos DB, and Key Vault resources are skipped. `DEPLOY_SEARCH_SERVICE` remains independent and controls only the workload/RAG Search service.
+
+### 6.10. Sanity check
 
 ```pwsh
 azd env get-values | Sort-Object

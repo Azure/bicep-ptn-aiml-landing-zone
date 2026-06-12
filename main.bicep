@@ -817,6 +817,12 @@ var _deployAmpls = _networkIsolation && _createAppInsights && _createLogAnalytic
 var _deployPrivateDnsZones = _networkIsolation && !policyManagedPrivateDns
 var _searchServiceLocation = empty(searchServiceLocation) ? location : searchServiceLocation
 var _speechServiceLocation = empty(speechServiceLocation) ? location : speechServiceLocation
+var _deployAiFoundryAgentService = deployAiFoundry && deployAAfAgentSvc
+var _useExistingAiFoundrySearch = !empty(aiSearchResourceId)
+var _useExistingAiFoundryStorage = !empty(aiFoundryStorageAccountResourceId)
+var _useExistingAiFoundryCosmos = !empty(aiFoundryCosmosDBAccountResourceId)
+var _deployAiFoundrySearch = _deployAiFoundryAgentService && !_useExistingAiFoundrySearch
+var _deployAiFoundryStorage = _deployAiFoundryAgentService && !_useExistingAiFoundryStorage
 
 
 // ----------------------------------------------------------------------
@@ -2082,7 +2088,7 @@ var _peList = concat(
       privateDnsZoneGroup: _peDnsZoneGroupSearch
     }
   ] : [],
-  (_networkIsolation && deployAiFoundry && aiSearchResourceId == '') ? [
+  (_networkIsolation && _deployAiFoundrySearch) ? [
     {
       name: '${const.abbrs.networking.privateEndpoint}${aiFoundrySearchServiceName}'
       privateLinkServiceConnections: [
@@ -2176,7 +2182,8 @@ module privateEndpoints 'modules/networking/private-endpoints.bicep' = if (_netw
     storageAccount!
     cosmosDBAccount!
     searchService!
-    searchServiceAIFoundry!
+    #disable-next-line BCP321
+    _deployAiFoundrySearch ? searchServiceAIFoundry : null
     keyVault!
     appConfig!
     containerEnv!
@@ -2235,7 +2242,7 @@ resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-
 // (e.g. Poland Central -> RedundancyConfigurationNotAvailableInRegion).
 // Creating it ourselves and passing the resource ID as `existingResourceId`
 // lets us honor an explicit SKU (default `Standard_LRS`).
-module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (deployAiFoundry && aiFoundryStorageAccountResourceId == '') {
+module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (_deployAiFoundryStorage) {
   name: 'aiFoundryStorage-${resourceToken}-deployment'
   params: {
     name: aiFoundryStorageAccountName
@@ -2273,7 +2280,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     // Required
     baseName: substring(resourceToken, 0, 10)
 
-    includeAssociatedResources: true
+    includeAssociatedResources: _deployAiFoundryAgentService
     location: location
     tags: deploymentTags
 
@@ -2292,7 +2299,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     aiFoundryConfiguration: {
       accountName: aiFoundryAccountName
       allowProjectManagement: deployAfProject
-      createCapabilityHosts: deployAAfAgentSvc
+      createCapabilityHosts: _deployAiFoundryAgentService
       location: location
 
       networking: varAfNetworkingOverride
@@ -2344,7 +2351,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
   }
   dependsOn: [
     #disable-next-line BCP321
-    (aiSearchResourceId == '') ? searchServiceAIFoundry : null
+    _deployAiFoundrySearch ? searchServiceAIFoundry : null
     #disable-next-line BCP321
     (_networkIsolation && !useExistingVNet) ? virtualNetwork : null
     #disable-next-line BCP321
@@ -2352,7 +2359,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     #disable-next-line BCP321
     _networkIsolation ? privateDnsZones : null
     #disable-next-line BCP321
-    (aiFoundryStorageAccountResourceId == '') ? aiFoundryStorageAccount : null
+    _deployAiFoundryStorage ? aiFoundryStorageAccount : null
     // Serialize AI Foundry's internal PE creation against the shared `pe-subnet`
     // (fixes #41). The AVM ai-foundry module creates its own cog-svc PEs on the
     // same subnet used by the `privateEndpoints` aggregator and by the inline blob
@@ -2382,42 +2389,40 @@ var varAfNetworkingOverride = _networkIsolation
       })
   : null
 
-var varAfAiSearchCfgComplete = {
-  existingResourceId: aiSearchResourceId != ''
-    ? aiSearchResourceId
-    : deployAiFoundry ? searchServiceAIFoundry.outputs.resourceId : null
+var varAfAiSearchCfgComplete = _deployAiFoundryAgentService ? {
+  #disable-next-line BCP318
+  existingResourceId: _useExistingAiFoundrySearch ? aiSearchResourceId : searchServiceAIFoundry.outputs.resourceId
   name: aiFoundrySearchServiceName
   privateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneSearchId : null
   roleAssignments: []
-}
+} : {}
 
-var varAfCosmosCfgComplete = {
-  existingResourceId: aiFoundryCosmosDBAccountResourceId != '' ? aiFoundryCosmosDBAccountResourceId : null
+var varAfCosmosCfgComplete = _deployAiFoundryAgentService ? {
+  existingResourceId: _useExistingAiFoundryCosmos ? aiFoundryCosmosDBAccountResourceId : null
   name: aiFoundryCosmosDbName
   privateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneCosmosId : null
   roleAssignments: []
-}
+} : {}
 
-var varAfKVCfgComplete = {
+var varAfKVCfgComplete = _deployAiFoundryAgentService ? {
   existingResourceId: keyVaultResourceId != '' ? keyVaultResourceId : null
   name: '${const.abbrs.security.keyVault}ai-${resourceToken}'
   privateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneKeyVaultId : null
   roleAssignments: []
-}
+} : {}
 
 // NOTE: The AVM ai-foundry `storageAccountConfigurationType` does not expose
 // a `skuName` field. We instead pre-create the Storage Account in
 // `aiFoundryStorageAccount` above with the requested SKU and pass its
 // resource ID here as `existingResourceId`, which causes the AVM to skip
 // internal storage creation (and its default `Standard_GRS`).
-var varAfStorageCfgComplete = {
-  existingResourceId: aiFoundryStorageAccountResourceId != ''
-    ? aiFoundryStorageAccountResourceId
-    : (deployAiFoundry ? aiFoundryStorageAccount.outputs.resourceId : null)
+var varAfStorageCfgComplete = _deployAiFoundryAgentService ? {
+  #disable-next-line BCP318
+  existingResourceId: _useExistingAiFoundryStorage ? aiFoundryStorageAccountResourceId : aiFoundryStorageAccount.outputs.resourceId
   name: aiFoundryStorageAccountName
   blobPrivateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneBlobId : null
   roleAssignments: []
-}
+} : {}
 
 var aiFoundryAccountResourceId = resourceId('Microsoft.CognitiveServices/accounts', aiFoundry!.outputs.aiServicesName)
 
@@ -2973,7 +2978,7 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
 
 // Dedicated AI Search service for AI Foundry (separate from the application search).
 // Skipped when the consumer brings their own AI Foundry search via `aiSearchResourceId`.
-module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' = if (deployAiFoundry && aiSearchResourceId == '') {
+module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' = if (_deployAiFoundrySearch) {
   name: 'searchServiceAIFoundry'
   params: {
     name: aiFoundrySearchServiceName

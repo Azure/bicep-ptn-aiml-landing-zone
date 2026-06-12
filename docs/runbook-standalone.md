@@ -107,6 +107,14 @@ azd env set ALLOWED_IP_RANGES '["203.0.113.10/32","198.51.100.0/24"]'
 
 These CIDRs become the only public IPs allowed to hit the data planes of Storage, Key Vault, App Configuration, ACR, Cosmos DB, AI Search, and the AI Foundry storage account. Useful for letting a development laptop talk to Cosmos directly without RDP'ing into the jumpbox. Combine with `NETWORK_ISOLATION=true` for defense in depth — workloads talk through PEs, named developers also have an exception.
 
+#### Optional: Foundry inference-only
+
+```pwsh
+azd env set DEPLOY_AAF_AGENT_SVC false
+```
+
+This keeps the AI Foundry account, project, and model deployments, but skips the Agent Service Standard Setup and its associated AI Search, Storage, Cosmos DB, and Key Vault resources. `DEPLOY_SEARCH_SERVICE` remains independent and controls only the workload/RAG Search service.
+
 #### Optional: jumpbox post-config bootstrap
 
 `main.bicep` ships an `install.ps1` Custom Script Extension that installs az/azd/git/PowerShell modules and clones the repos listed in `manifest.json` into `C:\github\`. To run it during provisioning:

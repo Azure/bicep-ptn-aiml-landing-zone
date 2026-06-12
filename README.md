@@ -187,6 +187,19 @@ If your application build needs additional HTTPS endpoints, add them to the `add
 
 Set `extendFirewallForJumpboxBootstrap=false` to skip the jumpbox-scoped rules when egress is managed centrally by another policy.
 
+### AI Foundry deployment modes
+
+`deployAiFoundry` controls the base AI Foundry account, project, and model deployments. `deployAAfAgentSvc` controls the Agent Service Standard Setup and its associated AI Search, Storage, Cosmos DB, and Key Vault resources. `deploySearchService` controls only the workload/RAG Azure AI Search service used by applications.
+
+| Scenario | Parameters |
+| --- | --- |
+| Full Foundry Agent Service setup | `deployAiFoundry=true`, `deployAAfAgentSvc=true` |
+| Foundry inference-only | `deployAiFoundry=true`, `deployAAfAgentSvc=false` |
+| Workload Search only | `deploySearchService=true`, independent of `deployAAfAgentSvc` |
+| No Foundry resources | `deployAiFoundry=false` |
+
+Use `DEPLOY_AAF_AGENT_SVC=false` when an external app only needs hosted model inference from Foundry and does not need Agent Service capability hosts or their associated state resources.
+
 ### Permissions
 
 The following role assignments are provisioned by the template based on the **default configuration** in `main.parameters.json`. This includes the default set of container apps, their associated roles, and the services they interact with. If you customize the parameters before provisioning — such as adding or removing container apps or changing role mappings — the actual assignments will vary accordingly.
