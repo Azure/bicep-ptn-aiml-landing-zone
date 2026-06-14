@@ -5,6 +5,11 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Foundry Agent Service v2 Cosmos data-plane assignments now cover lazily-created containers** ([#94](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/94)). The `cosmosDbDataPlane.bicep` module previously created five per-collection `Cosmos DB Built-in Data Contributor` assignments scoped to a fixed list of capability-host containers (`thread-message-store`, `system-thread-message-store`, `agent-entity-store`, `agent-definitions-v1`, `run-state-v1`). The Foundry Agent Service v2 runtime creates additional containers on demand (for example `<workspaceId>-aoaiv2-vector-store-store`), and the data-plane RBAC check against any not-yet-created collection scope returns `403`, breaking `AIProjectClient.agents.create_version` and `run_stream` in regions such as `swedencentral`. The module now creates a single role assignment scoped at the database level (`dbs/enterprise_memory`) so the project identity is authorized over every container the capability host owns, including ones materialized at runtime. The assignment name uses `guid(roleDefinitionId, principalId, dbScope, projectWorkspaceId)` so redeploys are idempotent. The database is dedicated to the Foundry capability host, so this is not a privilege widening in practice.
+  - Operator note for upgrades from v2.0.13 / v2.0.14: the previous five per-collection assignments remain on the account as orphans. They are informational only, not blocking, and are not removed by Bicep. If you want to clean them up, use `az cosmosdb sql role assignment delete` against the `dbs/enterprise_memory/colls/<workspaceId>-<suffix>` scopes.
+
 ## [v2.0.15] - 2026-06-11
 
 ### Fixed
