@@ -899,6 +899,45 @@ function Test-ModelQuota {
     }
 }
 
+# --------------------------------------------------------------------------
+# Cosmos analytical storage region eligibility
+#
+# Azure rejects Cosmos DB account creation when `enableAnalyticalStorage=true`
+# is requested against a region/subscription combination that has not been
+# allow-listed for Synapse Link, with the literal error: "Enabling analytical
+# storage on account creation is not supported in this subscription/region.
+# Please disable analytical storage on the account creation request and try
+# again." The flag cannot be toggled after the account is created, so a
+# failed provision requires deleting the account before retrying. Eligibility
+# can change without notice, so this is a WARN, not a FAIL. See issue #93.
+# --------------------------------------------------------------------------
+$script:CosmosAnalyticalRestrictiveRegions = @(
+    'swedencentral'
+)
+
+function Test-CosmosAnalyticalStorageRegionSupport {
+    param([hashtable]$P)
+
+    $enableAnalytical = ConvertTo-Bool $P['enableCosmosAnalyticalStorage']
+    if (-not $enableAnalytical) { return }
+
+    $deployCosmos = ConvertTo-Bool $(if ($null -ne $P['deployCosmosDb']) { $P['deployCosmosDb'] } else { $true })
+    if (-not $deployCosmos) { return }
+
+    $location = Get-StringValue $P['location']
+    $cosmosLocation = Get-StringValue $P['cosmosLocation']
+    if ([string]::IsNullOrWhiteSpace($cosmosLocation)) { $cosmosLocation = $location }
+    if ([string]::IsNullOrWhiteSpace($cosmosLocation)) { return }
+
+    $normalized = Get-NormalizedLocation $cosmosLocation
+    $restrictive = @($script:CosmosAnalyticalRestrictiveRegions | ForEach-Object { Get-NormalizedLocation $_ })
+    if ($restrictive -notcontains $normalized) { return }
+
+    Add-Finding -Severity WARN -Code 'COSMOS_ANALYTICAL_REGION' `
+        -Message "enableCosmosAnalyticalStorage=true and cosmosLocation='$cosmosLocation' is on the known-restrictive list. Azure has been observed to reject Cosmos DB account creation in this region/subscription combination with: 'Enabling analytical storage on account creation is not supported in this subscription/region. Please disable analytical storage on the account creation request and try again.' This flag cannot be toggled after the account is created, so a failed provision requires deleting the account before retrying." `
+        -Hint "If you do not actively consume Synapse Link or Fabric Mirroring, set enableCosmosAnalyticalStorage=false (or unset ENABLE_COSMOS_ANALYTICAL_STORAGE) and re-run preflight. If you have confirmed your subscription is allow-listed for analytical storage in '$cosmosLocation', you can ignore this WARN. See https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/93."
+}
+
 function Test-RegionalReadiness {
     param([hashtable]$P)
 
@@ -1086,6 +1125,7 @@ Test-Topology -P $effective
 Test-AllowedIpRanges -P $effective
 Test-LocalCidrSanity -P $effective
 Test-AzureResources -P $effective
+Test-CosmosAnalyticalStorageRegionSupport -P $effective
 Test-RegionalReadiness -P $effective
 
 $exitCode = Write-FindingsReport
