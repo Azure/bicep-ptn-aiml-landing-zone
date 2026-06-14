@@ -43,8 +43,11 @@ param tags object = {}
 ])
 param skuName string = 'Standard_LRS'
 
-@description('Optional. Disable public network access on the Storage Account.')
+@description('Optional. Disable public network access on the Storage Account. When `allowedIpRanges` is non-empty, the public surface is kept Enabled to allow IP-rule restriction (issue #58 Gap 1).')
 param disablePublicNetworkAccess bool = false
+
+@description('Optional. CIDR allow-list for service-level IP rules. Empty (default) means no allow-list. When non-empty, `networkAcls.defaultAction` is set to `Deny` and these CIDRs are added as `ipRules` with action `Allow`.')
+param allowedIpRanges string[] = []
 
 @description('Optional. Subnet resource ID for the blob private endpoint. When empty, no private endpoint is created.')
 param privateEndpointSubnetResourceId string = ''
@@ -54,6 +57,15 @@ param blobPrivateDnsZoneResourceId string = ''
 
 @description('Optional. Enable telemetry via the Customer Usage Attribution ID.')
 param enableTelemetry bool = true
+
+var _applyIpRules    = !empty(allowedIpRanges)
+var _ipRules         = [for ip in allowedIpRanges: { value: ip, action: 'Allow' }]
+// publicNetworkAccess matrix:
+//   disablePublic=true,  allowedIpRanges=[]   -> Disabled (private only)
+//   disablePublic=true,  allowedIpRanges=CIDR -> Enabled  (private + IP allow-list)
+//   disablePublic=false, allowedIpRanges=*    -> Enabled  (public)
+var _publicAccess    = (disablePublicNetworkAccess && !_applyIpRules) ? 'Disabled' : 'Enabled'
+var _defaultAction   = (disablePublicNetworkAccess || _applyIpRules) ? 'Deny' : 'Allow'
 
 // ---------------------------------------------------------------------
 // Storage Account
@@ -68,18 +80,20 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = {
     kind: 'StorageV2'
     allowBlobPublicAccess: false
     supportsHttpsTrafficOnly: true
-    publicNetworkAccess: disablePublicNetworkAccess ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: _publicAccess
     networkAcls: {
       bypass: 'AzureServices'
       virtualNetworkRules: []
-      defaultAction: disablePublicNetworkAccess ? 'Deny' : 'Allow'
+      ipRules: _ipRules
+      defaultAction: _defaultAction
     }
-    privateEndpoints: (!empty(privateEndpointSubnetResourceId) && !empty(blobPrivateDnsZoneResourceId))
+    privateEndpoints: !empty(privateEndpointSubnetResourceId)
       ? [
-          {
+          union({
             name: 'pe-${name}-blob'
             service: 'blob'
             subnetResourceId: privateEndpointSubnetResourceId
+          }, !empty(blobPrivateDnsZoneResourceId) ? {
             privateDnsZoneGroup: {
               privateDnsZoneGroupConfigs: [
                 {
@@ -87,7 +101,7 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = {
                 }
               ]
             }
-          }
+          } : {})
         ]
       : []
     enableTelemetry: enableTelemetry

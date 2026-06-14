@@ -259,6 +259,42 @@ Before submitting changes, verify:
 5. App Configuration population includes any new runtime settings.
 6. Names remain deterministic and compliant.
 7. Changes are compatible with submodule consumer pattern.
+8. Documentation is updated for any user-visible change (see **Documentation Consistency**).
+
+---
+
+## Documentation Consistency
+
+Documentation must always match the **current, shipped** implementation. Any
+change with a user-visible effect — a new/renamed feature flag or parameter, a
+changed default, new module behavior, a new deployment mode, an output
+consumers rely on, or a breaking change — MUST be documented **in the same
+change set**, never deferred.
+
+Where landing-zone documentation lives:
+
+- **In this repo (always update these in the same PR):**
+  - `README.md` — overview, parameters, feature flags, quick start.
+  - `CHANGELOG.md` — every change, under `[Unreleased]` on `develop` and the
+    versioned header on a release branch.
+  - `docs/` runbooks — `runbook-standalone.md`, `runbook-hub-spoke.md`,
+    `v2-migration.md`. Update the relevant runbook when the deployment flow,
+    topology, or migration steps change.
+- **Public AI Landing Zone site (separate repo):** the narrative published at
+  https://azure.github.io/AI-Landing-Zones/bicep is sourced from the
+  `Azure/AI-Landing-Zones` repository (built from its `gh-pages` branch), not
+  from this repo. When a change alters the public bicep landing-zone story
+  (architecture, design areas, consumer-facing parameters/flags, what's-new),
+  open a **companion PR in `Azure/AI-Landing-Zones`** and link it from this
+  PR's description.
+
+Rules:
+- A change is **not done** until the matching docs are updated, or you have
+  confirmed none are affected.
+- When unsure, grep the docs/README for the flag, parameter, or output name
+  you touched and update every place it appears.
+- Treat any drift between the published site and the deployed behavior as a
+  bug, not a cosmetic issue.
 
 ---
 
@@ -284,3 +320,53 @@ For an end-to-end example of the submodule + preprovision override + manifest bo
 - https://github.com/azure/gpt-rag
 
 Use that reference to validate mechanics, but keep this repository generic and reusable.
+
+## Engineering Standards (Bicep / IaC)
+
+### Clean Code and Modularity
+
+This is an IaC-first repository in Bicep. Keep templates modular, readable, and
+reusable; avoid letting `main.bicep` or any module accumulate hardcoded,
+workload-specific logic.
+
+- Keep `main.bicep` as the orchestrator: compose AVM and custom modules under
+  feature-flag conditions (`if (...)`). Put reusable resource logic in focused
+  modules under `modules/` rather than inlining duplicated resource blocks.
+- Reuse existing module patterns and `constants/constants.bicep` (role IDs,
+  naming abbreviations) before creating new module files or literals. Avoid
+  duplication and speculative abstractions.
+- Drive infra shape from data, not branches: extend the topology lists
+  (`containerAppsList`, `modelDeploymentList`, `databaseContainersList`,
+  `storageAccountContainersList`) and their mapping logic instead of adding
+  per-workload conditionals.
+- Use clear, descriptive symbolic names for resources, modules, parameters, and
+  variables. Add a `@description` to every parameter; comment only non-obvious
+  decisions.
+- Keep module parameters minimal but explicit, and preserve idempotency.
+
+### Parameterization, Identity, and Safety
+
+- Never hardcode tenant/subscription/resource names; derive names
+  deterministically (resource token + abbreviations) and keep tenant/sub IDs
+  out of templates.
+- Add new capability in the documented sequence: parameter in `main.bicep`
+  (with description + sensible default) → value in `main.parameters.json`
+  (literal or `"${ENV_VAR}"`) → fallback handling if substitution can resolve
+  empty → wire to modules → publish to App Configuration via
+  `appConfigPopulate` if runtime needs it → expose as output if downstream
+  automation needs it.
+- Keep role assignments explicit, centralized, and least-privilege.
+- Preserve both deployment modes (Standard and Zero Trust / network isolation):
+  do not break private DNS / private endpoint dependencies or the substituted-
+  parameter fallback behavior. Keep changes compatible with the submodule
+  consumer pattern.
+
+### Validating Changes
+
+```bash
+az bicep build --file main.bicep   # lint/compile before submitting
+```
+
+End-to-end validation is `azd provision` from a consumer (e.g. the GPT-RAG
+core) with the appropriate `main.parameters.json`. Run through the **Change
+Checklist** and **Documentation Consistency** sections above before submitting.

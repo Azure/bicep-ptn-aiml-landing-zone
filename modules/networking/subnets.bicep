@@ -63,6 +63,7 @@ module subnetsM 'subnet.bicep' = [
           ? string(subnets[i].networkSecurityGroupResourceId)
           : (deployNsgs && !contains(invalidNsgSubnets, subnets[i].name) ? nsgsM[i]!.outputs.id : '')
         routeTableId: string(subnets[i].?routeTableResourceId ?? '')
+        natGatewayId: string(subnets[i].?natGatewayResourceId ?? '')
     }
   }
 ]

@@ -6,10 +6,10 @@ param resourceGroupName string
 param tags object
 param subnetResourceId string
 param privateLinkServiceConnections array = []
-param privateDnsZoneGroup object = {}
+param privateDnsZoneGroup object?
 param prefix string = 'nic-'
 
-module privateEndpoint 'br/public:avm/res/network/private-endpoint:0.11.0' = {
+module privateEndpoint 'br/public:avm/res/network/private-endpoint:0.11.0' = if (privateDnsZoneGroup != null) {
   scope: resourceGroup(resourceGroupName)
   params: {
     name: name
@@ -17,9 +17,22 @@ module privateEndpoint 'br/public:avm/res/network/private-endpoint:0.11.0' = {
     tags: tags
     subnetResourceId: subnetResourceId
     privateLinkServiceConnections: privateLinkServiceConnections
-    privateDnsZoneGroup: privateDnsZoneGroup
+    privateDnsZoneGroup: privateDnsZoneGroup!
     customNetworkInterfaceName: '${prefix}${name}'
   }
 }
 
-output resourceId string = privateEndpoint.outputs.resourceId
+module privateEndpointWithoutDns 'br/public:avm/res/network/private-endpoint:0.11.0' = if (privateDnsZoneGroup == null) {
+  scope: resourceGroup(resourceGroupName)
+  params: {
+    name: name
+    location: location
+    tags: tags
+    subnetResourceId: subnetResourceId
+    privateLinkServiceConnections: privateLinkServiceConnections
+    customNetworkInterfaceName: '${prefix}${name}'
+  }
+}
+
+#disable-next-line BCP318
+output resourceId string = privateDnsZoneGroup == null ? privateEndpointWithoutDns!.outputs.resourceId : privateEndpoint!.outputs.resourceId

@@ -87,6 +87,16 @@ param appConfigLabel string = 'ai-lz'
 @description('Enable network isolation for the deployment. This will restrict public access to resources and require private endpoints where applicable.')
 param networkIsolation bool = false
 
+@description('Gap 8 — Deployment topology preset. Required to surface deployment intent explicitly. Allowed values: `standalone` (default — self-contained spoke, own firewall/bastion/NAT GW; suitable for sandbox or single-team subscriptions) or `ailz-integrated` (spoke designed to plug into an Azure Landing Zone-managed hub; consumer is expected to provide `hubIntegrationHubVnetResourceId`, `hubIntegrationEgressNextHopIp` and/or `hubIntegrationExistingRouteTableResourceId`, BYO Private DNS overrides, and optionally `existingLogAnalyticsWorkspaceResourceId` for centralized observability). The value is captured as a `deploymentMode` tag on the resource group so platform teams can audit deployment posture. The preset does NOT automatically override explicit operator flags; it primarily documents intent and powers the pre-flight script (`scripts/Invoke-PreflightChecks.ps1`, Gap 9).')
+@allowed([
+  'standalone'
+  'ailz-integrated'
+])
+param deploymentMode string = 'standalone'
+
+@description('Optional. When non-empty, opens each services public surface restricted to these CIDRs via native `ipRules` / `networkAcls.ipRules`. Empty (default) means no public allow-list. Applied to Storage, Key Vault, Cosmos DB, AI Search, Container Registry, and the AI Foundry / Cognitive Services accounts. App Configuration and Application Insights do not expose native ipRules and ignore this parameter (documented in docs/v2-migration.md). When `networkIsolation=true` AND `allowedIpRanges` is non-empty, services are switched to `publicNetworkAccess=Enabled` so the IP rules can take effect (defense-in-depth alongside private endpoints).')
+param allowedIpRanges string[] = []
+
 @description('''When set to true, Private DNS Zones and DNS zone groups will NOT be created by this module.
 Use this option in environments where Azure Policy automatically manages Private DNS Zone linking for private endpoints
 (e.g., CAF Enterprise-Scale Platform Landing Zone). Creating DNS zones in those environments causes conflicts with
@@ -94,6 +104,68 @@ policy-driven DNS management and results in deployment failures.
 When false (default), the module creates and manages all Private DNS Zones and links them to the VNet.
 Requires networkIsolation to be true to have any effect.''')
 param policyManagedPrivateDns bool = false
+
+// ----------------------------------------------------------------------
+// Gap 2 — BYO Private DNS Zones (granular per-namespace overrides)
+// ----------------------------------------------------------------------
+// For each Private DNS zone the landing zone normally creates, an
+// `existingPrivateDnsZone<Namespace>ResourceId` param accepts a full
+// resource ID. When provided:
+//   * The zone is NOT created by this deployment.
+//   * The zone is NOT linked from the spoke VNet (assumed pre-linked via
+//     the hub or another mechanism; cross-RG linking is an operator task
+//     in v2.0.0 — see docs/v2-migration.md).
+//   * The provided resource ID is used directly in every Private
+//     Endpoint DNS Zone Group that consumes the zone, so PE→FQDN
+//     resolution still works against the shared zone.
+// `policyManagedPrivateDns=true` continues to win — when it is set,
+// neither creation nor linking happens for any zone regardless of these
+// BYO params (the pre-flight script flags this as a misconfiguration).
+
+@description('Gap 2 — Resource ID of an existing `privatelink.cognitiveservices.azure.com` Private DNS Zone to reuse (Azure AI Foundry / Cognitive Services PE DNS). When set, the local zone is not created. Pre-link the zone to the spoke VNet (or rely on hub→spoke peering + hub-side link) — automatic spoke linking is not performed.')
+param existingPrivateDnsZoneCogSvcsResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.openai.azure.com` Private DNS Zone to reuse (Azure OpenAI PE DNS).')
+param existingPrivateDnsZoneOpenAiResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.services.ai.azure.com` Private DNS Zone to reuse (AI Services / Foundry PE DNS).')
+param existingPrivateDnsZoneAiServicesResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.search.windows.net` Private DNS Zone to reuse (Azure AI Search PE DNS).')
+param existingPrivateDnsZoneSearchResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.documents.azure.com` Private DNS Zone to reuse (Azure Cosmos DB PE DNS).')
+param existingPrivateDnsZoneCosmosResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.blob.<storage suffix>` Private DNS Zone to reuse (Azure Storage Blob PE DNS).')
+param existingPrivateDnsZoneBlobResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.vaultcore.azure.net` Private DNS Zone to reuse (Azure Key Vault PE DNS).')
+param existingPrivateDnsZoneKeyVaultResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.azconfig.io` Private DNS Zone to reuse (Azure App Configuration PE DNS).')
+param existingPrivateDnsZoneAppConfigResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.<region>.azurecontainerapps.io` Private DNS Zone to reuse (Azure Container Apps PE DNS). Region-specific zone — must match the deployment region.')
+param existingPrivateDnsZoneContainerAppsResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.azurecr.io` Private DNS Zone to reuse (Azure Container Registry PE DNS).')
+param existingPrivateDnsZoneAcrResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.monitor.azure.com` Private DNS Zone to reuse (Azure Monitor Private Link Scope PE DNS).')
+param existingPrivateDnsZoneAzureMonitorResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.oms.opinsights.azure.com` Private DNS Zone to reuse (OMS Log Analytics PE DNS).')
+param existingPrivateDnsZoneOmsOpsInsightsResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.ods.opinsights.azure.com` Private DNS Zone to reuse (ODS Log Analytics ingestion PE DNS).')
+param existingPrivateDnsZoneOdsOpsInsightsResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.agentsvc.azure.automation.net` Private DNS Zone to reuse (Azure Monitor agent service PE DNS).')
+param existingPrivateDnsZoneAzureAutomationResourceId string?
+
+@description('Gap 2 — Resource ID of an existing `privatelink.applicationinsights.io` Private DNS Zone to reuse. Only consumed when `enablePrivateLogAnalytics=true` and AMPLS is created locally; otherwise this BYO ID is ignored.')
+param existingPrivateDnsZoneAppInsightsResourceId string?
 
 @description('The Azure region where private endpoints will be created. Defaults to the main deployment location. Use this when your VNet is in a different region than the resources.')
 param privateEndpointLocation string = ''
@@ -121,6 +193,9 @@ param devopsBuildAgentsSubnetName string = 'devops-build-agents-subnet'
 param vnetAddressPrefixes array = [
   '192.168.0.0/21' // 192.168.0.0 – 192.168.7.255 (2048 IPs total)
 ]
+
+@description('Gap 3 — Optional suffix appended to every Private DNS zone VNet link name created by this deployment. Set to a unique value (e.g., the spoke name or environment short-code) when multiple spokes link to the same shared Private DNS zone — without a unique suffix the link name collides and the second deployment fails. Leave empty for single-spoke or non-shared-zone deployments. Final link name: `<vnetName>-<zone-shortcode>-link<suffix>[<-byon if useExistingVNet>]`. Forbidden characters per Microsoft.Network/privateDnsZones/virtualNetworkLinks: must be 1–80 chars, alphanumeric / hyphens / underscores only.')
+param dnsZoneLinkSuffix string = ''
 
 //
 // Subnet allocations (non-overlapping, optimized for production workloads)
@@ -177,16 +252,47 @@ param deployAppConfig bool = true
 param deployKeyVault bool = true
 
 @description('Deploy an Azure Key Vault to securely store VM secrets, keys, and certificates.')
-param deployVmKeyVault bool = true
+param deployVmKeyVault bool = false
 
 @description('Deploy an Azure Log Analytics workspace for centralized log collection and query.')
 param deployLogAnalytics bool = true
 
-@description('When network isolation is enabled, also deploy an Azure Monitor Private Link Scope (AMPLS) with private endpoints and the related monitor/opinsights/automation private DNS zones to keep Log Analytics + Application Insights traffic on the private network. Disable to opt-out and avoid sharing those Azure Monitor private DNS zones with other workloads (preventing cross-workload DNS conflicts). Has no effect when networkIsolation is false.')
+@description('Resource ID of an existing Log Analytics workspace to reuse instead of creating one (Gap 5). When non-empty, no LAW is created in this deployment and all diagnostic settings, AMPLS linkage, and App Configuration entries point at this central workspace. Cross-RG and cross-subscription IDs are supported.')
+param existingLogAnalyticsWorkspaceResourceId string?
+
+@description('When network isolation is enabled, also deploy an Azure Monitor Private Link Scope (AMPLS) with private endpoints and the related monitor/opinsights/automation private DNS zones to keep Log Analytics + Application Insights traffic on the private network. Disable to opt-out and avoid sharing those Azure Monitor private DNS zones with other workloads (preventing cross-workload DNS conflicts). Has no effect when networkIsolation is false or when an `existingLogAnalyticsWorkspaceResourceId` is provided (the central workspace is assumed to be private-linked centrally).')
 param enablePrivateLogAnalytics bool = true
 
 @description('Deploy Azure Application Insights for application performance monitoring and diagnostics.')
 param deployAppInsights bool = true
+
+@description('Resource ID of an existing Application Insights component to reuse instead of creating one (Gap 5). Pair with `existingApplicationInsightsConnectionString` so downstream consumers (Container Apps Environment, App Configuration) receive a working connection string without requiring same-RG access to the existing component. Cross-RG/cross-subscription IDs are supported.')
+param existingApplicationInsightsResourceId string?
+
+@description('Connection string for the existing Application Insights component referenced by `existingApplicationInsightsResourceId`. Required when reusing AppInsights so the Container Apps Environment and the `APPLICATIONINSIGHTS_CONNECTION_STRING` App Configuration entry are correctly populated. Operators retrieve this from `az monitor app-insights component show -g <rg> -a <name> --query connectionString -o tsv`.')
+@secure()
+param existingApplicationInsightsConnectionString string?
+
+@description('When `existingApplicationInsightsResourceId` is provided WITHOUT a matching `existingLogAnalyticsWorkspaceResourceId`, the deployment normally fails the pre-flight check (Gap 5 §4.13) because telemetry would split between the central AppInsights workspace and this deployment\'s own LAW. Set to `true` only if the split is intentional and accepted.')
+param allowMixedObservabilityWorkspaces bool = false
+
+@description('Gap 6 — IP address of an external network virtual appliance (typically the hub Azure Firewall private IP) that should receive the spoke 0.0.0.0/0 default route when no spoke-local firewall is deployed. Effective only when `deployAzureFirewall=false`, `networkIsolation=true`, and no `hubIntegrationExistingRouteTableResourceId` is provided. Use this in AI-LZ-integrated topologies where the hub provides centralized egress filtering.')
+param hubIntegrationEgressNextHopIp string?
+
+@description('Gap 6 — Resource ID of an existing Route Table to attach the spoke workload subnets to. When set, the deployment skips creation of its local route table and reuses this RT (assumed pre-configured with the correct default route). Required for Landing Zone-managed topologies where the platform team owns the spoke RT. Mutually exclusive with `hubIntegrationEgressNextHopIp` (which builds a local RT). When set, both `deployAzureFirewall` and any local default-route creation are suppressed.')
+param hubIntegrationExistingRouteTableResourceId string?
+
+@description('Gap 7 — Resource ID of the hub Virtual Network the spoke should peer with. When set and `hubIntegrationCreateHubPeering=true`, the deployment creates a spoke→hub VNet peering. The reverse (hub→spoke) peering is the operator\'s responsibility — typically handled by a platform team script (`tests/scripts/Add-HubSpokePeering.ps1` for our test harness). Hub VNet may live in a different subscription/RG; the peering resource itself lives in the spoke VNet so the spoke deployment has the rights to create it.')
+param hubIntegrationHubVnetResourceId string?
+
+@description('Gap 7 — When true and `hubIntegrationHubVnetResourceId` is set, the deployment creates the spoke→hub peering inline. Set to `false` to defer peering creation entirely to the platform team (both directions handled externally). Only effective when the spoke VNet is created by this deployment (`useExistingVNet=false`); with BYO VNet, peering management is the operator\'s responsibility.')
+param hubIntegrationCreateHubPeering bool = true
+
+@description('Gap 7 — `allowGatewayTransit` flag on the spoke→hub peering. Set to `true` when the spoke owns a VPN/ExpressRoute gateway that the hub should be allowed to use as transit. Defaults to `false` (hub-owned gateway is the standard topology).')
+param hubIntegrationPeeringAllowGatewayTransit bool = false
+
+@description('Gap 7 — `useRemoteGateways` flag on the spoke→hub peering. Set to `true` to route on-premises traffic from the spoke through the hub-owned VPN/ExpressRoute gateway. Requires the reverse hub→spoke peering to have `allowGatewayTransit=true` and a gateway provisioned in the hub. Defaults to `false` for the standalone topology.')
+param hubIntegrationPeeringUseRemoteGateways bool = false
 
 @description('Deploy an Azure Cognitive Search service for indexing and querying content. When disabled, search-related connections are skipped and search app configuration values resolve to empty values.')
 param deploySearchService bool = true
@@ -216,8 +322,46 @@ param deployContainerRegistry bool = true
 @description('Deploy the Container Apps environment (log ingestion, VNet integration, etc.).')
 param deployContainerEnv bool = true
 
-@description('Deploy a Virtual Machine (e.g., for jumpbox or specialized workloads).')
-param deployVM bool = true
+// ---------------------------------------------------------------------------
+// Hub-component deployment flags (Gap 4, issue #58)
+// ---------------------------------------------------------------------------
+// `deployVM` (v1.x) consolidated three independent deployments — jumpbox,
+// Bastion, and NAT Gateway — under one switch. v2.0.0 splits them so each
+// component can be controlled, reused (BYO) or skipped independently.
+//
+// Defaults are nullable. When null, the effective value is derived to match
+// v1.x behavior (everything deploys when `networkIsolation=true`). Set any
+// flag explicitly to override.
+//
+//   deployJumpbox      | jumpbox VM + CSE + RBAC + (optionally) VM Key Vault
+//   deployBastion      | spoke-side Azure Bastion + Bastion NSG + Bastion PIP
+//   deployNatGateway   | spoke NAT Gateway + NAT PIP for outbound egress
+//
+// Each component also accepts a matching `existing<Component>ResourceId` BYO
+// parameter. When the BYO ID is non-empty, the corresponding `deploy*` flag
+// defaults to `false` and the existing resource ID is consumed by downstream
+// wiring (RBAC, diagnostics, runbook docs).
+//
+@description('Deploy the jumpbox Virtual Machine (and its CSE + RBAC + optional VM Key Vault). When null, defaults to `networkIsolation` to match v1.x behavior. Set to `false` for AI LZ-integrated topologies where the operator connects via central tooling.')
+param deployJumpbox bool?
+
+@description('Deploy a spoke-side Azure Bastion + Bastion NSG + Bastion PIP. When null, defaults to `networkIsolation && deployJumpbox` (preserves v1.x behavior). Set to `false` when reusing a central hub Bastion via VNet peering (Gap 7).')
+param deployBastion bool?
+
+@description('Deploy a NAT Gateway + NAT PIP for outbound spoke egress. When null, defaults to `networkIsolation && deployJumpbox` (preserves v1.x behavior). Set to `false` when egress is centralized via Azure Firewall in the hub (Gap 6).')
+param deployNatGateway bool?
+
+@description('Resource ID of an existing Bastion to reuse (BYO). Informational — used by docs/runbooks. When non-empty, `deployBastion` defaults to `false`.')
+param existingBastionResourceId string?
+
+@description('Resource ID of an existing NAT Gateway to associate with the spoke subnets (BYO). When non-empty, `deployNatGateway` defaults to `false`.')
+param existingNatGatewayResourceId string?
+
+@description('Resource ID of an existing jumpbox VM (BYO). Informational — used by docs/runbooks for post-provision flows. When non-empty, `deployJumpbox` defaults to `false`.')
+param existingJumpboxResourceId string?
+
+@description('DEPRECATED (v2.0.0). Legacy v1.x consolidated switch for jumpbox + Bastion + NAT Gateway. Provided as a transitional fallback so v1.x parameter files continue to deploy unmodified — explicit `deployJumpbox` / `deployBastion` / `deployNatGateway` values ALWAYS take precedence over this flag. Will be REMOVED in v3.0.0; migrate to the three component-specific flags.')
+param deployVM bool?
 
 @description('Deploy the virtual network subnets.')
 param deploySubnets bool = true
@@ -248,6 +392,9 @@ param extendFirewallForJumpboxBootstrap bool = true
 
 @description('When true, extends the Azure Firewall Policy with the FQDN allow-list required for ACR Tasks builds running inside the build-agents subnet to fetch language packages (npm, PyPI) and OS packages (Debian/Ubuntu apt repos, yarn). Only effective when networkIsolation, deployAzureFirewall and deployAcrTaskAgentPool are all enabled. Disable if you manage egress centrally or pre-bake all dependencies into the builder base image.')
 param extendFirewallForAcrTaskBuilds bool = true
+
+@description('Additional FQDNs to allow from the ACR Tasks build-agent subnet when extendFirewallForAcrTaskBuilds is true. Use this for application-specific build dependencies that are not part of the landing-zone default allow-list.')
+param additionalAcrTaskBuildFqdns array = []
 
 @description('List of trusted source IP CIDRs allowed to connect to the Bastion public IP on port 443. When empty, all internet inbound to port 443 is denied by default.')
 param bastionAllowedSourceIPs array = []
@@ -453,6 +600,9 @@ param dbDatabaseThroughput int?
 @description('List of Cosmos DB containers to create. Each entry supports optional throughput and indexingPolicy via safe access.')
 param databaseContainersList array
 
+@description('Enable Synapse Link / Analytical Storage on the workload Cosmos DB account. Default is false because (a) Azure rejects this on account creation in several region/subscription combinations with the literal error "Enabling analytical storage on account creation is not supported in this subscription/region. Please disable analytical storage on the account creation request and try again." (notably observed in swedencentral, see issue #93), and (b) the default landing-zone topology does not deploy any Analytical Store consumer (Synapse Link, Fabric Mirroring). The value only takes effect at account creation; Azure does not permit toggling it on an existing Cosmos DB account, so a failed provision requires deleting the account before retrying. Set to true only when a downstream pipeline actively consumes the analytical store and the target region/subscription is known to allow it. The preflight check Test-CosmosAnalyticalStorageRegionSupport will WARN if this is true in a known-restrictive region.')
+param enableCosmosAnalyticalStorage bool = false
+
 // ----------------------------------------------------------------------
 // VM params
 // ----------------------------------------------------------------------
@@ -507,7 +657,8 @@ param storageAccountContainersList array
 
 var _manifest = loadJsonContent('./manifest.json')
 var _azdTags = { 'azd-env-name': environmentName }
-var _tags = union(_azdTags, deploymentTags)
+var _modeTags = { deploymentMode: deploymentMode, 'ai-lz-version': 'v2.0.0' }
+var _tags = union(_azdTags, _modeTags, deploymentTags)
 
 // Derive the list of additional Git repositories to clone onto the jumpbox
 // directly from `manifest.json#components`. Consumers that use this landing
@@ -523,21 +674,169 @@ var _extraRepoTags  = [for c in _manifestComponents: c.?tag ?? 'main']
 var _extraRepoNames = [for c in _manifestComponents: c.?name ?? replace(last(split(c.repo, '/')), '.git', '')]
 
 var _networkIsolation = empty(string(networkIsolation)) ? false : bool(networkIsolation)
+
+// -----------------------------------------------------------------------------
+// Public network access derivation (Gap 1, issue #58)
+// -----------------------------------------------------------------------------
+// `publicNetworkAccess` for every workload service is now derived from two
+// flat inputs rather than coupled directly to `_networkIsolation`:
+//
+//   _applyIpRules:        true when the operator provided one or more CIDRs.
+//   _publicNetworkAccess: 'Enabled' when the topology is public OR an
+//                         IP allow-list is in effect; otherwise 'Disabled'.
+//
+// Two parameters cover all four scenarios documented in issue #58:
+//
+//   networkIsolation=true,  allowedIpRanges=[]      -> Private only
+//   networkIsolation=true,  allowedIpRanges=[CIDR]  -> Private + public allow-list
+//   networkIsolation=false, allowedIpRanges=[]      -> Public
+//   networkIsolation=false, allowedIpRanges=[CIDR]  -> Public restricted to listed IPs
+//
+// Per-service rule arrays are pre-shaped because each Azure RP exposes a
+// slightly different schema (Storage/ACR use `{value, action}`, KV/Search/
+// Cognitive use `{value}`, Cosmos accepts a flat string[]).
+var _applyIpRules        = !empty(allowedIpRanges)
+var _publicNetworkAccess = (!_networkIsolation || _applyIpRules) ? 'Enabled' : 'Disabled'
+var _storageIpRules      = [for ip in allowedIpRanges: { value: ip, action: 'Allow' }]
+var _acrIpRules          = [for ip in allowedIpRanges: { value: ip, action: 'Allow' }]
+var _keyVaultIpRules     = [for ip in allowedIpRanges: { value: ip }]
+var _searchIpRules       = [for ip in allowedIpRanges: { value: ip }]
+var _cognitiveIpRules    = [for ip in allowedIpRanges: { value: ip }]
+var _cosmosIpRules       = allowedIpRanges
+// ---------------------------------------------------------------------------
+// Hub-component effective deployment derivations (Gap 4, issue #58)
+// ---------------------------------------------------------------------------
+// Nullable inputs coalesce to v1.x defaults so existing parameter files
+// (without the new flags) behave identically. BYO resource IDs flip the
+// default to `false` automatically — explicit `true/false` always wins.
+var _hasExistingJumpbox     = !empty(existingJumpboxResourceId ?? '')
+var _hasExistingBastion     = !empty(existingBastionResourceId ?? '')
+var _hasExistingNatGateway  = !empty(existingNatGatewayResourceId ?? '')
+
+// Legacy fallback (v1.x compatibility): when `deployVM` is non-null, it acts
+// as a global default for all three new flags so existing parameter files
+// (e.g. GPT-RAG's manifest-driven overlay) keep working unmodified. Explicit
+// new flags ALWAYS win — `deployVM` is purely a fallback layer. Slated for
+// removal in v3.0.0; emits a deployment-time warning when consumed.
+var _legacyDeployVMSet      = !(deployVM == null)
+#disable-next-line BCP318
+var _legacyDeployVMValue    = _legacyDeployVMSet ? deployVM! : false
+var _deployJumpbox          = deployJumpbox    ?? (_legacyDeployVMSet ? (_legacyDeployVMValue && _networkIsolation && !_hasExistingJumpbox)    : (_networkIsolation && !_hasExistingJumpbox))
+var _deployBastion          = deployBastion    ?? (_legacyDeployVMSet ? (_legacyDeployVMValue && _networkIsolation && _deployJumpbox && !_hasExistingBastion)    : (_networkIsolation && _deployJumpbox && !_hasExistingBastion))
+var _deployNatGateway       = deployNatGateway ?? (_legacyDeployVMSet ? (_legacyDeployVMValue && _networkIsolation && _deployJumpbox && !_hasExistingNatGateway) : (_networkIsolation && _deployJumpbox && !_hasExistingNatGateway))
+
+// Effective NAT Gateway ID — when we deploy our own NAT GW, use that. When
+// the operator BYO'd one, use theirs. Otherwise empty (subnet leaves
+// natGateway unset). Wired into `baseSubnets[jumpbox].natGatewayResourceId`
+// so both code paths (greenfield + useExistingVNet) attach the subnet
+// to the NAT GW.
+#disable-next-line BCP318
+var _effectiveNatGatewayId  = _deployNatGateway ? natGateway.id : (_hasExistingNatGateway ? existingNatGatewayResourceId! : '')
+
+// ---------------------------------------------------------------------------
+// Observability reuse derivations (Gap 5, issue #58)
+// ---------------------------------------------------------------------------
+// When the operator supplies an existing LAW or AppInsights resource ID, we
+// SKIP creating those resources locally and route every consumer — diagnostic
+// settings, AMPLS, Container Apps Environment telemetry, App Configuration
+// publishing — to the existing IDs instead.
+//
+//   _hasExistingLaw / _hasExistingAI  : BYO ID provided?
+//   _createLogAnalytics / _createAppInsights : do we deploy our own?
+//   _lawResourceId / _appInsightsResourceId  : effective IDs to wire downstream
+//   _appInsightsConnectionString             : effective connection string for
+//                                              Container Apps + App Config
+//
+// Cross-RG-safe: we never call `.id` / `.properties` against `existing`
+// resources here — those are passed through unchanged as raw strings.
+var _hasExistingLaw           = !empty(existingLogAnalyticsWorkspaceResourceId ?? '')
+var _hasExistingAI            = !empty(existingApplicationInsightsResourceId ?? '')
+var _createLogAnalytics       = deployLogAnalytics && !_hasExistingLaw
+var _createAppInsights        = deployAppInsights && !_hasExistingAI && (_createLogAnalytics || _hasExistingLaw)
+#disable-next-line BCP318
+var _lawResourceId            = _hasExistingLaw ? existingLogAnalyticsWorkspaceResourceId! : (_createLogAnalytics ? logAnalytics.id : '')
+#disable-next-line BCP318
+var _appInsightsResourceId    = _hasExistingAI ? existingApplicationInsightsResourceId! : (_createAppInsights ? appInsights.id : '')
+#disable-next-line BCP318
+var _appInsightsConnectionString = _hasExistingAI ? (existingApplicationInsightsConnectionString ?? '') : (_createAppInsights ? appInsights.properties.ConnectionString : '')
+// Instrumentation key is the first KV pair in a v2 connection string
+// ("InstrumentationKey=<guid>;..."). We split safely so an empty string
+// returns an empty key rather than failing the template.
+var _appInsightsInstrumentationKey = !empty(_appInsightsConnectionString)
+  ? split(split(_appInsightsConnectionString, ';')[0], '=')[1]
+  : ''
+var _hasEffectiveLaw          = !empty(_lawResourceId)
+var _hasEffectiveAI           = !empty(_appInsightsResourceId)
+
+// ----------------------------------------------------------------------
+// Gap 6 — External egress / route table reuse
+// ----------------------------------------------------------------------
+// Three valid configurations are now supported for the spoke 0.0.0.0/0 default route:
+//   1. Standalone (deployAzureFirewall=true)                : local FW, local RT, route → local FW IP.
+//   2. AI-LZ-integrated, hub-FW shared                       : deployAzureFirewall=false +
+//                                                             hubIntegrationEgressNextHopIp set → local RT,
+//                                                             route → hub FW IP.
+//   3. AI-LZ-integrated, platform-team-owned RT              : hubIntegrationExistingRouteTableResourceId set →
+//                                                             no local RT, no local default route. The
+//                                                             platform team's RT is attached to spoke subnets
+//                                                             and is assumed to already define egress routing.
+// Any other combination is invalid and surfaced by the pre-flight script (Gap 9).
+var _hasExistingRouteTable = !empty(hubIntegrationExistingRouteTableResourceId ?? '')
+var _hasExternalEgress     = !empty(hubIntegrationEgressNextHopIp ?? '')
+var _createRouteTable      = _networkIsolation && !_hasExistingRouteTable
+#disable-next-line BCP318
+var _effectiveRouteTableId = _hasExistingRouteTable
+  ? hubIntegrationExistingRouteTableResourceId!
+  : (_createRouteTable ? routeTable.id : '')
+var _createDefaultRoute    = _createRouteTable && (deployAzureFirewall || _hasExternalEgress)
+#disable-next-line BCP318
+var _defaultRouteNextHopIp = deployAzureFirewall
+  ? (_networkIsolation ? azureFirewall!.properties.ipConfigurations[0].properties.privateIPAddress : '')
+  : (_hasExternalEgress ? hubIntegrationEgressNextHopIp! : '')
+
+// ----------------------------------------------------------------------
+// Gap 7 — Hub VNet peering (spoke side)
+// ----------------------------------------------------------------------
+// Spoke→hub peering is created inline when the spoke owns its VNet
+// (useExistingVNet=false) and the operator opts in. The hub VNet may
+// reside in a different subscription/RG; we parse its segments so the
+// peering resource (which lives under the spoke VNet) can reference
+// the remote VNet correctly. The reverse hub→spoke peering is the
+// operator's responsibility — see tests/scripts/Add-HubSpokePeering.ps1.
+var _hasHubVnet      = !empty(hubIntegrationHubVnetResourceId ?? '')
+var _createSpokeToHubPeering = _hasHubVnet && hubIntegrationCreateHubPeering && _networkIsolation && !useExistingVNet
+var _hubVnetSegs   = _hasHubVnet ? split(hubIntegrationHubVnetResourceId!, '/') : ['']
+var _hubVnetName   = length(_hubVnetSegs) >= 9 ? _hubVnetSegs[8] : ''
+
 // AMPLS (Azure Monitor Private Link Scope) and the related monitor/opinsights/automation
 // private DNS zones + private endpoint are only deployed when network isolation is on AND
-// the operator explicitly opts in via enablePrivateLogAnalytics. This lets isolated
-// deployments opt-out of AMPLS to avoid cross-workload private DNS conflicts.
-var _deployAmpls = _networkIsolation && deployAppInsights && deployLogAnalytics && enablePrivateLogAnalytics
+// the operator explicitly opts in via enablePrivateLogAnalytics AND we're creating our
+// own LAW locally (a BYO/central LAW is assumed to be private-linked centrally already,
+// so deploying a duplicate AMPLS would conflict on the shared monitor private DNS zones).
+var _deployAmpls = _networkIsolation && _createAppInsights && _createLogAnalytics && enablePrivateLogAnalytics
 var _deployPrivateDnsZones = _networkIsolation && !policyManagedPrivateDns
 var _searchServiceLocation = empty(searchServiceLocation) ? location : searchServiceLocation
 var _speechServiceLocation = empty(speechServiceLocation) ? location : speechServiceLocation
+var _deployAiFoundryAgentService = deployAiFoundry && deployAAfAgentSvc
+var _useExistingAiFoundrySearch = !empty(aiSearchResourceId)
+var _useExistingAiFoundryStorage = !empty(aiFoundryStorageAccountResourceId)
+var _useExistingAiFoundryCosmos = !empty(aiFoundryCosmosDBAccountResourceId)
+var _deployAiFoundrySearch = _deployAiFoundryAgentService && !_useExistingAiFoundrySearch
+var _deployAiFoundryStorage = _deployAiFoundryAgentService && !_useExistingAiFoundryStorage
 
 
 // ----------------------------------------------------------------------
 // Container vars
 // ----------------------------------------------------------------------
 
-var _containerDummyImageName = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+// Placeholder image deployed initially; replaced by the operator's real image
+// via `azd deploy`. Pinned to `aspnetapp-9.0` because:
+//   - it listens on port 8080 by default (matches our `target_port` default,
+//     so the placeholder serves a working page out of the box and lets the
+//     operator validate ingress before deploying their app);
+//   - it is published on MCR (no auth required from ACA pull egress);
+//   - the explicit tag prevents drift when Microsoft retags `:aspnetapp`.
+var _containerDummyImageName = 'mcr.microsoft.com/dotnet/samples:aspnetapp-9.0'
 
 // ----------------------------------------------------------------------
 // Networking vars
@@ -613,7 +912,7 @@ var _useCAppAPIKey  = empty(string(useCAppAPIKey))? false : bool(useCAppAPIKey)
 ///////////////////////////////////////////////////////////////////////////
 
 // Bastion NSG — restricts inbound 443 to trusted IPs only
-module bastionNsg 'modules/networking/bastion-nsg.bicep' = if (deployVM && _networkIsolation && deployNsgs) {
+module bastionNsg 'modules/networking/bastion-nsg.bicep' = if (_deployBastion && deployNsgs) {
   name: 'bastionNsgDeployment'
   params: {
     name: 'nsg-${vnetName}-${azureBastionSubnetName}'
@@ -755,6 +1054,15 @@ var _firewallDevRuntimeFqdns = [
   'registry.npmjs.org'
   '*.npmjs.org'
 ]
+// Jumpbox ACME workflow egress (issue #53): scoped only to the jumpbox subnet
+// and only when `extendFirewallForJumpboxBootstrap=true`.
+// - api.github.com: reserved for ACME-client release discovery / plugin checks.
+// - acme-v02.api.letsencrypt.org: Let's Encrypt ACME v2 directory endpoint
+//   used during certificate issuance/renewal.
+var _firewallJumpboxAcmeFqdns = [
+  'api.github.com'
+  'acme-v02.api.letsencrypt.org'
+]
 #disable-next-line no-hardcoded-env-urls
 var _firewallEditorFqdns = [
   'update.code.visualstudio.com'
@@ -799,9 +1107,11 @@ var _firewallAcrTaskFqdns = _deployAcrTaskAgentPool ? [
 
 // OS package repositories used by Debian/Ubuntu-based builder images during
 // `apt-get` steps in ACR Tasks runs. Scoped to devopsBuildAgentsSubnetPrefix
-// via `AllowAcrTaskOsPackages`. Language registries (npm/PyPI/python.org) are
-// reused from `_firewallDevRuntimeFqdns` via `AllowAcrTaskDevRuntimes`.
-// See issue #20.
+// via `AllowAcrTaskOsPackages`. Includes packages.microsoft.com because
+// Microsoft-supported Linux packages such as msodbcsql18 are common build-time
+// dependencies for solution accelerators. Language registries (npm/PyPI/python.org)
+// are reused from `_firewallDevRuntimeFqdns` via `AllowAcrTaskDevRuntimes`.
+// See issues #20 and #68.
 #disable-next-line no-hardcoded-env-urls
 var _firewallAcrTaskOsPackageFqdns = [
   'deb.debian.org'
@@ -809,10 +1119,13 @@ var _firewallAcrTaskOsPackageFqdns = [
   'archive.ubuntu.com'
   'security.ubuntu.com'
   'dl.yarnpkg.com'
+  'packages.microsoft.com'
 ]
 
-// Route Table for egress traffic control through Azure Firewall
-resource routeTable 'Microsoft.Network/routeTables@2024-07-01' = if (_networkIsolation) {
+// Route Table for egress traffic control through Azure Firewall (or external NVA, Gap 6).
+// Created only when network isolation is on AND no existing RT is provided via
+// `hubIntegrationExistingRouteTableResourceId`.
+resource routeTable 'Microsoft.Network/routeTables@2024-07-01' = if (_createRouteTable) {
   name: '${const.abbrs.networking.routeTable}${resourceToken}'
   location: location
   tags: _tags
@@ -827,7 +1140,7 @@ var baseSubnets = [
         name: agentSubnetName
         addressPrefix: agentSubnetPrefix 
         delegation: 'Microsoft.app/environments'
-        routeTableResourceId: routeTable.id
+        routeTableResourceId: _effectiveRouteTableId
         serviceEndpoints: [
           'Microsoft.CognitiveServices'
         ]
@@ -835,7 +1148,7 @@ var baseSubnets = [
       {
         name: peSubnetName
         addressPrefix: peSubnetPrefix 
-        routeTableResourceId: routeTable.id
+        routeTableResourceId: _effectiveRouteTableId
         serviceEndpoints: [
           'Microsoft.AzureCosmosDB'
         ]        
@@ -851,7 +1164,7 @@ var baseSubnets = [
         name: azureBastionSubnetName
         addressPrefix: azureBastionSubnetPrefix
         #disable-next-line BCP318
-        networkSecurityGroupResourceId: (deployVM && _networkIsolation && deployNsgs) ? bastionNsg!.outputs.id : ''
+        networkSecurityGroupResourceId: (_deployBastion && deployNsgs) ? bastionNsg!.outputs.id : ''
         delegation: ''
         serviceEndpoints : []
       }
@@ -872,8 +1185,8 @@ var baseSubnets = [
       {
         name: jumpboxSubnetName
         addressPrefix: jumpboxSubnetPrefix 
-        natGatewayResourceId: natGateway.id
-        routeTableResourceId: routeTable.id
+        natGatewayResourceId: _effectiveNatGatewayId
+        routeTableResourceId: _effectiveRouteTableId
         delegation: ''
         serviceEndpoints : []
       }
@@ -881,7 +1194,7 @@ var baseSubnets = [
         name: acaEnvironmentSubnetName
         addressPrefix: acaEnvironmentSubnetPrefix  
         delegation: 'Microsoft.app/environments'
-        routeTableResourceId: routeTable.id
+        routeTableResourceId: _effectiveRouteTableId
         serviceEndpoints: [
           'Microsoft.AzureCosmosDB'
         ]
@@ -889,7 +1202,7 @@ var baseSubnets = [
       {
         name: devopsBuildAgentsSubnetName
         addressPrefix: devopsBuildAgentsSubnetPrefix 
-        routeTableResourceId: routeTable.id
+        routeTableResourceId: _effectiveRouteTableId
         delegation: ''
         serviceEndpoints : []
       }
@@ -929,6 +1242,35 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_n
   }
 }
 
+// Gap 7 — Spoke→hub VNet peering.
+// Lives under the locally-created spoke VNet; the existing resource
+// reference below ensures Bicep can attach the peering as a child without
+// the AVM module having to expose a peerings property.
+resource spokeVnetForPeering 'Microsoft.Network/virtualNetworks@2024-07-01' existing = if (_createSpokeToHubPeering) {
+  name: vnetName
+}
+
+resource spokeToHubPeering 'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2024-07-01' = if (_createSpokeToHubPeering) {
+  parent: spokeVnetForPeering
+  name: 'to-hub-${_hubVnetName}'
+  properties: {
+    allowVirtualNetworkAccess: true
+    // Required so the hub Azure Firewall (or any hub NVA) can forward spoke
+    // traffic on behalf of the spoke. Without this, asymmetric routing
+    // through the hub firewall breaks.
+    allowForwardedTraffic: true
+    allowGatewayTransit: hubIntegrationPeeringAllowGatewayTransit
+    useRemoteGateways: hubIntegrationPeeringUseRemoteGateways
+    remoteVirtualNetwork: {
+      #disable-next-line BCP318
+      id: hubIntegrationHubVnetResourceId!
+    }
+  }
+  dependsOn: [
+    virtualNetwork
+  ]
+}
+
 // Bastion Host
 // Bastion Host — replaced the AVM `bastion-host` module with a raw resource so
 // `enableTunneling` can be set (the AVM module up to 0.8.2 does not expose it).
@@ -936,7 +1278,7 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_n
 // audio/clipboard/device redirection, and SSH agent forwarding from inside the
 // spoke. Behavior-equivalent to the previous module call: same subnet
 // (AzureBastionSubnet), Standard static PIP, optional zone redundancy, tags.
-resource bastionPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (deployVM && networkIsolation) {
+resource bastionPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (_deployBastion) {
   name: '${const.abbrs.networking.publicIPAddress}bastion-${resourceToken}'
   location: location
   tags: _tags
@@ -951,7 +1293,7 @@ resource bastionPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (
   }
 }
 
-resource testVmBastionHost 'Microsoft.Network/bastionHosts@2024-07-01' = if (deployVM && networkIsolation) {
+resource testVmBastionHost 'Microsoft.Network/bastionHosts@2024-07-01' = if (_deployBastion) {
   name: '${const.abbrs.security.bastion}testvm-${resourceToken}'
   location: location
   tags: _tags
@@ -1029,7 +1371,15 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
         action: {
           type: 'Allow'
         }
-        rules: [
+        // Azure Firewall rejects ApplicationRules whose targetFqdns is an empty
+        // array with `BadRequest: "The request is invalid."` at the ARM
+        // request-validation layer (no rule-collection-group operation is even
+        // created). Build the full set of rules below, then filter out any
+        // whose targetFqdns ended up empty due to disabled feature flags
+        // (e.g. deployJumpbox=false, deployAcrTaskAgentPool=false). This keeps
+        // every rule definition co-located while ensuring the ARM payload only
+        // ever contains rules with at least one FQDN target.
+        rules: filter([
           {
             ruleType: 'ApplicationRule'
             name: 'AllowMicrosoftContainerRegistry'
@@ -1096,6 +1446,15 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
           }
           {
             ruleType: 'ApplicationRule'
+            name: 'AllowJumpboxAcme'
+            protocols: [
+              { protocolType: 'Https', port: 443 }
+            ]
+            targetFqdns: extendFirewallForJumpboxBootstrap ? _firewallJumpboxAcmeFqdns : []
+            sourceAddresses: [jumpboxSubnetPrefix]
+          }
+          {
+            ruleType: 'ApplicationRule'
             name: 'AllowAcrTasks'
             protocols: [
               { protocolType: 'Https', port: 443 }
@@ -1109,7 +1468,7 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
             protocols: [
               { protocolType: 'Https', port: 443 }
             ]
-            targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? _firewallDevRuntimeFqdns : []
+            targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? union(_firewallDevRuntimeFqdns, additionalAcrTaskBuildFqdns) : []
             sourceAddresses: [devopsBuildAgentsSubnetPrefix]
           }
           {
@@ -1122,7 +1481,7 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
             targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? _firewallAcrTaskOsPackageFqdns : []
             sourceAddresses: [devopsBuildAgentsSubnetPrefix]
           }
-        ]
+        ], rule => !empty(rule.targetFqdns))
       }
     ]
   }
@@ -1225,24 +1584,25 @@ resource azureFirewall 'Microsoft.Network/azureFirewalls@2024-07-01' = if (deplo
   ]
 }
 
-// Default route through Azure Firewall
-resource defaultRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = if (deployAzureFirewall && _networkIsolation) {
+// Default route through Azure Firewall (local) or external NVA/hub firewall (Gap 6).
+// Skipped entirely when the operator brings their own Route Table via
+// `hubIntegrationExistingRouteTableResourceId` (we don't write into a foreign RT).
+resource defaultRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = if (_createDefaultRoute) {
   parent: routeTable
   name: 'default-to-firewall'
   properties: {
     addressPrefix: '0.0.0.0/0'
     nextHopType: 'VirtualAppliance'
-    nextHopIpAddress: azureFirewall!.properties.ipConfigurations[0].properties.privateIPAddress
+    nextHopIpAddress: _defaultRouteNextHopIp
   }
 }
 
 // Azure Firewall diagnostics to Log Analytics
-resource firewallDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (deployAzureFirewall && _networkIsolation && deployLogAnalytics) {
+resource firewallDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (deployAzureFirewall && _networkIsolation && _hasEffectiveLaw) {
   name: 'fw-diagnostics'
   scope: azureFirewall
   properties: {
-    #disable-next-line BCP318
-    workspaceId: logAnalytics.id
+    workspaceId: _lawResourceId
     logs: [
       {
         categoryGroup: 'allLogs'
@@ -1265,7 +1625,7 @@ resource testVmUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31'
 }
 
 // Test VM
-module testVm 'br/public:avm/res/compute/virtual-machine:0.15.0' = if (deployVM && _networkIsolation) {
+module testVm 'br/public:avm/res/compute/virtual-machine:0.15.0' = if (_deployJumpbox) {
   name: 'testVmDeployment'
   params: {
     name: _vmName
@@ -1317,7 +1677,7 @@ module testVm 'br/public:avm/res/compute/virtual-machine:0.15.0' = if (deployVM 
   ]
 }
 
-resource natPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (deployVM && _networkIsolation) {
+resource natPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (_deployNatGateway) {
   name: '${const.abbrs.networking.publicIPAddress}${const.abbrs.networking.natGateway}${resourceToken}'
   location: location
   sku: {
@@ -1336,7 +1696,7 @@ resource natPublicIp 'Microsoft.Network/publicIPAddresses@2024-07-01' = if (depl
 }
 
 #disable-next-line BCP081
-resource natGateway 'Microsoft.Network/natGateways@2024-10-01' = if (deployVM && _networkIsolation) {
+resource natGateway 'Microsoft.Network/natGateways@2024-10-01' = if (_deployNatGateway) {
   name: '${const.abbrs.networking.natGateway}${resourceToken}'
   location: location
   sku: {
@@ -1355,12 +1715,12 @@ resource natGateway 'Microsoft.Network/natGateways@2024-10-01' = if (deployVM &&
 // TestVM role assignments (consolidated into a single array-driven module call
 // to keep the compiled ARM template under the 4 MB deployment limit).
 // ---------------------------------------------------------------------------
-var _testVmPrincipalId = (deployVM && _networkIsolation)
+var _testVmPrincipalId = _deployJumpbox
   #disable-next-line BCP318
   ? (_useUAI ? testVmUAI.properties.principalId : testVm.outputs.systemAssignedMIPrincipalId!)
   : ''
 
-var _testVmRoles = (deployVM && _networkIsolation) ? concat(
+var _testVmRoles = _deployJumpbox ? concat(
   [
     // Reader on the resource group itself so the jumpbox SAMI can enumerate
     // ARM resources from inside the VNet (`az resource list`,
@@ -1446,6 +1806,13 @@ var _testVmRoles = (deployVM && _networkIsolation) ? concat(
       resourceId: keyVault.id
       principalType: 'ServicePrincipal'
     }
+    {
+      principalId: _testVmPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultCertificatesOfficer.guid)
+      #disable-next-line BCP318
+      resourceId: keyVault.id
+      principalType: 'ServicePrincipal'
+    }
   ] : [],
   deploySearchService ? [
     {
@@ -1504,7 +1871,7 @@ var _testVmRoles = (deployVM && _networkIsolation) ? concat(
   ] : []
 ) : []
 
-module assignTestVmRoles 'modules/security/resource-role-assignment.bicep' = if (deployVM && _networkIsolation) {
+module assignTestVmRoles 'modules/security/resource-role-assignment.bicep' = if (_deployJumpbox) {
   name: 'assignTestVmRoles'
   params: {
     name: 'assignTestVmRoles'
@@ -1513,7 +1880,7 @@ module assignTestVmRoles 'modules/security/resource-role-assignment.bicep' = if 
 }
 
 // Cosmos DB Account - Cosmos DB Built-in Data Contributor -> TestVm
-module assignCosmosDBCosmosDbBuiltInDataContributorTestVm 'modules/security/cosmos-data-plane-role-assignment.bicep' = if (deployVM && deployCosmosDb && _networkIsolation) {
+module assignCosmosDBCosmosDbBuiltInDataContributorTestVm 'modules/security/cosmos-data-plane-role-assignment.bicep' = if (_deployJumpbox && deployCosmosDb) {
   name: 'assignCosmosDBCosmosDbBuiltInDataContributorTestVm'
   params: {
     #disable-next-line BCP318
@@ -1528,7 +1895,20 @@ var _fileUris = [
   'https://raw.githubusercontent.com/Azure/bicep-ptn-aiml-landing-zone/refs/tags/${_manifest.ailz_tag}/install.ps1'
 ]
 
-resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (deployVM && deploySoftware && _networkIsolation) {
+// Windows CustomScriptExtension has a FIXED 90-minute platform provisioning
+// timeout (`VMExtensionProvisioningTimeout`) that cannot be extended from the
+// extension definition — there is no supported `timeout` setting here. Under
+// Zero Trust all jumpbox egress traverses the Azure Firewall, so package feeds
+// and external downloads can be slow or transiently blocked. `install.ps1` is
+// therefore self-limiting: it caps every network operation and tracks an
+// overall wall-clock budget (~75 min) so it always reports a terminal status
+// before the 90-minute cap, skipping OPTIONAL steps (Python, win-acme,
+// component/extra repos) under low budget while keeping CORE steps fatal. See
+// issue #82. NOTE: this script is fetched from the tag pinned in
+// `manifest.json#ailz_tag` (and passed as `-release`), so a fix to install.ps1
+// only takes effect once a new tag containing it is published AND `ailz_tag`
+// is bumped to that tag.
+resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (_deployJumpbox && deploySoftware) {
   name: '${_vmName}/cse'
   location: location
   properties: {
@@ -1559,35 +1939,50 @@ resource cse 'Microsoft.Compute/virtualMachines/extensions@2024-11-01' = if (dep
 ///////////////////////////////////////////////////////////////////////////
 
 var _dnsZonesTargetRg = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-var _dnsZonesLinkSuffix = useExistingVNet ? '-byon' : ''
+var _dnsZonesLinkSuffix = '${useExistingVNet ? '-byon' : ''}${empty(dnsZoneLinkSuffix) ? '' : '-${dnsZoneLinkSuffix}'}'
+
+// Gap 2 — Per-zone BYO flags (true ⇒ skip local creation for that zone).
+var _byoZoneCogSvcs        = !empty(existingPrivateDnsZoneCogSvcsResourceId ?? '')
+var _byoZoneOpenAi         = !empty(existingPrivateDnsZoneOpenAiResourceId ?? '')
+var _byoZoneAiServices     = !empty(existingPrivateDnsZoneAiServicesResourceId ?? '')
+var _byoZoneSearch         = !empty(existingPrivateDnsZoneSearchResourceId ?? '')
+var _byoZoneCosmos         = !empty(existingPrivateDnsZoneCosmosResourceId ?? '')
+var _byoZoneBlob           = !empty(existingPrivateDnsZoneBlobResourceId ?? '')
+var _byoZoneKeyVault       = !empty(existingPrivateDnsZoneKeyVaultResourceId ?? '')
+var _byoZoneAppConfig      = !empty(existingPrivateDnsZoneAppConfigResourceId ?? '')
+var _byoZoneContainerApps  = !empty(existingPrivateDnsZoneContainerAppsResourceId ?? '')
+var _byoZoneAcr            = !empty(existingPrivateDnsZoneAcrResourceId ?? '')
+var _byoZoneAppInsights    = !empty(existingPrivateDnsZoneAppInsightsResourceId ?? '')
+var _byoZoneAzureMonitor   = !empty(existingPrivateDnsZoneAzureMonitorResourceId ?? '')
+var _byoZoneOmsOpInsights  = !empty(existingPrivateDnsZoneOmsOpsInsightsResourceId ?? '')
+var _byoZoneOdsOpInsights  = !empty(existingPrivateDnsZoneOdsOpsInsightsResourceId ?? '')
+var _byoZoneAzureAutomation= !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '')
 
 var _dnsZonesList = _deployPrivateDnsZones ? concat(
-  [
-    { dnsName: 'privatelink.cognitiveservices.azure.com', virtualNetworkLinkName: '${vnetName}-cogsvcs-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.openai.azure.com',            virtualNetworkLinkName: '${vnetName}-openai-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.services.ai.azure.com',       virtualNetworkLinkName: '${vnetName}-aiservices-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.search.windows.net',          virtualNetworkLinkName: '${vnetName}-search-std-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.documents.azure.com',         virtualNetworkLinkName: '${vnetName}-cosmos-std-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${vnetName}-blob-std-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${vnetName}-kv-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${vnetName}-appcfg-link${_dnsZonesLinkSuffix}' }
-  ],
-  deployContainerApps ? [
+  _byoZoneCogSvcs       ? [] : [ { dnsName: 'privatelink.cognitiveservices.azure.com', virtualNetworkLinkName: '${vnetName}-cogsvcs-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneOpenAi        ? [] : [ { dnsName: 'privatelink.openai.azure.com',            virtualNetworkLinkName: '${vnetName}-openai-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneAiServices    ? [] : [ { dnsName: 'privatelink.services.ai.azure.com',       virtualNetworkLinkName: '${vnetName}-aiservices-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneSearch        ? [] : [ { dnsName: 'privatelink.search.windows.net',          virtualNetworkLinkName: '${vnetName}-search-std-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneCosmos        ? [] : [ { dnsName: 'privatelink.documents.azure.com',         virtualNetworkLinkName: '${vnetName}-cosmos-std-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneBlob          ? [] : [ { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${vnetName}-blob-std-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneKeyVault      ? [] : [ { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${vnetName}-kv-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneAppConfig     ? [] : [ { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${vnetName}-appcfg-link${_dnsZonesLinkSuffix}' } ],
+  (deployContainerApps && !_byoZoneContainerApps) ? [
     { dnsName: 'privatelink.${location}.azurecontainerapps.io', virtualNetworkLinkName: '${vnetName}-containerapps-link${_dnsZonesLinkSuffix}' }
   ] : [],
-  deployContainerRegistry ? [
+  (deployContainerRegistry && !_byoZoneAcr) ? [
     { dnsName: 'privatelink.${acrDnsSuffix}',                         virtualNetworkLinkName: '${vnetName}-containerregistry-link${_dnsZonesLinkSuffix}' }
   ] : [],
-  _deployAmpls ? [
-    { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.monitor.azure.com',                       virtualNetworkLinkName: '${vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.oms.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.ods.opinsights.azure.com',                virtualNetworkLinkName: '${vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' }
-    { dnsName: 'privatelink.agentsvc.azure.automation.net',           virtualNetworkLinkName: '${vnetName}-azure-automation-link${_dnsZonesLinkSuffix}' }
-  ] : []
+  _deployAmpls ? concat(
+    _byoZoneAppInsights     ? [] : [ { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneAzureMonitor    ? [] : [ { dnsName: 'privatelink.monitor.azure.com',           virtualNetworkLinkName: '${vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneOmsOpInsights   ? [] : [ { dnsName: 'privatelink.oms.opinsights.azure.com',    virtualNetworkLinkName: '${vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneOdsOpInsights   ? [] : [ { dnsName: 'privatelink.ods.opinsights.azure.com',    virtualNetworkLinkName: '${vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneAzureAutomation ? [] : [ { dnsName: 'privatelink.agentsvc.azure.automation.net', virtualNetworkLinkName: '${vnetName}-azure-automation-link${_dnsZonesLinkSuffix}' } ]
+  ) : []
 ) : []
 
-module privateDnsZones 'modules/networking/private-dns-zones.bicep' = if (_deployPrivateDnsZones) {
+module privateDnsZones 'modules/networking/private-dns-zones.bicep' = if (_deployPrivateDnsZones && !empty(_dnsZonesList)) {
   name: 'dep-private-dns-zones'
   params: {
     zones: _dnsZonesList
@@ -1604,49 +1999,49 @@ module privateDnsZones 'modules/networking/private-dns-zones.bicep' = if (_deplo
 // Private Endpoints (consolidated into a single for-loop module with @batchSize(1) to keep compiled ARM template under 4 MB while preserving serialized PE creation).
 ///////////////////////////////////////////////////////////////////////////
 
-var _peDnsZoneGroupBlob = policyManagedPrivateDns ? {} : {
+var _peDnsZoneGroupBlob = policyManagedPrivateDns ? null : {
   name: 'blobDnsZoneGroup'
   privateDnsZoneGroupConfigs: [
     { name: 'blobARecord', privateDnsZoneResourceId: _dnsZoneBlobId }
   ]
 }
-var _peDnsZoneGroupCosmos = policyManagedPrivateDns ? {} : {
+var _peDnsZoneGroupCosmos = policyManagedPrivateDns ? null : {
   name: 'cosmosDnsZoneGroup'
   privateDnsZoneGroupConfigs: [
     { name: 'cosmosARecord', privateDnsZoneResourceId: _dnsZoneCosmosId }
   ]
 }
-var _peDnsZoneGroupSearch = policyManagedPrivateDns ? {} : {
+var _peDnsZoneGroupSearch = policyManagedPrivateDns ? null : {
   name: 'searchDnsZoneGroup'
   privateDnsZoneGroupConfigs: [
     { name: 'searchARecord', privateDnsZoneResourceId: _dnsZoneSearchId }
   ]
 }
-var _peDnsZoneGroupKeyVault = policyManagedPrivateDns ? {} : {
+var _peDnsZoneGroupKeyVault = policyManagedPrivateDns ? null : {
   name: 'kvDnsZoneGroup'
   privateDnsZoneGroupConfigs: [
     { name: 'kvARecord', privateDnsZoneResourceId: _dnsZoneKeyVaultId }
   ]
 }
-var _peDnsZoneGroupAppConfig = policyManagedPrivateDns ? {} : {
+var _peDnsZoneGroupAppConfig = policyManagedPrivateDns ? null : {
   name: 'appConfigDnsZoneGroup'
   privateDnsZoneGroupConfigs: [
     { name: 'appConfigARecord', privateDnsZoneResourceId: _dnsZoneAppConfigId }
   ]
 }
-var _peDnsZoneGroupContainerApps = policyManagedPrivateDns ? {} : {
+var _peDnsZoneGroupContainerApps = policyManagedPrivateDns ? null : {
   name: 'ccaDnsZoneGroup'
   privateDnsZoneGroupConfigs: [
     { name: 'ccaARecord', privateDnsZoneResourceId: _dnsZoneContainerAppsId }
   ]
 }
-var _peDnsZoneGroupAcr = policyManagedPrivateDns ? {} : {
+var _peDnsZoneGroupAcr = policyManagedPrivateDns ? null : {
   name: 'acrDnsZoneGroup'
   privateDnsZoneGroupConfigs: [
     { name: 'acr', privateDnsZoneResourceId: _dnsZoneAcrId }
   ]
 }
-var _peDnsZoneGroupCogSvcs = policyManagedPrivateDns ? {} : {
+var _peDnsZoneGroupCogSvcs = policyManagedPrivateDns ? null : {
   name: 'cogSvcsDnsZoneGroup'
   privateDnsZoneGroupConfigs: [
     { name: 'cogSvcsARecord', privateDnsZoneResourceId: _dnsZoneCogSvcsId }
@@ -1693,7 +2088,7 @@ var _peList = concat(
       privateDnsZoneGroup: _peDnsZoneGroupSearch
     }
   ] : [],
-  (_networkIsolation && deployAiFoundry && aiSearchResourceId == '') ? [
+  (_networkIsolation && _deployAiFoundrySearch) ? [
     {
       name: '${const.abbrs.networking.privateEndpoint}${aiFoundrySearchServiceName}'
       privateLinkServiceConnections: [
@@ -1787,7 +2182,8 @@ module privateEndpoints 'modules/networking/private-endpoints.bicep' = if (_netw
     storageAccount!
     cosmosDBAccount!
     searchService!
-    searchServiceAIFoundry!
+    #disable-next-line BCP321
+    _deployAiFoundrySearch ? searchServiceAIFoundry : null
     keyVault!
     appConfig!
     containerEnv!
@@ -1811,20 +2207,20 @@ module privateEndpoints 'modules/networking/private-endpoints.bicep' = if (_netw
 
 var _dnsZonesSubscriptionId = useExistingVNet && !sideBySideDeploy ? varExistingVnetSubscriptionId : subscription().subscriptionId
 var _dnsZonesResourceGroupName = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
-var _dnsZoneCogSvcsId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.cognitiveservices.azure.com')
-var _dnsZoneOpenAiId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.openai.azure.com')
-var _dnsZoneAiServicesId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.services.ai.azure.com')
-var _dnsZoneSearchId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.search.windows.net')
-var _dnsZoneCosmosId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.documents.azure.com')
-var _dnsZoneBlobId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.blob.${environment().suffixes.storage}')
-var _dnsZoneKeyVaultId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')
-var _dnsZoneAppConfigId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.azconfig.io')
-var _dnsZoneContainerAppsId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.${location}.azurecontainerapps.io')
-var _dnsZoneAcrId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.${acrDnsSuffix}')
-var _dnsZoneAzureMonitorId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.monitor.azure.com')
-var _dnsZoneOmsOpsInsightsId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.oms.opinsights.azure.com')
-var _dnsZoneOdsOpsInsightsId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.ods.opinsights.azure.com')
-var _dnsZoneAzureAutomationId = resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.agentsvc.azure.automation.net')
+var _dnsZoneCogSvcsId         = !empty(existingPrivateDnsZoneCogSvcsResourceId ?? '')         ? existingPrivateDnsZoneCogSvcsResourceId!         : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.cognitiveservices.azure.com')
+var _dnsZoneOpenAiId          = !empty(existingPrivateDnsZoneOpenAiResourceId ?? '')          ? existingPrivateDnsZoneOpenAiResourceId!          : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.openai.azure.com')
+var _dnsZoneAiServicesId      = !empty(existingPrivateDnsZoneAiServicesResourceId ?? '')      ? existingPrivateDnsZoneAiServicesResourceId!      : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.services.ai.azure.com')
+var _dnsZoneSearchId          = !empty(existingPrivateDnsZoneSearchResourceId ?? '')          ? existingPrivateDnsZoneSearchResourceId!          : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.search.windows.net')
+var _dnsZoneCosmosId          = !empty(existingPrivateDnsZoneCosmosResourceId ?? '')          ? existingPrivateDnsZoneCosmosResourceId!          : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.documents.azure.com')
+var _dnsZoneBlobId            = !empty(existingPrivateDnsZoneBlobResourceId ?? '')            ? existingPrivateDnsZoneBlobResourceId!            : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.blob.${environment().suffixes.storage}')
+var _dnsZoneKeyVaultId        = !empty(existingPrivateDnsZoneKeyVaultResourceId ?? '')        ? existingPrivateDnsZoneKeyVaultResourceId!        : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')
+var _dnsZoneAppConfigId       = !empty(existingPrivateDnsZoneAppConfigResourceId ?? '')       ? existingPrivateDnsZoneAppConfigResourceId!       : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.azconfig.io')
+var _dnsZoneContainerAppsId   = !empty(existingPrivateDnsZoneContainerAppsResourceId ?? '')   ? existingPrivateDnsZoneContainerAppsResourceId!   : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.${location}.azurecontainerapps.io')
+var _dnsZoneAcrId             = !empty(existingPrivateDnsZoneAcrResourceId ?? '')             ? existingPrivateDnsZoneAcrResourceId!             : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.${acrDnsSuffix}')
+var _dnsZoneAzureMonitorId    = !empty(existingPrivateDnsZoneAzureMonitorResourceId ?? '')    ? existingPrivateDnsZoneAzureMonitorResourceId!    : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.monitor.azure.com')
+var _dnsZoneOmsOpsInsightsId  = !empty(existingPrivateDnsZoneOmsOpsInsightsResourceId ?? '')  ? existingPrivateDnsZoneOmsOpsInsightsResourceId!  : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.oms.opinsights.azure.com')
+var _dnsZoneOdsOpsInsightsId  = !empty(existingPrivateDnsZoneOdsOpsInsightsResourceId ?? '')  ? existingPrivateDnsZoneOdsOpsInsightsResourceId!  : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.ods.opinsights.azure.com')
+var _dnsZoneAzureAutomationId = !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '') ? existingPrivateDnsZoneAzureAutomationResourceId! : resourceId(_dnsZonesSubscriptionId, _dnsZonesResourceGroupName, 'Microsoft.Network/privateDnsZones', 'privatelink.agentsvc.azure.automation.net')
 
 //AI Foundry Account User Managed Identity
 resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI) {
@@ -1846,7 +2242,7 @@ resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-
 // (e.g. Poland Central -> RedundancyConfigurationNotAvailableInRegion).
 // Creating it ourselves and passing the resource ID as `existingResourceId`
 // lets us honor an explicit SKU (default `Standard_LRS`).
-module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (deployAiFoundry && aiFoundryStorageAccountResourceId == '') {
+module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (_deployAiFoundryStorage) {
   name: 'aiFoundryStorage-${resourceToken}-deployment'
   params: {
     name: aiFoundryStorageAccountName
@@ -1854,8 +2250,9 @@ module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (
     tags: _tags
     skuName: aiFoundryStorageSku
     disablePublicNetworkAccess: _networkIsolation
+    allowedIpRanges: allowedIpRanges
     privateEndpointSubnetResourceId: _networkIsolation ? _peSubnetId : ''
-    blobPrivateDnsZoneResourceId: _networkIsolation ? _dnsZoneBlobId : ''
+    blobPrivateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneBlobId : ''
   }
   dependsOn: [
     #disable-next-line BCP321
@@ -1863,8 +2260,7 @@ module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (
     #disable-next-line BCP321
     (_networkIsolation && useExistingVNet && deploySubnets) ? virtualNetworkSubnets : null
     #disable-next-line BCP321
-    _networkIsolation ? privateDnsZones : null
-    // Serialize PE creation against the shared `pe-subnet` (fixes #41). The aggregator
+    (_networkIsolation && !policyManagedPrivateDns) ? privateDnsZones : null
     // `privateEndpoints` module creates ~10 PEs against `pe-subnet` (already serialized
     // internally via @batchSize(1)). This module also creates an inline blob PE on the
     // same subnet via the AVM storage-account module's `privateEndpoints` parameter.
@@ -1884,16 +2280,26 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     // Required
     baseName: substring(resourceToken, 0, 10)
 
-    includeAssociatedResources: true
+    includeAssociatedResources: _deployAiFoundryAgentService
     location: location
     tags: deploymentTags
 
-    privateEndpointSubnetResourceId: varPeSubnetId
+    // Gate this on `_networkIsolation` to mirror the sibling `aiFoundryStorageAccount`
+    // module at L2220. When network isolation is off, the spoke VNet is not deployed,
+    // `virtualNetworkResourceId` resolves to '', and `varPeSubnetId` collapses to the
+    // bogus literal '/subnets/pe-subnet'. Passing that down to the four AI Foundry-
+    // bundled sub-modules (Cosmos, Key Vault, AI Search, Storage) makes each one's
+    // `privateNetworkingEnabled = !empty(privateEndpointSubnetResourceId)` evaluate
+    // true (the string is non-empty but invalid), and ARM template validation fails
+    // with `databaseAccount_privateEndpoints[0]` / `keyVault_privateEndpoints[0]` ...
+    // `'reference' is not valid: all function arguments should be string literals.`.
+    // See issue #63 for the full diagnosis.
+    privateEndpointSubnetResourceId: _networkIsolation ? varPeSubnetId : ''
 
     aiFoundryConfiguration: {
       accountName: aiFoundryAccountName
       allowProjectManagement: deployAfProject
-      createCapabilityHosts: deployAAfAgentSvc
+      createCapabilityHosts: _deployAiFoundryAgentService
       location: location
 
       networking: varAfNetworkingOverride
@@ -1945,7 +2351,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
   }
   dependsOn: [
     #disable-next-line BCP321
-    (aiSearchResourceId == '') ? searchServiceAIFoundry : null
+    _deployAiFoundrySearch ? searchServiceAIFoundry : null
     #disable-next-line BCP321
     (_networkIsolation && !useExistingVNet) ? virtualNetwork : null
     #disable-next-line BCP321
@@ -1953,7 +2359,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     #disable-next-line BCP321
     _networkIsolation ? privateDnsZones : null
     #disable-next-line BCP321
-    (aiFoundryStorageAccountResourceId == '') ? aiFoundryStorageAccount : null
+    _deployAiFoundryStorage ? aiFoundryStorageAccount : null
     // Serialize AI Foundry's internal PE creation against the shared `pe-subnet`
     // (fixes #41). The AVM ai-foundry module creates its own cog-svc PEs on the
     // same subnet used by the `privateEndpoints` aggregator and by the inline blob
@@ -1970,49 +2376,53 @@ var varPeSubnetId = empty(existingVnetResourceId!)
   ? '${virtualNetworkResourceId}/subnets/pe-subnet'
   : '${existingVnetResourceId!}/subnets/pe-subnet'
 
-var varAfNetworkingOverride = _networkIsolation ? {
-  cognitiveServicesPrivateDnsZoneResourceId: _dnsZoneCogSvcsId
-  openAiPrivateDnsZoneResourceId: _dnsZoneOpenAiId
-  aiServicesPrivateDnsZoneResourceId: _dnsZoneAiServicesId
-  agentServiceSubnetResourceId: deployAiFoundrySubnet ? _agentSubnetId : null
-} : null
+var varAfNetworkingOverride = _networkIsolation
+  ? (policyManagedPrivateDns
+    ? {
+        agentServiceSubnetResourceId: deployAiFoundrySubnet ? _agentSubnetId : null
+      }
+    : {
+        cognitiveServicesPrivateDnsZoneResourceId: _dnsZoneCogSvcsId
+        openAiPrivateDnsZoneResourceId: _dnsZoneOpenAiId
+        aiServicesPrivateDnsZoneResourceId: _dnsZoneAiServicesId
+        agentServiceSubnetResourceId: deployAiFoundrySubnet ? _agentSubnetId : null
+      })
+  : null
 
-var varAfAiSearchCfgComplete = {
-  existingResourceId: aiSearchResourceId != ''
-    ? aiSearchResourceId
-    : deployAiFoundry ? searchServiceAIFoundry.outputs.resourceId : null
+var varAfAiSearchCfgComplete = _deployAiFoundryAgentService ? {
+  #disable-next-line BCP318
+  existingResourceId: _useExistingAiFoundrySearch ? aiSearchResourceId : searchServiceAIFoundry.outputs.resourceId
   name: aiFoundrySearchServiceName
-  privateDnsZoneResourceId: _networkIsolation ? _dnsZoneSearchId : null
+  privateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneSearchId : null
   roleAssignments: []
-}
+} : {}
 
-var varAfCosmosCfgComplete = {
-  existingResourceId: aiFoundryCosmosDBAccountResourceId != '' ? aiFoundryCosmosDBAccountResourceId : null
+var varAfCosmosCfgComplete = _deployAiFoundryAgentService ? {
+  existingResourceId: _useExistingAiFoundryCosmos ? aiFoundryCosmosDBAccountResourceId : null
   name: aiFoundryCosmosDbName
-  privateDnsZoneResourceId: _networkIsolation ? _dnsZoneCosmosId : null
+  privateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneCosmosId : null
   roleAssignments: []
-}
+} : {}
 
-var varAfKVCfgComplete = {
+var varAfKVCfgComplete = _deployAiFoundryAgentService ? {
   existingResourceId: keyVaultResourceId != '' ? keyVaultResourceId : null
   name: '${const.abbrs.security.keyVault}ai-${resourceToken}'
-  privateDnsZoneResourceId: _networkIsolation ? _dnsZoneKeyVaultId : null
+  privateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneKeyVaultId : null
   roleAssignments: []
-}
+} : {}
 
 // NOTE: The AVM ai-foundry `storageAccountConfigurationType` does not expose
 // a `skuName` field. We instead pre-create the Storage Account in
 // `aiFoundryStorageAccount` above with the requested SKU and pass its
 // resource ID here as `existingResourceId`, which causes the AVM to skip
 // internal storage creation (and its default `Standard_GRS`).
-var varAfStorageCfgComplete = {
-  existingResourceId: aiFoundryStorageAccountResourceId != ''
-    ? aiFoundryStorageAccountResourceId
-    : (deployAiFoundry ? aiFoundryStorageAccount.outputs.resourceId : null)
+var varAfStorageCfgComplete = _deployAiFoundryAgentService ? {
+  #disable-next-line BCP318
+  existingResourceId: _useExistingAiFoundryStorage ? aiFoundryStorageAccountResourceId : aiFoundryStorageAccount.outputs.resourceId
   name: aiFoundryStorageAccountName
-  blobPrivateDnsZoneResourceId: _networkIsolation ? _dnsZoneBlobId : null
+  blobPrivateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneBlobId : null
   roleAssignments: []
-}
+} : {}
 
 var aiFoundryAccountResourceId = resourceId('Microsoft.CognitiveServices/accounts', aiFoundry!.outputs.aiServicesName)
 
@@ -2070,15 +2480,16 @@ module aiFoundryConnectionSearch 'modules/ai-foundry/connection-ai-search.bicep'
 }
 
 // Application Insights Connection
-module aiFoundryConnectionInsights 'modules/ai-foundry/connection-application-insights.bicep' = if (deployAiFoundry && deployAppInsights && deployLogAnalytics) {
+module aiFoundryConnectionInsights 'modules/ai-foundry/connection-application-insights.bicep' = if (deployAiFoundry && _hasEffectiveAI) {
   name: 'connection-appinsights-${resourceToken}'
   params: {
     aiFoundryName: aiFoundry!.outputs.aiServicesName
-    connectedResourceName: appInsights!.name
+    connectedResourceId: _appInsightsResourceId
   }
   dependsOn: [
     aiFoundry!
-    appInsights!
+    #disable-next-line BCP321
+    _createAppInsights ? appInsights : null
   ]
 }
 
@@ -2099,14 +2510,14 @@ module aiFoundryConnectionStorage 'modules/ai-foundry/connection-storage-account
 //////////////////////////////////////////////////////////////////////////
 var appInsightsInvalidLocations = ['westcentralus']
 
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (deployAppInsights && deployLogAnalytics) {
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (_createAppInsights) {
   name: appInsightsName
   location: contains(appInsightsInvalidLocations, location) ? 'eastus' : location
   kind: 'web'
   tags: _tags
   properties: {
     Application_Type: 'web'
-    WorkspaceResourceId: logAnalytics.id
+    WorkspaceResourceId: _lawResourceId
     DisableIpMasking: false
     publicNetworkAccessForIngestion: 'Enabled'
     publicNetworkAccessForQuery: 'Enabled'
@@ -2145,7 +2556,7 @@ module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bice
         }
       }
     ]
-    privateDnsZoneGroup: policyManagedPrivateDns ? {} : {
+    privateDnsZoneGroup: policyManagedPrivateDns ? null : {
       name: 'privateLinkDnsZoneGroup'
       privateDnsZoneGroupConfigs: [
         { name: 'azuremonitorARecord', privateDnsZoneResourceId: _dnsZoneAzureMonitorId }
@@ -2166,7 +2577,7 @@ resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scope
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${logAnalyticsWorkspaceName}'!
   properties :{
     #disable-next-line BCP318
-    linkedResourceId: logAnalytics.id
+    linkedResourceId: _lawResourceId
   }
   dependsOn: [
     privateLinkScope
@@ -2176,8 +2587,7 @@ resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scope
 resource privateLinkScopedResources2 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_deployAmpls) {
   name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${appInsightsName}'!
   properties :{
-    #disable-next-line BCP318
-    linkedResourceId: appInsights.id
+    linkedResourceId: _appInsightsResourceId
   }
   dependsOn: [
     privateLinkScope
@@ -2206,8 +2616,8 @@ resource containerEnv 'Microsoft.App/managedEnvironments@2025-01-01' = if (deplo
     appLogsConfiguration: {
       destination: null
     }
-    appInsightsConfiguration: (deployAppInsights && deployLogAnalytics) ? {
-      connectionString: appInsights.properties.ConnectionString
+    appInsightsConfiguration: _hasEffectiveAI ? {
+      connectionString: _appInsightsConnectionString
     } : null
     zoneRedundant: useZoneRedundancy
     workloadProfiles: workloadProfiles
@@ -2243,9 +2653,13 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-pr
     userAssignedIdentities: _useUAI ? { '${containerRegistryUAI.id}': {} } : null
   }
   properties: {
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: _publicNetworkAccess
     zoneRedundancy: useZoneRedundancy ? 'Enabled' : 'Disabled'
     dataEndpointEnabled: _networkIsolation
+    networkRuleSet: _applyIpRules ? {
+      defaultAction: 'Deny'
+      ipRules: _acrIpRules
+    } : null
     policies: {
       exportPolicy: {
         status: 'enabled'
@@ -2361,6 +2775,16 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
       containerEnv!                   
       privateDnsZones
       privateEndpoints
+      // Issue #78 — under network isolation the aca-environment-subnet UDR
+      // routes 0.0.0.0/0 to Azure Firewall. The ACA control plane validates
+      // the placeholder image (`_containerDummyImageName`, MCR) at create
+      // time. Without this dependency the container apps race the firewall
+      // rule collection group and the MCR pull is denied (EOF), which
+      // aborts the whole provision before the firewall rules ever land.
+      // The reference is to a conditional resource; in Basic mode
+      // (`deployAzureFirewall=false` or `networkIsolation=false`) the
+      // dependency is simply absent.
+      firewallPolicyDefaultRuleCollectionGroup
     ]
   }
 ]
@@ -2393,10 +2817,11 @@ module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' =
     ]
     defaultConsistencyLevel: 'Session'
     capabilitiesToAdd: ['EnableServerless']
-    enableAnalyticalStorage: true
+    enableAnalyticalStorage: enableCosmosAnalyticalStorage
     enableFreeTier: false
     networkRestrictions: {
-      publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+      publicNetworkAccess: _publicNetworkAccess
+      ipRules: _cosmosIpRules
       virtualNetworkRules: _networkIsolation ? [
         {
           subnetResourceId: _peSubnetId
@@ -2447,7 +2872,12 @@ resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' = if (deployKeyVault) {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 90
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: _publicNetworkAccess
+    networkAcls: _applyIpRules ? {
+      bypass: 'AzureServices'
+      defaultAction: 'Deny'
+      ipRules: _keyVaultIpRules
+    } : null
   }
 }
 
@@ -2466,7 +2896,7 @@ resource secret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = [for (config, i
 // Log Analytics Workspace
 //////////////////////////////////////////////////////////////////////////
 
-resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if (deployLogAnalytics) {
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if (_createLogAnalytics) {
   name: logAnalyticsWorkspaceName
   location: location
   tags: _tags
@@ -2498,7 +2928,11 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
   params: {
     name: searchServiceName
     location: _searchServiceLocation
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: _publicNetworkAccess
+    networkRuleSet: _applyIpRules ? {
+      bypass: 'AzureServices'
+      ipRules: _searchIpRules
+    } : null
     tags: _tags
 
     // SKU & capacity
@@ -2544,12 +2978,16 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
 
 // Dedicated AI Search service for AI Foundry (separate from the application search).
 // Skipped when the consumer brings their own AI Foundry search via `aiSearchResourceId`.
-module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' = if (deployAiFoundry && aiSearchResourceId == '') {
+module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' = if (_deployAiFoundrySearch) {
   name: 'searchServiceAIFoundry'
   params: {
     name: aiFoundrySearchServiceName
     location: _searchServiceLocation
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: _publicNetworkAccess
+    networkRuleSet: _applyIpRules ? {
+      bypass: 'AzureServices'
+      ipRules: _searchIpRules
+    } : null
     tags: _tags
 
     // SKU & capacity (aligned with application search defaults; override for heavier workloads)
@@ -2608,8 +3046,12 @@ module speechService 'br/public:avm/res/cognitive-services/account:0.13.2' = if 
     // Pinning it to the account name keeps the FQDN deterministic.
     customSubDomainName: speechServiceName
 
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
-    networkAcls: {
+    publicNetworkAccess: _publicNetworkAccess
+    networkAcls: _applyIpRules ? {
+      defaultAction: 'Deny'
+      bypass: 'AzureServices'
+      ipRules: _cognitiveIpRules
+    } : {
       defaultAction: 'Allow'
       bypass: 'AzureServices'
     }
@@ -2622,10 +3064,9 @@ module speechService 'br/public:avm/res/cognitive-services/account:0.13.2' = if 
     // PE is created out-of-module via `_peList` (#35).
     privateEndpoints: []
 
-    diagnosticSettings: deployLogAnalytics ? [
+    diagnosticSettings: _hasEffectiveLaw ? [
       {
-        #disable-next-line BCP318
-        workspaceResourceId: logAnalytics.id
+        workspaceResourceId: _lawResourceId
       }
     ] : []
   }
@@ -2640,7 +3081,7 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = if (d
   params: {
     name: storageAccountName
     location: location
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: _publicNetworkAccess
     skuName: 'Standard_LRS'
     kind: 'StorageV2'
     allowBlobPublicAccess: false
@@ -2649,7 +3090,8 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = if (d
     networkAcls: {
       bypass: 'AzureServices'
       virtualNetworkRules: []
-      defaultAction: 'Allow'
+      ipRules: _storageIpRules
+      defaultAction: _applyIpRules ? 'Deny' : 'Allow'
     }
     tags: _tags
     blobServices: {
@@ -3226,7 +3668,11 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2024-05-01' =
       authenticationMode: 'Pass-through'
       privateLinkDelegation: _networkIsolation ? 'Enabled' : 'Disabled'
     }
-    publicNetworkAccess: _networkIsolation ? 'Disabled' : 'Enabled'
+    // Note: App Configuration does not expose `networkAcls.ipRules` like the
+    // other workload services, so `allowedIpRanges` is intentionally ignored
+    // here. The public surface still tracks `_publicNetworkAccess` so the
+    // service follows the same Enabled/Disabled logic as the rest of the stack.
+    publicNetworkAccess: _publicNetworkAccess
     disableLocalAuth: false
   }
 }
@@ -3273,7 +3719,7 @@ module publicIngressM 'modules/networking/public-ingress.bicep' = if (_publicIng
     tags: _tags
     #disable-next-line BCP318
     appGatewaySubnetResourceId: '${virtualNetworkResourceId}/subnets/${azureAppGatewaySubnetName}'
-    logAnalyticsWorkspaceResourceId: deployLogAnalytics ? logAnalytics.id : ''
+    logAnalyticsWorkspaceResourceId: _lawResourceId
     #disable-next-line BCP318
     backendAppFqdn: containerApps[_publicIngressBackendIndex].outputs.fqdn
     useZoneRedundancy: useZoneRedundancy
@@ -3393,20 +3839,16 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'LOG_LEVEL',           value: 'INFO',                                 label: appConfigLabel, contentType: 'text/plain' }
       { name: 'ENABLE_CONSOLE_LOGGING', value: 'true',                              label: appConfigLabel, contentType: 'text/plain' }
       { name: 'RELEASE',     value: _manifest.tag,                      label: appConfigLabel, contentType: 'text/plain' }
-      #disable-next-line BCP318
-      { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: (deployAppInsights && deployLogAnalytics) ? appInsights.properties.ConnectionString : '',   label: appConfigLabel, contentType: 'text/plain' }
-      #disable-next-line BCP318
-      { name: 'APPLICATIONINSIGHTS__INSTRUMENTATIONKEY', value: (deployAppInsights && deployLogAnalytics) ? appInsights.properties.InstrumentationKey : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: _appInsightsConnectionString,   label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'APPLICATIONINSIGHTS__INSTRUMENTATIONKEY', value: _appInsightsInstrumentationKey, label: appConfigLabel, contentType: 'text/plain' }
 
       //── Resource IDs ─────────────────────────────────────────────────────
       #disable-next-line BCP318
       { name: 'KEY_VAULT_RESOURCE_ID', value: deployKeyVault ? keyVault.id : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'STORAGE_ACCOUNT_RESOURCE_ID', value: deployStorageAccount ? storageAccount.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
-      #disable-next-line BCP318
-      { name: 'APP_INSIGHTS_RESOURCE_ID', value: (deployAppInsights && deployLogAnalytics) ? appInsights.id : '', label: appConfigLabel, contentType: 'text/plain' }
-      #disable-next-line BCP318
-      { name: 'LOG_ANALYTICS_RESOURCE_ID', value: deployLogAnalytics ? logAnalytics.id : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'APP_INSIGHTS_RESOURCE_ID', value: _appInsightsResourceId, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'LOG_ANALYTICS_RESOURCE_ID', value: _lawResourceId, label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'CONTAINER_ENV_RESOURCE_ID', value: deployContainerEnv ? containerEnv.id : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AI_FOUNDRY_ACCOUNT_RESOURCE_ID', value: (deployAiFoundry) ? aiFoundryAccountResourceId : '', label: appConfigLabel, contentType: 'text/plain' }
@@ -3563,6 +4005,8 @@ output VNET_RESOURCE_ID string = virtualNetworkResourceId
 output KEY_VAULT_RESOURCE_ID string = deployKeyVault ? keyVault.id : ''
 output KEY_VAULT_NAME string = deployKeyVault ? keyVaultName : ''
 #disable-next-line BCP318
-output LOG_ANALYTICS_RESOURCE_ID string = deployLogAnalytics ? logAnalytics.id : ''
+output LOG_ANALYTICS_RESOURCE_ID string = _lawResourceId
+output APP_INSIGHTS_RESOURCE_ID string = _appInsightsResourceId
+output OBSERVABILITY_MIXED_WORKSPACES_ALLOWED bool = allowMixedObservabilityWorkspaces
 #disable-next-line BCP318
 output CONTAINER_APP_INTERNAL_FQDN string = (deployContainerApps && length(containerAppsList) > 0) ? containerApps[_publicIngressBackendIndex].outputs.fqdn : ''

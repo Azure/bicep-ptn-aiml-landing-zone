@@ -36,7 +36,7 @@ resource existingKeyVault 'Microsoft.KeyVault/vaults@2024-11-01' existing = if (
   scope: resourceGroup(existingSubscriptionId, existingResourceGroupName)
 }
 
-var privateNetworkingEnabled = !empty(privateDnsZoneResourceId) && !empty(privateEndpointSubnetResourceId)
+var privateNetworkingEnabled = !empty(privateEndpointSubnetResourceId)
 
 module keyVault 'br/public:avm/res/key-vault/vault:0.13.3' = if (empty(existingResourceId)) {
   name: take('avm.res.key-vault.vault.${name}', 64)
@@ -58,7 +58,10 @@ module keyVault 'br/public:avm/res/key-vault/vault:0.13.3' = if (empty(existingR
     softDeleteRetentionInDays: 7
     privateEndpoints: privateNetworkingEnabled
       ? [
-          {
+          union({
+            service: 'vault'
+            subnetResourceId: privateEndpointSubnetResourceId!
+          }, !empty(privateDnsZoneResourceId) ? {
             privateDnsZoneGroup: {
               privateDnsZoneGroupConfigs: [
                 {
@@ -66,9 +69,7 @@ module keyVault 'br/public:avm/res/key-vault/vault:0.13.3' = if (empty(existingR
                 }
               ]
             }
-            service: 'vault'
-            subnetResourceId: privateEndpointSubnetResourceId!
-          }
+          } : {})
         ]
       : []
     roleAssignments: roleAssignments

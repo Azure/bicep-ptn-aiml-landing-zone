@@ -36,7 +36,7 @@ resource existingStorageAccount 'Microsoft.Storage/storageAccounts@2025-01-01' e
   scope: resourceGroup(existingSubscriptionId, existingResourceGroupName)
 }
 
-var privateNetworkingEnabled = !empty(blobPrivateDnsZoneResourceId) && !empty(privateEndpointSubnetResourceId)
+var privateNetworkingEnabled = !empty(privateEndpointSubnetResourceId)
 
 module storageAccount 'br/public:avm/res/storage/storage-account:0.28.0' = if (empty(existingResourceId)) {
   name: take('avm.res.storage.storage-account.${name}', 64)
@@ -64,7 +64,10 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.28.0' = if (e
     supportsHttpsTrafficOnly: true
     privateEndpoints: privateNetworkingEnabled
       ? [
-          {
+          union({
+            service: 'blob'
+            subnetResourceId: privateEndpointSubnetResourceId!
+          }, !empty(blobPrivateDnsZoneResourceId) ? {
             privateDnsZoneGroup: {
               privateDnsZoneGroupConfigs: [
                 {
@@ -72,9 +75,7 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.28.0' = if (e
                 }
               ]
             }
-            service: 'blob'
-            subnetResourceId: privateEndpointSubnetResourceId!
-          }
+          } : {})
         ]
       : []
     roleAssignments: roleAssignments

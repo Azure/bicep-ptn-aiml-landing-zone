@@ -4,7 +4,7 @@ targetScope = 'resourceGroup'
 type endpointInfo = {
   name: string
   privateLinkServiceConnections: array
-  privateDnsZoneGroup: object
+  privateDnsZoneGroup: object?
   customNetworkInterfaceName: string?
 }
 
@@ -25,7 +25,7 @@ module privateEndpoints 'br/public:avm/res/network/private-endpoint:0.11.0' = [f
     tags: tags
     subnetResourceId: subnetResourceId
     privateLinkServiceConnections: ep.privateLinkServiceConnections
-    privateDnsZoneGroup: ep.privateDnsZoneGroup
+    privateDnsZoneGroup: ep.?privateDnsZoneGroup
     customNetworkInterfaceName: ep.?customNetworkInterfaceName ?? '${prefix}${ep.name}'
   }
 }]

@@ -36,7 +36,7 @@ resource existingCosmosDb 'Microsoft.DocumentDB/databaseAccounts@2025-04-15' exi
   scope: resourceGroup(existingSubscriptionId, existingResourceGroupName)
 }
 
-var privateNetworkingEnabled = !empty(privateDnsZoneResourceId) && !empty(privateEndpointSubnetResourceId)
+var privateNetworkingEnabled = !empty(privateEndpointSubnetResourceId)
 
 module cosmosDb 'br/public:avm/res/document-db/database-account:0.18.0' = if (empty(existingResourceId)) {
   name: take('avm.res.document-db.database-account.${name}', 64)
@@ -55,7 +55,10 @@ module cosmosDb 'br/public:avm/res/document-db/database-account:0.18.0' = if (em
     }
     privateEndpoints: privateNetworkingEnabled
       ? [
-          {
+          union({
+            service: 'Sql'
+            subnetResourceId: privateEndpointSubnetResourceId!
+          }, !empty(privateDnsZoneResourceId) ? {
             privateDnsZoneGroup: {
               privateDnsZoneGroupConfigs: [
                 {
@@ -63,9 +66,7 @@ module cosmosDb 'br/public:avm/res/document-db/database-account:0.18.0' = if (em
                 }
               ]
             }
-            service: 'Sql'
-            subnetResourceId: privateEndpointSubnetResourceId!
-          }
+          } : {})
         ]
       : []
     roleAssignments: roleAssignments
