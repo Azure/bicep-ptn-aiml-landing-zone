@@ -5,6 +5,17 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.0.17] - 2026-06-14
+
+### Added
+
+- **App Configuration is now optional for external Container Apps via the new `appRuntimeConfigurationMode` parameter** ([#89](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/89)). The parameter accepts three values, each gating the runtime configuration plane independently of `deployAppConfig` (which still controls whether the store itself is deployed):
+  - `appConfig` (default): preserves the existing behavior. The App Configuration store is populated with deployment outputs (`appConfigPopulate`, `appConfigKeyVaultPopulate`, `cosmosConfigKeyVaultPopulate`), each Container App receives the `APP_CONFIG_ENDPOINT` env var, and the per-app `App Configuration Data Reader` role assignment is created. Existing consumers see no change.
+  - `containerEnv`: skips the three App Configuration population modules and the per-app `App Configuration Data Reader` RBAC. Each Container App instead receives a curated bootstrap env block (`SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `LOCATION`, `ENVIRONMENT_NAME`, `RESOURCE_TOKEN`, `RELEASE`, `NETWORK_ISOLATION`, `USE_UAI`, `ENABLE_AGENTIC_RETRIEVAL`, `LOG_LEVEL`, `ENABLE_CONSOLE_LOGGING`, the Foundry account/project names + computed `AI_FOUNDRY_ACCOUNT_ENDPOINT` and `AI_FOUNDRY_OPENAI_ENDPOINT`, and the deployed resource names for App Insights / Container Env / Container Registry / Cosmos / Search / Storage / Key Vault / App Config). Consumers resolve endpoints and other runtime details through the Azure SDK from these names. The block contains no cross-module `.outputs` references, so it is free of circular dependencies and re-deploys idempotently (each provision recomputes from current parameter and resource-name expressions).
+  - `none`: deploys the Container App shells with only the identity bootstrap (`AZURE_TENANT_ID`, plus `AZURE_CLIENT_ID` when `useUAI=true`). Callers are expected to supply runtime configuration through their own mechanism.
+- Secrets remain on secure params / Key Vault references in every mode; they are never emitted into env vars by this template.
+- New output `APP_RUNTIME_CONFIGURATION_MODE` echoes the active mode so downstream tooling can branch on it.
+
 ## [v2.0.16] - 2026-06-14
 
 ### Fixed
