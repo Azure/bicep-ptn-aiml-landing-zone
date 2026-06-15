@@ -248,6 +248,14 @@ param deployAiFoundrySubnet bool = true
 @description('Deploy Azure App Configuration for centralized feature-flag and configuration management.')
 param deployAppConfig bool = true
 
+@description('How the landing zone should provide runtime configuration to the external Container Apps. ``appConfig`` (default) preserves the existing behavior: an Azure App Configuration store is populated with deployment outputs and each Container App receives an ``APP_CONFIG_ENDPOINT`` env var plus the ``App Configuration Data Reader`` RBAC. ``containerEnv`` skips the App Configuration population and instead injects a small set of bootstrap env vars (tenant, subscription, resource group, location, resource token, network/identity flags, plus the names of the deployed resources) directly on every Container App so consumers can resolve endpoints via SDK without going through App Configuration. ``none`` deploys the Container App shells with only the identity bootstrap env vars (``AZURE_TENANT_ID`` and ``AZURE_CLIENT_ID`` when applicable); callers are expected to supply runtime configuration through their own mechanism. Secrets are always sourced from secure parameters or Key Vault references regardless of mode. Set ``deployAppConfig=false`` to skip the store entirely when the mode is ``containerEnv`` or ``none``.')
+@allowed([
+  'appConfig'
+  'containerEnv'
+  'none'
+])
+param appRuntimeConfigurationMode string = 'appConfig'
+
 @description('Deploy an Azure Key Vault to securely store secrets, keys, and certificates.')
 param deployKeyVault bool = true
 
@@ -889,6 +897,25 @@ var _containerAppsKeyVaultKeys = _useCAppAPIKey ? _containerAppsKeyVaultKeysTemp
 // ----------------------------------------------------------------------
 var _useUAI         = empty(string(useUAI)) ? false : bool(useUAI)
 var _useCAppAPIKey  = empty(string(useCAppAPIKey))? false : bool(useCAppAPIKey)
+
+// ----------------------------------------------------------------------
+// App runtime configuration mode (Issue #89)
+// ----------------------------------------------------------------------
+// ``appConfig``     -> existing behavior: App Configuration store is populated
+//                       with deployment outputs and Container Apps receive
+//                       APP_CONFIG_ENDPOINT + the AppConfigurationDataReader RBAC.
+// ``containerEnv``  -> App Configuration population is skipped; Container Apps
+//                       receive a curated bootstrap env (tenant, subscription,
+//                       RG, location, resource token, network/identity flags
+//                       and the names of the deployed resources) so consumers
+//                       can resolve everything else through the Azure SDK
+//                       without going through App Configuration.
+// ``none``          -> Container Apps are deployed with only the identity
+//                       bootstrap (AZURE_TENANT_ID, AZURE_CLIENT_ID when UAI);
+//                       callers supply runtime configuration through their own
+//                       mechanism. Secrets remain on secure params / Key Vault.
+var _runtimeConfigIsAppConfig    = appRuntimeConfigurationMode == 'appConfig'
+var _runtimeConfigIsContainerEnv = appRuntimeConfigurationMode == 'containerEnv'
 
 //////////////////////////////////////////////////////////////////////////
 // RESOURCES
@@ -2694,6 +2721,46 @@ resource containerAppsUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023
 ]
 
 // Container Apps
+//
+// Runtime configuration env vars (Issue #89). When
+// ``appRuntimeConfigurationMode == 'containerEnv'`` every Container App
+// receives this curated bootstrap env block in addition to the identity
+// bootstrap (AZURE_TENANT_ID, AZURE_CLIENT_ID when UAI). The block intentionally
+// contains only values that are knowable from input parameters and resource
+// names (no module .outputs references) so it stays free of cross-module
+// circular dependencies and re-deploys idempotently. Endpoints that the
+// consumer needs at runtime can be resolved from these names through the
+// Azure SDK. Secrets remain on secure params / Key Vault references and are
+// NOT emitted here.
+var _containerRuntimeEnv = [
+  { name: 'SUBSCRIPTION_ID',           value: subscription().subscriptionId }
+  { name: 'AZURE_RESOURCE_GROUP',      value: resourceGroup().name }
+  { name: 'LOCATION',                  value: location }
+  { name: 'ENVIRONMENT_NAME',          value: environmentName }
+  { name: 'RESOURCE_TOKEN',            value: resourceToken }
+  { name: 'RELEASE',                   value: _manifest.tag }
+  { name: 'NETWORK_ISOLATION',         value: toLower(string(_networkIsolation)) }
+  { name: 'USE_UAI',                   value: toLower(string(_useUAI)) }
+  { name: 'ENABLE_AGENTIC_RETRIEVAL',  value: toLower(string(enableAgenticRetrieval)) }
+  { name: 'LOG_LEVEL',                 value: 'INFO' }
+  { name: 'ENABLE_CONSOLE_LOGGING',    value: 'true' }
+  { name: 'AI_FOUNDRY_ACCOUNT_NAME',   value: aiFoundryAccountName }
+  { name: 'AI_FOUNDRY_PROJECT_NAME',   value: aiFoundryProjectName }
+  { name: 'AI_FOUNDRY_ACCOUNT_ENDPOINT', value: 'https://${aiFoundryAccountName}.cognitiveservices.azure.com/' }
+  { name: 'AI_FOUNDRY_OPENAI_ENDPOINT',  value: 'https://${aiFoundryAccountName}.openai.azure.com/' }
+  { name: 'APP_INSIGHTS_NAME',         value: appInsightsName }
+  { name: 'CONTAINER_ENV_NAME',        value: containerEnvName }
+  { name: 'CONTAINER_REGISTRY_NAME',   value: containerRegistryName }
+  { name: 'CONTAINER_REGISTRY_LOGIN_SERVER', value: '${containerRegistryName}.azurecr.io' }
+  { name: 'DATABASE_ACCOUNT_NAME',     value: dbAccountName }
+  { name: 'DATABASE_NAME',             value: dbDatabaseName }
+  { name: 'SEARCH_SERVICE_NAME',       value: searchServiceName }
+  { name: 'STORAGE_ACCOUNT_NAME',      value: storageAccountName }
+  { name: 'KEY_VAULT_NAME',            value: keyVaultName }
+  { name: 'APP_CONFIG_NAME',           value: appConfigName }
+  { name: 'APP_RUNTIME_CONFIGURATION_MODE', value: appRuntimeConfigurationMode }
+]
+
 @batchSize(4)
 module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
   for (app, index) in containerAppsList: if (deployContainerApps) {
@@ -2738,11 +2805,15 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
             memory: app.?memory ?? '1.0Gi'
           }
           env: concat(
-            [
+            // APP_CONFIG_ENDPOINT is only meaningful when the App Configuration
+            // store is the source of runtime configuration (Issue #89).
+            _runtimeConfigIsAppConfig ? [
               {
                 name: 'APP_CONFIG_ENDPOINT'
                 value: 'https://${appConfigName}.azconfig.io'
               }
+            ] : [],
+            [
               {
                 name: 'AZURE_TENANT_ID'
                 value: subscription().tenantId
@@ -2762,7 +2833,10 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
                 #disable-next-line BCP318
                 value: containerAppsUAI[index].properties.clientId
               }
-            ] : []
+            ] : [],
+            // Bootstrap runtime config when the consumer opts out of App Config
+            // (Issue #89, `appRuntimeConfigurationMode == 'containerEnv'`).
+            _runtimeConfigIsContainerEnv ? _containerRuntimeEnv : []
           )
         }
       ]
@@ -3264,7 +3338,7 @@ module assignKeyVaultSecretsUserAca 'modules/security/resource-role-assignment.b
 
 // App Configuration Settings Service - App Configuration Data Reader -> ContainerApp
 module assignAppConfigAppConfigurationDataReaderContainerApps 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployAppConfig && contains(
+  for (app, i) in containerAppsList: if (deployContainerApps && deployAppConfig && _runtimeConfigIsAppConfig && contains(
     app.roles,
     const.roles.AppConfigurationDataReader.key
   )) {
@@ -3778,7 +3852,7 @@ var _modelDeploymentSettings = [
 ]
 
 // Populate App Configuration store with Container App API keys (only when useAPIKeys is true).
-module appConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployAppConfig && deployKeyVault && _useCAppAPIKey) {
+module appConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployAppConfig && _runtimeConfigIsAppConfig && deployKeyVault && _useCAppAPIKey) {
   name: 'appConfigKeyVaultPopulate'
   params: {
     #disable-next-line BCP318
@@ -3795,7 +3869,7 @@ module appConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bi
   }
 }
 
-module cosmosConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployCosmosDb && deployAppConfig && !_networkIsolation) {
+module cosmosConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployCosmosDb && deployAppConfig && _runtimeConfigIsAppConfig && !_networkIsolation) {
   name: 'cosmosConfigKeyVaultPopulate'
   params: {
     #disable-next-line BCP318
@@ -3811,7 +3885,7 @@ module cosmosConfigKeyVaultPopulate 'modules/app-configuration/app-configuration
   }
 }
 
-module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployAppConfig && !_networkIsolation) {
+module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployAppConfig && _runtimeConfigIsAppConfig && !_networkIsolation) {
   name: 'appConfigPopulate'
   params: {
     #disable-next-line BCP318
@@ -3942,6 +4016,7 @@ output NETWORK_ISOLATION bool = _networkIsolation
 output USE_UAI bool = _useUAI
 output USE_CAPP_API_KEY bool = _useCAppAPIKey
 output RELEASE string = _manifest.tag
+output APP_RUNTIME_CONFIGURATION_MODE string = appRuntimeConfigurationMode
 
 // ──────────────────────────────────────────────────────────────────────
 // Feature flagging
