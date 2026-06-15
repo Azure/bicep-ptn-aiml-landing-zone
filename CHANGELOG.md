@@ -15,6 +15,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
   - `none`: deploys the Container App shells with only the identity bootstrap (`AZURE_TENANT_ID`, plus `AZURE_CLIENT_ID` when `useUAI=true`). Callers are expected to supply runtime configuration through their own mechanism.
 - Secrets remain on secure params / Key Vault references in every mode; they are never emitted into env vars by this template.
 - New output `APP_RUNTIME_CONFIGURATION_MODE` echoes the active mode so downstream tooling can branch on it.
+- **Container Apps Dapr sidecar is now opt-in** ([#90](https://github.com/Azure/bicep-ptn-aiml-landing-zone/pull/90)). Workloads that do not need Dapr no longer pay the sidecar cost by default; consumers can re-enable it per app via the existing parameter shape.
 
 ## [v2.0.16] - 2026-06-14
 
