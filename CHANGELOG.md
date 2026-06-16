@@ -3,7 +3,11 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v2.0.18] - 2026-06-16
+
+### Fixed
+
+- **Regional preflight no longer emits non-actionable transient capacity warnings.** Removed the `SEARCH_CAPACITY`, `COSMOS_CAPACITY`, and `ACA_WORKLOAD_PROFILE_CAPACITY` warnings because Azure does not expose reliable pre-create APIs for those transient capacity pools. The preflight now stays focused on checks it can actually validate, such as provider/location support, VM SKU availability, and AI model quota.
 
 ## [v2.0.17] - 2026-06-14
 
