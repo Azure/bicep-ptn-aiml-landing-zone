@@ -733,9 +733,6 @@ function Test-AzureResources {
 #     `preprovision` hook (i.e. an azd env is present).
 #   * Provider/location support — for each resource type the landing zone
 #     provisions, confirm the provider lists the chosen region as supported.
-#   * Transient regional capacity — known to fail at provision time with
-#     `InsufficientResourcesAvailable` (Search) or `ServiceUnavailable`
-#     (Cosmos DB) even when the region is listed as supported; raised as WARN.
 #   * Jumpbox VM SKU availability — when a jumpbox is requested, confirm the
 #     requested VM size is offered (and not restricted) in the region for the
 #     current subscription.
@@ -1005,23 +1002,14 @@ function Test-RegionalReadiness {
     if ($deploySearch) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.Search' -ResourceType 'searchServices' `
             -Location $location -DisplayName 'Azure AI Search' -CodePrefix 'SEARCH'
-        Add-Finding -Severity WARN -Code 'SEARCH_CAPACITY' `
-            -Message "Azure AI Search transient regional capacity (InsufficientResourcesAvailable) is not exposed by any pre-create quota API; this preflight validates provider/location support only." `
-            -Hint "If provisioning fails with InsufficientResourcesAvailable, retry in a different region — see https://azure.github.io/AI-Landing-Zones/bicep/regional-considerations/."
     }
     if ($deployCosmos) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.DocumentDB' -ResourceType 'databaseAccounts' `
             -Location $cosmosLocation -DisplayName 'Azure Cosmos DB' -CodePrefix 'COSMOS'
-        Add-Finding -Severity WARN -Code 'COSMOS_CAPACITY' `
-            -Message "Cosmos DB transient regional capacity (ServiceUnavailable on high-demand regions) is not exposed by a pre-create quota API; this preflight validates provider/location support only." `
-            -Hint "If provisioning fails with ServiceUnavailable, retry in a different region — see https://azure.github.io/AI-Landing-Zones/bicep/regional-considerations/."
     }
     if ($deployContainerApps -or $deployContainerEnv) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.App' -ResourceType 'managedEnvironments' `
             -Location $location -DisplayName 'Azure Container Apps Environment' -CodePrefix 'ACA'
-        Add-Finding -Severity WARN -Code 'ACA_WORKLOAD_PROFILE_CAPACITY' `
-            -Message "Container Apps workload profiles (D-series/E-series) occasionally hit transient capacity limits in popular regions; this preflight validates provider/location support only." `
-            -Hint "If environment creation fails on workload-profile capacity, retry or fall back to the Consumption profile."
     }
     if ($deployAiFoundry) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.CognitiveServices' -ResourceType 'accounts' `
