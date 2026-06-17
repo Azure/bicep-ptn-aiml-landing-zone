@@ -7,7 +7,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ### Fixed
 
-- **AI Foundry project deployments now honor `aiFoundryProjectName`** ([#101](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/101)). The template already exposed `aiFoundryProjectName` and published it to App Configuration as `AI_FOUNDRY_PROJECT_NAME`, but the AI Foundry project resource still used the hardcoded name `aifoundry-default-project`. The deployed project name now follows the parameterized naming pattern, and the project display name and description can be customized with `aiFoundryProjectDisplayName` and `aiFoundryProjectDescription` while preserving the previous defaults when omitted.
+- **AI Foundry project deployments now honor `aiFoundryProjectName`** ([#101](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/101)). The template already exposed `aiFoundryProjectName` and published it to App Configuration as `AI_FOUNDRY_PROJECT_NAME`, but the AI Foundry project resource still used the hardcoded name `aifoundry-default-project`. The deployed project name now follows the parameterized naming pattern, the display name defaults to that same generated project name, and both display name and description can still be customized with `aiFoundryProjectDisplayName` and `aiFoundryProjectDescription`.
 
 ## [v2.0.18] - 2026-06-16
 

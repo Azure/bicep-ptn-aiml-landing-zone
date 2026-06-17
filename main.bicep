@@ -2340,7 +2340,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
       project: deployAfProject
         ? {
             name: aiFoundryProjectName
-            displayName: empty(aiFoundryProjectDisplayName) ? 'Default AI Foundry Project.' : aiFoundryProjectDisplayName!
+            displayName: empty(aiFoundryProjectDisplayName) ? aiFoundryProjectName : aiFoundryProjectDisplayName!
             description: empty(aiFoundryProjectDescription) ? 'This is the default project for AI Foundry.' : aiFoundryProjectDescription!
           }
         : null
