@@ -531,6 +531,12 @@ param aiFoundryAccountName string = '${const.abbrs.ai.aiFoundry}${resourceToken}
 @description('Name of the AI Foundry project resource.')
 param aiFoundryProjectName string = '${const.abbrs.ai.aiFoundryProject}${resourceToken}'
 
+@description('Optional display name for the AI Foundry project. When omitted, the default display name is used.')
+param aiFoundryProjectDisplayName string?
+
+@description('Optional description for the AI Foundry project. When omitted, the default description is used.')
+param aiFoundryProjectDescription string?
+
 @description('Name of the Storage Account used by AI Foundry for blobs, queues, tables, and files.')
 param aiFoundryStorageAccountName string = replace('${const.abbrs.storage.storageAccount}${const.abbrs.ai.aiFoundry}${resourceToken}', '-', '')
 
@@ -2333,9 +2339,9 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
 
       project: deployAfProject
         ? {
-            name: 'aifoundry-default-project'
-            displayName: 'Default AI Foundry Project.'
-            description: 'This is the default project for AI Foundry.'
+            name: aiFoundryProjectName
+            displayName: empty(aiFoundryProjectDisplayName) ? 'Default AI Foundry Project.' : aiFoundryProjectDisplayName!
+            description: empty(aiFoundryProjectDescription) ? 'This is the default project for AI Foundry.' : aiFoundryProjectDescription!
           }
         : null
     }
