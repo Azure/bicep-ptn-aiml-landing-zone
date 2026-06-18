@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v2.0.20] - 2026-06-18
+
+### Fixed
+
+- **Preflight now preserves structured parameters before regional model quota checks** ([#103](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/103)). `Expand-ParamValue` no longer coerces arrays and objects such as `modelDeploymentList` into strings while expanding `${VAR}` tokens. The AI model quota preflight can now inspect requested OpenAI deployments and fail early with `MODEL_QUOTA_INSUFFICIENT` when the requested capacity exceeds available regional quota, instead of reporting "All checks passed" and letting ARM fail later.
+
 ## [v2.0.19] - 2026-06-17
 
 ### Fixed

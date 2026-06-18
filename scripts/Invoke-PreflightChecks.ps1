@@ -182,7 +182,7 @@ function Get-AzdEnvValues {
 
 function Expand-ParamValue {
     param(
-        [string]$Raw,
+        $Raw,
         [hashtable]$EnvValues
     )
     if ($null -eq $Raw) { return $null }
