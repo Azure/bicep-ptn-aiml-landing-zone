@@ -182,7 +182,7 @@ function Get-AzdEnvValues {
 
 function Expand-ParamValue {
     param(
-        [string]$Raw,
+        $Raw,
         [hashtable]$EnvValues
     )
     if ($null -eq $Raw) { return $null }
@@ -894,9 +894,6 @@ function Test-ResourceProviders {
 #     `preprovision` hook (i.e. an azd env is present).
 #   * Provider/location support — for each resource type the landing zone
 #     provisions, confirm the provider lists the chosen region as supported.
-#   * Transient regional capacity — known to fail at provision time with
-#     `InsufficientResourcesAvailable` (Search) or `ServiceUnavailable`
-#     (Cosmos DB) even when the region is listed as supported; raised as WARN.
 #   * Jumpbox VM SKU availability — when a jumpbox is requested, confirm the
 #     requested VM size is offered (and not restricted) in the region for the
 #     current subscription.
@@ -1207,6 +1204,45 @@ function Test-CosmosAvailabilityZone {
     }
 }
 
+# --------------------------------------------------------------------------
+# Cosmos analytical storage region eligibility
+#
+# Azure rejects Cosmos DB account creation when `enableAnalyticalStorage=true`
+# is requested against a region/subscription combination that has not been
+# allow-listed for Synapse Link, with the literal error: "Enabling analytical
+# storage on account creation is not supported in this subscription/region.
+# Please disable analytical storage on the account creation request and try
+# again." The flag cannot be toggled after the account is created, so a
+# failed provision requires deleting the account before retrying. Eligibility
+# can change without notice, so this is a WARN, not a FAIL. See issue #93.
+# --------------------------------------------------------------------------
+$script:CosmosAnalyticalRestrictiveRegions = @(
+    'swedencentral'
+)
+
+function Test-CosmosAnalyticalStorageRegionSupport {
+    param([hashtable]$P)
+
+    $enableAnalytical = ConvertTo-Bool $P['enableCosmosAnalyticalStorage']
+    if (-not $enableAnalytical) { return }
+
+    $deployCosmos = ConvertTo-Bool $(if ($null -ne $P['deployCosmosDb']) { $P['deployCosmosDb'] } else { $true })
+    if (-not $deployCosmos) { return }
+
+    $location = Get-StringValue $P['location']
+    $cosmosLocation = Get-StringValue $P['cosmosLocation']
+    if ([string]::IsNullOrWhiteSpace($cosmosLocation)) { $cosmosLocation = $location }
+    if ([string]::IsNullOrWhiteSpace($cosmosLocation)) { return }
+
+    $normalized = Get-NormalizedLocation $cosmosLocation
+    $restrictive = @($script:CosmosAnalyticalRestrictiveRegions | ForEach-Object { Get-NormalizedLocation $_ })
+    if ($restrictive -notcontains $normalized) { return }
+
+    Add-Finding -Severity WARN -Code 'COSMOS_ANALYTICAL_REGION' `
+        -Message "enableCosmosAnalyticalStorage=true and cosmosLocation='$cosmosLocation' is on the known-restrictive list. Azure has been observed to reject Cosmos DB account creation in this region/subscription combination with: 'Enabling analytical storage on account creation is not supported in this subscription/region. Please disable analytical storage on the account creation request and try again.' This flag cannot be toggled after the account is created, so a failed provision requires deleting the account before retrying." `
+        -Hint "If you do not actively consume Synapse Link or Fabric Mirroring, set enableCosmosAnalyticalStorage=false (or unset ENABLE_COSMOS_ANALYTICAL_STORAGE) and re-run preflight. If you have confirmed your subscription is allow-listed for analytical storage in '$cosmosLocation',         you can ignore this WARN. See https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/93."
+        }
+
 function Test-RegionalReadiness {
     param([hashtable]$P)
 
@@ -1274,23 +1310,14 @@ function Test-RegionalReadiness {
     if ($deploySearch) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.Search' -ResourceType 'searchServices' `
             -Location $location -DisplayName 'Azure AI Search' -CodePrefix 'SEARCH'
-        Add-Finding -Severity WARN -Code 'SEARCH_CAPACITY' `
-            -Message "Azure AI Search transient regional capacity (InsufficientResourcesAvailable) is not exposed by any pre-create quota API; this preflight validates provider/location support only." `
-            -Hint "If provisioning fails with InsufficientResourcesAvailable, retry in a different region — see https://azure.github.io/AI-Landing-Zones/bicep/regional-considerations/."
     }
     if ($deployCosmos) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.DocumentDB' -ResourceType 'databaseAccounts' `
             -Location $cosmosLocation -DisplayName 'Azure Cosmos DB' -CodePrefix 'COSMOS'
-        Add-Finding -Severity WARN -Code 'COSMOS_CAPACITY' `
-            -Message "Cosmos DB transient regional capacity (ServiceUnavailable on high-demand regions) is not exposed by a pre-create quota API; this preflight validates provider/location support only." `
-            -Hint "If provisioning fails with ServiceUnavailable, retry in a different region — see https://azure.github.io/AI-Landing-Zones/bicep/regional-considerations/."
     }
     if ($deployContainerApps -or $deployContainerEnv) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.App' -ResourceType 'managedEnvironments' `
             -Location $location -DisplayName 'Azure Container Apps Environment' -CodePrefix 'ACA'
-        Add-Finding -Severity WARN -Code 'ACA_WORKLOAD_PROFILE_CAPACITY' `
-            -Message "Container Apps workload profiles (D-series/E-series) occasionally hit transient capacity limits in popular regions; this preflight validates provider/location support only." `
-            -Hint "If environment creation fails on workload-profile capacity, retry or fall back to the Consumption profile."
     }
     if ($deployAiFoundry) {
         Test-ProviderLocation -ProviderNamespace 'Microsoft.CognitiveServices' -ResourceType 'accounts' `
@@ -1425,6 +1452,7 @@ Test-AllowedIpRanges -P $effective
 Test-LocalCidrSanity -P $effective
 Test-AzureResources -P $effective
 Test-ResourceProviders
+Test-CosmosAnalyticalStorageRegionSupport -P $effective
 Test-RegionalReadiness -P $effective
 
 $exitCode = Write-FindingsReport

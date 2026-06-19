@@ -248,6 +248,14 @@ param deployAiFoundrySubnet bool = true
 @description('Deploy Azure App Configuration for centralized feature-flag and configuration management.')
 param deployAppConfig bool = true
 
+@description('How the landing zone should provide runtime configuration to the external Container Apps. ``appConfig`` (default) preserves the existing behavior: an Azure App Configuration store is populated with deployment outputs and each Container App receives an ``APP_CONFIG_ENDPOINT`` env var plus the ``App Configuration Data Reader`` RBAC. ``containerEnv`` skips the App Configuration population and instead injects a small set of bootstrap env vars (tenant, subscription, resource group, location, resource token, network/identity flags, plus the names of the deployed resources) directly on every Container App so consumers can resolve endpoints via SDK without going through App Configuration. ``none`` deploys the Container App shells with only the identity bootstrap env vars (``AZURE_TENANT_ID`` and ``AZURE_CLIENT_ID`` when applicable); callers are expected to supply runtime configuration through their own mechanism. Secrets are always sourced from secure parameters or Key Vault references regardless of mode. Set ``deployAppConfig=false`` to skip the store entirely when the mode is ``containerEnv`` or ``none``.')
+@allowed([
+  'appConfig'
+  'containerEnv'
+  'none'
+])
+param appRuntimeConfigurationMode string = 'appConfig'
+
 @description('Deploy an Azure Key Vault to securely store secrets, keys, and certificates.')
 param deployKeyVault bool = true
 
@@ -523,6 +531,12 @@ param aiFoundryAccountName string = '${const.abbrs.ai.aiFoundry}${resourceToken}
 @description('Name of the AI Foundry project resource.')
 param aiFoundryProjectName string = '${const.abbrs.ai.aiFoundryProject}${resourceToken}'
 
+@description('Optional display name for the AI Foundry project. When omitted, the default display name is used.')
+param aiFoundryProjectDisplayName string?
+
+@description('Optional description for the AI Foundry project. When omitted, the default description is used.')
+param aiFoundryProjectDescription string?
+
 @description('Name of the Storage Account used by AI Foundry for blobs, queues, tables, and files.')
 param aiFoundryStorageAccountName string = replace('${const.abbrs.storage.storageAccount}${const.abbrs.ai.aiFoundry}${resourceToken}', '-', '')
 
@@ -600,7 +614,7 @@ param dbDatabaseThroughput int?
 @description('List of Cosmos DB containers to create. Each entry supports optional throughput and indexingPolicy via safe access.')
 param databaseContainersList array
 
-@description('Enable Synapse Link / Analytical Storage on the workload Cosmos DB account. Default is false because (a) Azure currently restricts enabling this on account creation in several region/subscription combinations and breaks provisioning, and (b) the default landing-zone topology does not deploy any Analytical Store consumer (Synapse Link, Fabric Mirroring). Set to true only when a downstream pipeline actively consumes the analytical store and the target region/subscription is known to allow it. Note: Azure does not permit toggling this flag on an existing Cosmos DB account; the value only takes effect at account creation.')
+@description('Enable Synapse Link / Analytical Storage on the workload Cosmos DB account. Default is false because (a) Azure rejects this on account creation in several region/subscription combinations with the literal error "Enabling analytical storage on account creation is not supported in this subscription/region. Please disable analytical storage on the account creation request and try again." (notably observed in swedencentral, see issue #93), and (b) the default landing-zone topology does not deploy any Analytical Store consumer (Synapse Link, Fabric Mirroring). The value only takes effect at account creation; Azure does not permit toggling it on an existing Cosmos DB account, so a failed provision requires deleting the account before retrying. Set to true only when a downstream pipeline actively consumes the analytical store and the target region/subscription is known to allow it. The preflight check Test-CosmosAnalyticalStorageRegionSupport will WARN if this is true in a known-restrictive region.')
 param enableCosmosAnalyticalStorage bool = false
 
 // ----------------------------------------------------------------------
@@ -817,6 +831,12 @@ var _deployAmpls = _networkIsolation && _createAppInsights && _createLogAnalytic
 var _deployPrivateDnsZones = _networkIsolation && !policyManagedPrivateDns
 var _searchServiceLocation = empty(searchServiceLocation) ? location : searchServiceLocation
 var _speechServiceLocation = empty(speechServiceLocation) ? location : speechServiceLocation
+var _deployAiFoundryAgentService = deployAiFoundry && deployAAfAgentSvc
+var _useExistingAiFoundrySearch = !empty(aiSearchResourceId)
+var _useExistingAiFoundryStorage = !empty(aiFoundryStorageAccountResourceId)
+var _useExistingAiFoundryCosmos = !empty(aiFoundryCosmosDBAccountResourceId)
+var _deployAiFoundrySearch = _deployAiFoundryAgentService && !_useExistingAiFoundrySearch
+var _deployAiFoundryStorage = _deployAiFoundryAgentService && !_useExistingAiFoundryStorage
 
 
 // ----------------------------------------------------------------------
@@ -883,6 +903,25 @@ var _containerAppsKeyVaultKeys = _useCAppAPIKey ? _containerAppsKeyVaultKeysTemp
 // ----------------------------------------------------------------------
 var _useUAI         = empty(string(useUAI)) ? false : bool(useUAI)
 var _useCAppAPIKey  = empty(string(useCAppAPIKey))? false : bool(useCAppAPIKey)
+
+// ----------------------------------------------------------------------
+// App runtime configuration mode (Issue #89)
+// ----------------------------------------------------------------------
+// ``appConfig``     -> existing behavior: App Configuration store is populated
+//                       with deployment outputs and Container Apps receive
+//                       APP_CONFIG_ENDPOINT + the AppConfigurationDataReader RBAC.
+// ``containerEnv``  -> App Configuration population is skipped; Container Apps
+//                       receive a curated bootstrap env (tenant, subscription,
+//                       RG, location, resource token, network/identity flags
+//                       and the names of the deployed resources) so consumers
+//                       can resolve everything else through the Azure SDK
+//                       without going through App Configuration.
+// ``none``          -> Container Apps are deployed with only the identity
+//                       bootstrap (AZURE_TENANT_ID, AZURE_CLIENT_ID when UAI);
+//                       callers supply runtime configuration through their own
+//                       mechanism. Secrets remain on secure params / Key Vault.
+var _runtimeConfigIsAppConfig    = appRuntimeConfigurationMode == 'appConfig'
+var _runtimeConfigIsContainerEnv = appRuntimeConfigurationMode == 'containerEnv'
 
 //////////////////////////////////////////////////////////////////////////
 // RESOURCES
@@ -2082,7 +2121,7 @@ var _peList = concat(
       privateDnsZoneGroup: _peDnsZoneGroupSearch
     }
   ] : [],
-  (_networkIsolation && deployAiFoundry && aiSearchResourceId == '') ? [
+  (_networkIsolation && _deployAiFoundrySearch) ? [
     {
       name: '${const.abbrs.networking.privateEndpoint}${aiFoundrySearchServiceName}'
       privateLinkServiceConnections: [
@@ -2176,7 +2215,8 @@ module privateEndpoints 'modules/networking/private-endpoints.bicep' = if (_netw
     storageAccount!
     cosmosDBAccount!
     searchService!
-    searchServiceAIFoundry!
+    #disable-next-line BCP321
+    _deployAiFoundrySearch ? searchServiceAIFoundry : null
     keyVault!
     appConfig!
     containerEnv!
@@ -2235,7 +2275,7 @@ resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-
 // (e.g. Poland Central -> RedundancyConfigurationNotAvailableInRegion).
 // Creating it ourselves and passing the resource ID as `existingResourceId`
 // lets us honor an explicit SKU (default `Standard_LRS`).
-module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (deployAiFoundry && aiFoundryStorageAccountResourceId == '') {
+module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (_deployAiFoundryStorage) {
   name: 'aiFoundryStorage-${resourceToken}-deployment'
   params: {
     name: aiFoundryStorageAccountName
@@ -2273,7 +2313,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     // Required
     baseName: substring(resourceToken, 0, 10)
 
-    includeAssociatedResources: true
+    includeAssociatedResources: _deployAiFoundryAgentService
     location: location
     tags: deploymentTags
 
@@ -2292,16 +2332,16 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     aiFoundryConfiguration: {
       accountName: aiFoundryAccountName
       allowProjectManagement: deployAfProject
-      createCapabilityHosts: deployAAfAgentSvc
+      createCapabilityHosts: _deployAiFoundryAgentService
       location: location
 
       networking: varAfNetworkingOverride
 
       project: deployAfProject
         ? {
-            name: 'aifoundry-default-project'
-            displayName: 'Default AI Foundry Project.'
-            description: 'This is the default project for AI Foundry.'
+            name: aiFoundryProjectName
+            displayName: empty(aiFoundryProjectDisplayName) ? aiFoundryProjectName : aiFoundryProjectDisplayName!
+            description: empty(aiFoundryProjectDescription) ? 'This is the default project for AI Foundry.' : aiFoundryProjectDescription!
           }
         : null
     }
@@ -2344,7 +2384,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
   }
   dependsOn: [
     #disable-next-line BCP321
-    (aiSearchResourceId == '') ? searchServiceAIFoundry : null
+    _deployAiFoundrySearch ? searchServiceAIFoundry : null
     #disable-next-line BCP321
     (_networkIsolation && !useExistingVNet) ? virtualNetwork : null
     #disable-next-line BCP321
@@ -2352,7 +2392,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     #disable-next-line BCP321
     _networkIsolation ? privateDnsZones : null
     #disable-next-line BCP321
-    (aiFoundryStorageAccountResourceId == '') ? aiFoundryStorageAccount : null
+    _deployAiFoundryStorage ? aiFoundryStorageAccount : null
     // Serialize AI Foundry's internal PE creation against the shared `pe-subnet`
     // (fixes #41). The AVM ai-foundry module creates its own cog-svc PEs on the
     // same subnet used by the `privateEndpoints` aggregator and by the inline blob
@@ -2382,42 +2422,40 @@ var varAfNetworkingOverride = _networkIsolation
       })
   : null
 
-var varAfAiSearchCfgComplete = {
-  existingResourceId: aiSearchResourceId != ''
-    ? aiSearchResourceId
-    : deployAiFoundry ? searchServiceAIFoundry.outputs.resourceId : null
+var varAfAiSearchCfgComplete = _deployAiFoundryAgentService ? {
+  #disable-next-line BCP318
+  existingResourceId: _useExistingAiFoundrySearch ? aiSearchResourceId : searchServiceAIFoundry.outputs.resourceId
   name: aiFoundrySearchServiceName
   privateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneSearchId : null
   roleAssignments: []
-}
+} : {}
 
-var varAfCosmosCfgComplete = {
-  existingResourceId: aiFoundryCosmosDBAccountResourceId != '' ? aiFoundryCosmosDBAccountResourceId : null
+var varAfCosmosCfgComplete = _deployAiFoundryAgentService ? {
+  existingResourceId: _useExistingAiFoundryCosmos ? aiFoundryCosmosDBAccountResourceId : null
   name: aiFoundryCosmosDbName
   privateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneCosmosId : null
   roleAssignments: []
-}
+} : {}
 
-var varAfKVCfgComplete = {
+var varAfKVCfgComplete = _deployAiFoundryAgentService ? {
   existingResourceId: keyVaultResourceId != '' ? keyVaultResourceId : null
   name: '${const.abbrs.security.keyVault}ai-${resourceToken}'
   privateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneKeyVaultId : null
   roleAssignments: []
-}
+} : {}
 
 // NOTE: The AVM ai-foundry `storageAccountConfigurationType` does not expose
 // a `skuName` field. We instead pre-create the Storage Account in
 // `aiFoundryStorageAccount` above with the requested SKU and pass its
 // resource ID here as `existingResourceId`, which causes the AVM to skip
 // internal storage creation (and its default `Standard_GRS`).
-var varAfStorageCfgComplete = {
-  existingResourceId: aiFoundryStorageAccountResourceId != ''
-    ? aiFoundryStorageAccountResourceId
-    : (deployAiFoundry ? aiFoundryStorageAccount.outputs.resourceId : null)
+var varAfStorageCfgComplete = _deployAiFoundryAgentService ? {
+  #disable-next-line BCP318
+  existingResourceId: _useExistingAiFoundryStorage ? aiFoundryStorageAccountResourceId : aiFoundryStorageAccount.outputs.resourceId
   name: aiFoundryStorageAccountName
   blobPrivateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneBlobId : null
   roleAssignments: []
-}
+} : {}
 
 var aiFoundryAccountResourceId = resourceId('Microsoft.CognitiveServices/accounts', aiFoundry!.outputs.aiServicesName)
 
@@ -2689,6 +2727,46 @@ resource containerAppsUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023
 ]
 
 // Container Apps
+//
+// Runtime configuration env vars (Issue #89). When
+// ``appRuntimeConfigurationMode == 'containerEnv'`` every Container App
+// receives this curated bootstrap env block in addition to the identity
+// bootstrap (AZURE_TENANT_ID, AZURE_CLIENT_ID when UAI). The block intentionally
+// contains only values that are knowable from input parameters and resource
+// names (no module .outputs references) so it stays free of cross-module
+// circular dependencies and re-deploys idempotently. Endpoints that the
+// consumer needs at runtime can be resolved from these names through the
+// Azure SDK. Secrets remain on secure params / Key Vault references and are
+// NOT emitted here.
+var _containerRuntimeEnv = [
+  { name: 'SUBSCRIPTION_ID',           value: subscription().subscriptionId }
+  { name: 'AZURE_RESOURCE_GROUP',      value: resourceGroup().name }
+  { name: 'LOCATION',                  value: location }
+  { name: 'ENVIRONMENT_NAME',          value: environmentName }
+  { name: 'RESOURCE_TOKEN',            value: resourceToken }
+  { name: 'RELEASE',                   value: _manifest.tag }
+  { name: 'NETWORK_ISOLATION',         value: toLower(string(_networkIsolation)) }
+  { name: 'USE_UAI',                   value: toLower(string(_useUAI)) }
+  { name: 'ENABLE_AGENTIC_RETRIEVAL',  value: toLower(string(enableAgenticRetrieval)) }
+  { name: 'LOG_LEVEL',                 value: 'INFO' }
+  { name: 'ENABLE_CONSOLE_LOGGING',    value: 'true' }
+  { name: 'AI_FOUNDRY_ACCOUNT_NAME',   value: aiFoundryAccountName }
+  { name: 'AI_FOUNDRY_PROJECT_NAME',   value: aiFoundryProjectName }
+  { name: 'AI_FOUNDRY_ACCOUNT_ENDPOINT', value: 'https://${aiFoundryAccountName}.cognitiveservices.azure.com/' }
+  { name: 'AI_FOUNDRY_OPENAI_ENDPOINT',  value: 'https://${aiFoundryAccountName}.openai.azure.com/' }
+  { name: 'APP_INSIGHTS_NAME',         value: appInsightsName }
+  { name: 'CONTAINER_ENV_NAME',        value: containerEnvName }
+  { name: 'CONTAINER_REGISTRY_NAME',   value: containerRegistryName }
+  { name: 'CONTAINER_REGISTRY_LOGIN_SERVER', value: '${containerRegistryName}.azurecr.io' }
+  { name: 'DATABASE_ACCOUNT_NAME',     value: dbAccountName }
+  { name: 'DATABASE_NAME',             value: dbDatabaseName }
+  { name: 'SEARCH_SERVICE_NAME',       value: searchServiceName }
+  { name: 'STORAGE_ACCOUNT_NAME',      value: storageAccountName }
+  { name: 'KEY_VAULT_NAME',            value: keyVaultName }
+  { name: 'APP_CONFIG_NAME',           value: appConfigName }
+  { name: 'APP_RUNTIME_CONFIGURATION_MODE', value: appRuntimeConfigurationMode }
+]
+
 @batchSize(4)
 module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
   for (app, index) in containerAppsList: if (deployContainerApps) {
@@ -2733,11 +2811,15 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
             memory: app.?memory ?? '1.0Gi'
           }
           env: concat(
-            [
+            // APP_CONFIG_ENDPOINT is only meaningful when the App Configuration
+            // store is the source of runtime configuration (Issue #89).
+            _runtimeConfigIsAppConfig ? [
               {
                 name: 'APP_CONFIG_ENDPOINT'
                 value: 'https://${appConfigName}.azconfig.io'
               }
+            ] : [],
+            [
               {
                 name: 'AZURE_TENANT_ID'
                 value: subscription().tenantId
@@ -2757,7 +2839,10 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
                 #disable-next-line BCP318
                 value: containerAppsUAI[index].properties.clientId
               }
-            ] : []
+            ] : [],
+            // Bootstrap runtime config when the consumer opts out of App Config
+            // (Issue #89, `appRuntimeConfigurationMode == 'containerEnv'`).
+            _runtimeConfigIsContainerEnv ? _containerRuntimeEnv : []
           )
         }
       ]
@@ -2973,7 +3058,7 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
 
 // Dedicated AI Search service for AI Foundry (separate from the application search).
 // Skipped when the consumer brings their own AI Foundry search via `aiSearchResourceId`.
-module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' = if (deployAiFoundry && aiSearchResourceId == '') {
+module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' = if (_deployAiFoundrySearch) {
   name: 'searchServiceAIFoundry'
   params: {
     name: aiFoundrySearchServiceName
@@ -3259,7 +3344,7 @@ module assignKeyVaultSecretsUserAca 'modules/security/resource-role-assignment.b
 
 // App Configuration Settings Service - App Configuration Data Reader -> ContainerApp
 module assignAppConfigAppConfigurationDataReaderContainerApps 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployAppConfig && contains(
+  for (app, i) in containerAppsList: if (deployContainerApps && deployAppConfig && _runtimeConfigIsAppConfig && contains(
     app.roles,
     const.roles.AppConfigurationDataReader.key
   )) {
@@ -3773,7 +3858,7 @@ var _modelDeploymentSettings = [
 ]
 
 // Populate App Configuration store with Container App API keys (only when useAPIKeys is true).
-module appConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployAppConfig && deployKeyVault && _useCAppAPIKey) {
+module appConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployAppConfig && _runtimeConfigIsAppConfig && deployKeyVault && _useCAppAPIKey) {
   name: 'appConfigKeyVaultPopulate'
   params: {
     #disable-next-line BCP318
@@ -3790,7 +3875,7 @@ module appConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bi
   }
 }
 
-module cosmosConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployCosmosDb && deployAppConfig && !_networkIsolation) {
+module cosmosConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployCosmosDb && deployAppConfig && _runtimeConfigIsAppConfig && !_networkIsolation) {
   name: 'cosmosConfigKeyVaultPopulate'
   params: {
     #disable-next-line BCP318
@@ -3806,7 +3891,7 @@ module cosmosConfigKeyVaultPopulate 'modules/app-configuration/app-configuration
   }
 }
 
-module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployAppConfig && !_networkIsolation) {
+module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployAppConfig && _runtimeConfigIsAppConfig && !_networkIsolation) {
   name: 'appConfigPopulate'
   params: {
     #disable-next-line BCP318
@@ -3937,6 +4022,7 @@ output NETWORK_ISOLATION bool = _networkIsolation
 output USE_UAI bool = _useUAI
 output USE_CAPP_API_KEY bool = _useCAppAPIKey
 output RELEASE string = _manifest.tag
+output APP_RUNTIME_CONFIGURATION_MODE string = appRuntimeConfigurationMode
 
 // ──────────────────────────────────────────────────────────────────────
 // Feature flagging

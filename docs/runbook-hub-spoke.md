@@ -211,7 +211,15 @@ azd env set AZURE_SEARCH_LOCATION eastus    # spoke is in eastus2
 
 The Private Endpoint stays in the spoke VNet (eastus2); only the Search service itself lives in eastus. This validates the v2.0 "cross-region PE" scenario without any code changes.
 
-### 6.9. Sanity check
+### 6.9. Optional: Foundry inference-only
+
+```pwsh
+azd env set DEPLOY_AAF_AGENT_SVC false
+```
+
+Use this when the spoke only needs AI Foundry hosted model inference. The AI Foundry account, project, and model deployments remain enabled, while the Agent Service Standard Setup and its associated AI Search, Storage, Cosmos DB, and Key Vault resources are skipped. `DEPLOY_SEARCH_SERVICE` remains independent and controls only the workload/RAG Search service.
+
+### 6.10. Sanity check
 
 ```pwsh
 azd env get-values | Sort-Object
@@ -227,7 +235,7 @@ Confirm `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `AZURE_LOCATION=eastus2`, `A
 azd provision
 ```
 
-> A **pre-flight script** (`scripts/Invoke-PreflightChecks.ps1`) runs automatically as an `azd preprovision` hook before the deployment touches Azure. It validates the parameter set (CIDR ranges, BYO resources, conflicting flags) and fails fast on deterministic mistakes. To bypass it temporarily, set `$env:PREFLIGHT_SKIP = 'true'` before running `azd provision`. See [docs/v2-migration.md §6](./v2-migration.md#6-pre-flight-validation-script) for the full list of checks.
+> A **pre-flight script** (`scripts/Invoke-PreflightChecks.ps1`) runs automatically as an `azd preprovision` hook before the deployment touches Azure. It validates the parameter set (CIDR ranges, BYO resources, conflicting flags, and insufficient AI Foundry OpenAI model quota) and fails fast on deterministic mistakes. To bypass it temporarily, set `$env:PREFLIGHT_SKIP = 'true'` before running `azd provision`. See [docs/v2-migration.md §6](./v2-migration.md#6-pre-flight-validation-script) for the full list of checks.
 
 **Expected duration**: 25–35 minutes for a network-isolated spoke with all PEs and the AI Foundry account.
 

@@ -29,8 +29,10 @@
     "aiFoundryCosmosDBAccountResourceId":  { "value": null },
     
     "deployAiFoundry":                      { "value": "true" },
+    "deployAAfAgentSvc":                    { "value": "${DEPLOY_AAF_AGENT_SVC=true}" },
     "deployAiFoundrySubnet":                { "value": "true" },
     "deployAppConfig":                      { "value": "true" },
+    "appRuntimeConfigurationMode":          { "value": "${APP_RUNTIME_CONFIGURATION_MODE=appConfig}" },
     "deployAppInsights":                    { "value": "true" },
     "deployCosmosDb":                       { "value": "true" },
     "enableCosmosAnalyticalStorage":        { "value": "${ENABLE_COSMOS_ANALYTICAL_STORAGE=false}" },

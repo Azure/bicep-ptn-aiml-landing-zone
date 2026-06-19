@@ -3,7 +3,49 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v2.0.20] - 2026-06-18
+
+### Fixed
+
+- **Preflight now preserves structured parameters before regional model quota checks** ([#103](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/103)). `Expand-ParamValue` no longer coerces arrays and objects such as `modelDeploymentList` into strings while expanding `${VAR}` tokens. The AI model quota preflight can now inspect requested OpenAI deployments and fail early with `MODEL_QUOTA_INSUFFICIENT` when the requested capacity exceeds available regional quota, instead of reporting "All checks passed" and letting ARM fail later.
+
+## [v2.0.19] - 2026-06-17
+
+### Fixed
+
+- **AI Foundry project deployments now honor `aiFoundryProjectName`** ([#101](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/101)). The template already exposed `aiFoundryProjectName` and published it to App Configuration as `AI_FOUNDRY_PROJECT_NAME`, but the AI Foundry project resource still used the hardcoded name `aifoundry-default-project`. The deployed project name now follows the parameterized naming pattern, the display name defaults to that same generated project name, and both display name and description can still be customized with `aiFoundryProjectDisplayName` and `aiFoundryProjectDescription`.
+
+## [v2.0.18] - 2026-06-16
+
+### Fixed
+
+- **Regional preflight no longer emits non-actionable transient capacity warnings.** Removed the `SEARCH_CAPACITY`, `COSMOS_CAPACITY`, and `ACA_WORKLOAD_PROFILE_CAPACITY` warnings because Azure does not expose reliable pre-create APIs for those transient capacity pools. The preflight now stays focused on checks it can actually validate, such as provider/location support, VM SKU availability, and AI model quota.
+
+## [v2.0.17] - 2026-06-14
+
+### Added
+
+- **App Configuration is now optional for external Container Apps via the new `appRuntimeConfigurationMode` parameter** ([#89](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/89)). The parameter accepts three values, each gating the runtime configuration plane independently of `deployAppConfig` (which still controls whether the store itself is deployed):
+  - `appConfig` (default): preserves the existing behavior. The App Configuration store is populated with deployment outputs (`appConfigPopulate`, `appConfigKeyVaultPopulate`, `cosmosConfigKeyVaultPopulate`), each Container App receives the `APP_CONFIG_ENDPOINT` env var, and the per-app `App Configuration Data Reader` role assignment is created. Existing consumers see no change.
+  - `containerEnv`: skips the three App Configuration population modules and the per-app `App Configuration Data Reader` RBAC. Each Container App instead receives a curated bootstrap env block (`SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `LOCATION`, `ENVIRONMENT_NAME`, `RESOURCE_TOKEN`, `RELEASE`, `NETWORK_ISOLATION`, `USE_UAI`, `ENABLE_AGENTIC_RETRIEVAL`, `LOG_LEVEL`, `ENABLE_CONSOLE_LOGGING`, the Foundry account/project names + computed `AI_FOUNDRY_ACCOUNT_ENDPOINT` and `AI_FOUNDRY_OPENAI_ENDPOINT`, and the deployed resource names for App Insights / Container Env / Container Registry / Cosmos / Search / Storage / Key Vault / App Config). Consumers resolve endpoints and other runtime details through the Azure SDK from these names. The block contains no cross-module `.outputs` references, so it is free of circular dependencies and re-deploys idempotently (each provision recomputes from current parameter and resource-name expressions).
+  - `none`: deploys the Container App shells with only the identity bootstrap (`AZURE_TENANT_ID`, plus `AZURE_CLIENT_ID` when `useUAI=true`). Callers are expected to supply runtime configuration through their own mechanism.
+- Secrets remain on secure params / Key Vault references in every mode; they are never emitted into env vars by this template.
+- New output `APP_RUNTIME_CONFIGURATION_MODE` echoes the active mode so downstream tooling can branch on it.
+- **Container Apps Dapr sidecar is now opt-in** ([#90](https://github.com/Azure/bicep-ptn-aiml-landing-zone/pull/90)). Workloads that do not need Dapr no longer pay the sidecar cost by default; consumers can re-enable it per app via the existing parameter shape.
+
+## [v2.0.16] - 2026-06-14
+
+### Fixed
+
+- **Foundry Agent Service v2 Cosmos data-plane assignments now cover lazily-created containers** ([#94](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/94)). The `cosmosDbDataPlane.bicep` module previously created five per-collection `Cosmos DB Built-in Data Contributor` assignments scoped to a fixed list of capability-host containers (`thread-message-store`, `system-thread-message-store`, `agent-entity-store`, `agent-definitions-v1`, `run-state-v1`). The Foundry Agent Service v2 runtime creates additional containers on demand (for example `<workspaceId>-aoaiv2-vector-store-store`), and the data-plane RBAC check against any not-yet-created collection scope returns `403`, breaking `AIProjectClient.agents.create_version` and `run_stream` in regions such as `swedencentral`. The module now creates a single role assignment scoped at the database level (`dbs/enterprise_memory`) so the project identity is authorized over every container the capability host owns, including ones materialized at runtime. The assignment name uses `guid(roleDefinitionId, principalId, dbScope, projectWorkspaceId)` so redeploys are idempotent. The database is dedicated to the Foundry capability host, so this is not a privilege widening in practice.
+  - Operator note for upgrades from v2.0.13 / v2.0.14: the previous five per-collection assignments remain on the account as orphans. They are informational only, not blocking, and are not removed by Bicep. If you want to clean them up, use `az cosmosdb sql role assignment delete` against the `dbs/enterprise_memory/colls/<workspaceId>-<suffix>` scopes.
+- **Preflight warns when `enableCosmosAnalyticalStorage=true` targets a region that rejects analytical storage at account creation** ([#93](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/93)). Several region/subscription combinations (notably `swedencentral`) reject Cosmos DB account creation with `Enabling analytical storage on account creation is not supported in this subscription/region. Please disable analytical storage on the account creation request and try again.`, and the flag cannot be toggled post-creation. `scripts/Invoke-PreflightChecks.ps1` now runs `Test-CosmosAnalyticalStorageRegionSupport`, which emits a `WARN` (code `COSMOS_ANALYTICAL_REGION`) when `enableCosmosAnalyticalStorage=true` and `cosmosLocation` (or `location` as fallback) is on the known-restrictive list. It is a `WARN` rather than `FAIL` because subscription/region eligibility for analytical storage can change without notice. The `@description` of `enableCosmosAnalyticalStorage` in `main.bicep` now also names the literal Cosmos error and links #93 so operators can self-diagnose without re-reading the issue.
+
+## [v2.0.15] - 2026-06-11
+
+### Fixed
+
+- **AI Foundry inference-only deployments no longer create Agent Service dependencies** ([#88](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/88), [#84](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/84)). `deployAAfAgentSvc` now controls the Agent Service Standard Setup and its associated AI Search, Storage, Cosmos DB, and Key Vault resources through the AI Foundry wrapper's `includeAssociatedResources` flag. `deployAiFoundry=true` with `deployAAfAgentSvc=false` deploys the Foundry account, project, and model deployments for hosted inference only, while `deploySearchService` remains scoped to the workload/RAG Search service.
 
 ## [v2.0.14] - 2026-06-04
 

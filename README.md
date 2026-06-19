@@ -20,7 +20,8 @@ A handful of other quality-of-life additions:
 - **`allowedIpRanges`** — let named CIDRs reach the data plane of Storage, Key Vault, Cosmos DB, AI Search, ACR, AI Foundry, and App Configuration without disabling private endpoints. Use this when developers need to query the workload from their laptops without routing through Bastion.
 - **Decoupled hub components** — `deployJumpbox`, `deployBastion`, and `deployNatGateway` are now independent flags. No more all-or-nothing `deployVM`.
 - **Hub integration helpers** — `hubIntegration.hubVnetResourceId` creates the spoke→hub peering for you; `hubIntegration.egressNextHopIp` routes spoke egress through your hub firewall / NVA.
-- **Pre-flight validation** — `scripts/Invoke-PreflightChecks.ps1` runs automatically as an `azd preprovision` hook and catches the usual mistakes (CIDR overlap, undersized subnets, missing BYO resource IDs, conflicting flags) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
+- **Pre-flight validation** — `scripts/Invoke-PreflightChecks.ps1` runs automatically as an `azd preprovision` hook and catches the usual mistakes (CIDR overlap, undersized subnets, missing BYO resource IDs, conflicting flags, and insufficient AI Foundry OpenAI model quota) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
+- **AI Foundry project naming** — `aiFoundryProjectName`, `aiFoundryProjectDisplayName`, and `aiFoundryProjectDescription` let consumers customize the deployed AI Foundry project instead of using a hardcoded default.
 
 **Pick a runbook to deploy:**
 
@@ -186,6 +187,19 @@ If your application build needs additional HTTPS endpoints, add them to the `add
 | `AllowAcrTasks` | `devopsBuildAgentsSubnetPrefix` | `*.azurecr.io`, `*.data.azurecr.io` | ACR Tasks agent pool talking to its registry |
 
 Set `extendFirewallForJumpboxBootstrap=false` to skip the jumpbox-scoped rules when egress is managed centrally by another policy.
+
+### AI Foundry deployment modes
+
+`deployAiFoundry` controls the base AI Foundry account, project, and model deployments. `deployAAfAgentSvc` controls the Agent Service Standard Setup and its associated AI Search, Storage, Cosmos DB, and Key Vault resources. `deploySearchService` controls only the workload/RAG Azure AI Search service used by applications.
+
+| Scenario | Parameters |
+| --- | --- |
+| Full Foundry Agent Service setup | `deployAiFoundry=true`, `deployAAfAgentSvc=true` |
+| Foundry inference-only | `deployAiFoundry=true`, `deployAAfAgentSvc=false` |
+| Workload Search only | `deploySearchService=true`, independent of `deployAAfAgentSvc` |
+| No Foundry resources | `deployAiFoundry=false` |
+
+Use `DEPLOY_AAF_AGENT_SVC=false` when an external app only needs hosted model inference from Foundry and does not need Agent Service capability hosts or their associated state resources.
 
 ### Permissions
 
