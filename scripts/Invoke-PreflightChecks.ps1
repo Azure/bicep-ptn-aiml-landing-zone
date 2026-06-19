@@ -275,6 +275,39 @@ function Get-ArrayValue {
     return @($V)
 }
 
+function Resolve-DeployJumpbox {
+    # Mirror main.bicep `_deployJumpbox`:
+    #   deployJumpbox ?? deployVM ?? (networkIsolation && !existingJumpboxResourceId)
+    # main.parameters.json substitutes unset env vars as the literal string 'null'
+    # (e.g. "${DEPLOY_JUMPBOX=null}"), which ConvertTo-Bool would silently turn
+    # into $false and mask the Bicep default. Honor explicit true/false here and
+    # otherwise fall through to the same default-derivation Bicep uses.
+    param([hashtable]$P)
+    foreach ($key in 'deployJumpbox', 'deployVM') {
+        $raw = (Get-StringValue $P[$key]).Trim().ToLowerInvariant()
+        if ($raw -in 'true', '1', 'yes')  { return $true }
+        if ($raw -in 'false', '0', 'no')  { return $false }
+    }
+    $hasExisting = -not [string]::IsNullOrWhiteSpace((Get-StringValue $P['existingJumpboxResourceId']))
+    return (ConvertTo-Bool $P['networkIsolation']) -and -not $hasExisting
+}
+
+function Resolve-DeployFlag {
+    # Resolve a feature-flag parameter to a bool, honoring an explicit value and
+    # falling back to $Default when the parameter is null, empty, or still an
+    # unresolved '${VAR}' token. Mirrors the default-on/off semantics expressed
+    # in main.parameters.json (e.g. "${DEPLOY_SEARCH_SERVICE=true}").
+    param(
+        [hashtable]$P,
+        [Parameter(Mandatory)] [string]$Key,
+        [bool]$Default
+    )
+    $raw = Get-StringValue $P[$Key]
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $Default }
+    if ($raw -match '^\$\{') { return $Default }
+    return [bool](ConvertTo-Bool $raw)
+}
+
 # --------------------------------------------------------------------------
 # Deterministic topology checks (no Azure calls)
 # --------------------------------------------------------------------------
@@ -359,10 +392,9 @@ function Test-Topology {
 
     # Network isolation without any access path
     $netIso = ConvertTo-Bool $P['networkIsolation']
-    $deployJump = ConvertTo-Bool $P['deployJumpbox']
-    $deployVmLegacy = ConvertTo-Bool $P['deployVM']
+    $deployJump = Resolve-DeployJumpbox $P
     $allowedIps = Get-ArrayValue $P['allowedIpRanges']
-    if ($netIso -and -not $deployJump -and -not $deployVmLegacy -and $allowedIps.Count -eq 0) {
+    if ($netIso -and -not $deployJump -and $allowedIps.Count -eq 0) {
         Add-Finding -Severity WARN -Code 'ISO_NO_INGRESS' `
             -Message "networkIsolation=true but no jumpbox/VM is deployed and allowedIpRanges is empty." `
             -Hint "You will not have any way to reach the workload after deployment. Set DEPLOY_JUMPBOX=true, ALLOWED_IP_RANGES=<your-ip>, or plan to use an existing hub jumpbox via EXISTING_JUMPBOX_RESOURCE_ID."
@@ -720,6 +752,208 @@ function Test-AzureResources {
 }
 
 # --------------------------------------------------------------------------
+# Resource-provider registration check. Discovers the Azure resource provider
+# namespaces referenced by `resource 'Microsoft.X/...'` declarations across all
+# of the repo's *.bicep files (excluding tests/), then verifies each is
+# Registered. Providers are classified as "selected" or "optional" against the
+# effective feature flags: an unregistered provider only FAILs preflight when
+# its resource is actually selected by the current parameters; providers for
+# feature-flagged-off resources are reported as a non-blocking WARN. Read-only —
+# does not attempt to register providers.
+# --------------------------------------------------------------------------
+
+function Get-RequiredResourceProviders {
+    # Friendly descriptions for known namespaces. The actual *list* of
+    # namespaces is derived from the Bicep tree below so it stays in sync with
+    # main.bicep / modules as resources are added or removed. Unknown
+    # namespaces (e.g. a future addition) still get checked — they just show
+    # a generic reason and are treated as optional (WARN, never FAIL).
+    param([hashtable]$P = @{})
+    $reasonByNamespace = @{
+        'Microsoft.Resources'            = 'Always required (resource group, deployments)'
+        'Microsoft.Authorization'        = 'Role assignments and role definitions'
+        'Microsoft.Network'              = 'VNet, NSGs, Private DNS, Private Endpoints, Bastion, NAT Gateway, Firewall, App Gateway'
+        'Microsoft.ManagedIdentity'      = 'User-assigned managed identities'
+        'Microsoft.Compute'              = 'Jumpbox VM and VM extensions'
+        'Microsoft.Storage'              = 'Storage accounts (workload + AI Foundry)'
+        'Microsoft.KeyVault'             = 'Key Vault'
+        'Microsoft.AppConfiguration'     = 'App Configuration store'
+        'Microsoft.OperationalInsights'  = 'Log Analytics workspace'
+        'Microsoft.Insights'             = 'Application Insights, diagnostic settings, AMPLS'
+        'Microsoft.OperationsManagement' = 'Log Analytics solutions'
+        'Microsoft.AlertsManagement'     = 'Smart detector alerts on Application Insights'
+        'Microsoft.App'                  = 'Container Apps + managed environment'
+        'Microsoft.ContainerRegistry'    = 'Azure Container Registry + ACR Tasks agent pool'
+        'Microsoft.CognitiveServices'    = 'AI Foundry account/project, AI Services, Speech'
+        'Microsoft.Search'               = 'Azure AI Search'
+        'Microsoft.DocumentDB'           = 'Cosmos DB workload account + AI Foundry-bundled Cosmos'
+        'Microsoft.Bing'                 = 'Bing grounding'
+    }
+
+    # Always-required providers used implicitly at deploy time (LA workspace
+    # solutions, smart-detector alerts attached to App Insights, the resource
+    # group/deployment plumbing itself). These never appear as `resource`
+    # declarations in the Bicep tree so we add them unconditionally.
+    $implicitNamespaces = @('Microsoft.Resources', 'Microsoft.OperationsManagement', 'Microsoft.AlertsManagement')
+
+    # Discover provider namespaces from `resource 'Microsoft.X/...'` declarations
+    # across the repo's Bicep files. Skips tests/ (not part of azd provision).
+    $repoRoot = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) { '' } else { Split-Path -Parent $PSScriptRoot }
+    $discovered = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $resourceRegex = [regex]::new("^\s*resource\s+\w+\s+'(Microsoft\.[^/']+)/", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+
+    if (-not [string]::IsNullOrWhiteSpace($repoRoot) -and (Test-Path -LiteralPath $repoRoot)) {
+        Get-ChildItem -Path $repoRoot -Recurse -Filter *.bicep -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '[\\/]tests[\\/]' } |
+            ForEach-Object {
+                foreach ($line in (Get-Content -Path $_.FullName -ErrorAction SilentlyContinue)) {
+                    $m = $resourceRegex.Match($line)
+                    if ($m.Success) { [void]$discovered.Add($m.Groups[1].Value) }
+                }
+            }
+    }
+
+    # Canonicalize casing against the known-namespace map (Bicep accepts
+    # 'microsoft.insights' lowercase too; az provider expects the canonical
+    # 'Microsoft.Insights').
+    $canonical = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($ns in $discovered) {
+        $known = @($reasonByNamespace.Keys | Where-Object { $_ -ieq $ns } | Select-Object -First 1)
+        if ($known.Count -gt 0) { [void]$canonical.Add($known[0]) } else { [void]$canonical.Add($ns) }
+    }
+    foreach ($ns in $implicitNamespaces) { [void]$canonical.Add($ns) }
+
+    # Fallback: if Bicep discovery returned nothing (e.g. script run from an
+    # unusual location), fall back to the full known-namespace list so the
+    # check still has coverage.
+    if ($canonical.Count -le $implicitNamespaces.Count) {
+        foreach ($ns in $reasonByNamespace.Keys) { [void]$canonical.Add($ns) }
+    }
+
+    # Map each namespace to whether the current parameters actually select it.
+    # Mirrors the feature-flag resolution used elsewhere (Test-RegionalReadiness)
+    # and the default-on/off semantics in main.parameters.json. Providers not in
+    # this map default to optional ($false) so unknown discoveries never hard-fail.
+    $deployAiFoundry         = Resolve-DeployFlag -P $P -Key 'deployAiFoundry'         -Default $true
+    $deploySpeech            = Resolve-DeployFlag -P $P -Key 'deploySpeechService'     -Default $false
+    $deployCosmos            = Resolve-DeployFlag -P $P -Key 'deployCosmosDb'          -Default $true
+    $deploySearch            = Resolve-DeployFlag -P $P -Key 'deploySearchService'     -Default $true
+    $deployBing              = Resolve-DeployFlag -P $P -Key 'deployGroundingWithBing' -Default $false
+    $deployKeyVault          = Resolve-DeployFlag -P $P -Key 'deployKeyVault'          -Default $true
+    $deployStorage           = Resolve-DeployFlag -P $P -Key 'deployStorageAccount'    -Default $true
+    $deployAppConfig         = Resolve-DeployFlag -P $P -Key 'deployAppConfig'         -Default $true
+    $deployContainerApps     = Resolve-DeployFlag -P $P -Key 'deployContainerApps'     -Default $true
+    $deployContainerEnv      = Resolve-DeployFlag -P $P -Key 'deployContainerEnv'      -Default $true
+    $deployContainerRegistry = Resolve-DeployFlag -P $P -Key 'deployContainerRegistry' -Default $true
+    $deployLogAnalytics      = Resolve-DeployFlag -P $P -Key 'deployLogAnalytics'      -Default $true
+    $deployJump              = Resolve-DeployJumpbox $P
+
+    $selectionByNamespace = @{
+        'Microsoft.Resources'            = $true
+        'Microsoft.Authorization'        = $true
+        'Microsoft.ManagedIdentity'      = $true
+        'Microsoft.Insights'             = $true
+        'Microsoft.OperationsManagement' = $true
+        'Microsoft.AlertsManagement'     = $true
+        'Microsoft.Network'              = $true
+        'Microsoft.OperationalInsights'  = $deployLogAnalytics
+        'Microsoft.Compute'              = $deployJump
+        'Microsoft.Storage'              = ($deployStorage -or $deployAiFoundry)
+        'Microsoft.KeyVault'             = $deployKeyVault
+        'Microsoft.AppConfiguration'     = $deployAppConfig
+        'Microsoft.App'                  = ($deployContainerApps -or $deployContainerEnv)
+        'Microsoft.ContainerRegistry'    = $deployContainerRegistry
+        'Microsoft.CognitiveServices'    = ($deployAiFoundry -or $deploySpeech)
+        'Microsoft.Search'               = $deploySearch
+        'Microsoft.DocumentDB'           = ($deployCosmos -or $deployAiFoundry)
+        'Microsoft.Bing'                 = $deployBing
+    }
+
+    $canonical | Sort-Object | ForEach-Object {
+        $ns = $_
+        $reason = if ($reasonByNamespace.ContainsKey($ns)) { $reasonByNamespace[$ns] } else { 'Discovered in repository Bicep files' }
+        $selected = if ($selectionByNamespace.ContainsKey($ns)) { [bool]$selectionByNamespace[$ns] } else { $false }
+        @{ Namespace = $ns; Reason = $reason; Selected = $selected }
+    }
+}
+
+function Get-VmSkuInfo {
+    # Single source of truth for VM-SKU facts: queries Azure for the SKU's
+    # availability, vCPU count, family (quota counter), and any restrictions
+    # active in the target region/subscription. Returns $null when the SKU is
+    # not offered in the region.
+    param(
+        [Parameter(Mandatory)] [string]$Location,
+        [Parameter(Mandatory)] [string]$VmSize
+    )
+    if ([string]::IsNullOrWhiteSpace($Location) -or [string]::IsNullOrWhiteSpace($VmSize)) { return $null }
+    $skus = Invoke-AzCliRaw -Arguments @('vm', 'list-skus', '--location', $Location, '--size', $VmSize, '--all', '-o', 'json')
+    if (-not $skus) { return $null }
+    $match = @($skus | Where-Object { $_.name -eq $VmSize -and $_.resourceType -eq 'virtualMachines' } | Select-Object -First 1)
+    if (-not $match) { return $null }
+
+    $vCpus = 0
+    if ($match.capabilities) {
+        $cap = @($match.capabilities | Where-Object { $_.name -eq 'vCPUs' -or $_.name -eq 'vCPUsAvailable' } | Select-Object -First 1)
+        if ($cap) { $vCpus = [int]$cap.value }
+    }
+    $restrictions = @()
+    if ($match.PSObject.Properties.Name -contains 'restrictions' -and $match.restrictions) {
+        $restrictions = @($match.restrictions | Where-Object { $_ })
+    }
+    [pscustomobject]@{
+        Name         = [string]$match.name
+        Family       = [string]$match.family
+        VCpus        = $vCpus
+        Restrictions = $restrictions
+    }
+}
+
+function Test-ResourceProviders {
+    param([hashtable]$P = @{})
+    if ($SkipAzureLookups) { return }
+    if (-not (Get-Command az -ErrorAction SilentlyContinue)) { return }
+
+    # Silent context check — avoids emitting a duplicate AZ_NOT_LOGGED_IN
+    # warning (Test-AzureResources already covers that path).
+    & az account show --output none 2>$null
+    if ($LASTEXITCODE -ne 0) { return }
+
+    foreach ($entry in (Get-RequiredResourceProviders -P $P)) {
+        $ns = $entry.Namespace
+        $state = & az provider show --namespace $ns --query 'registrationState' -o tsv 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($state)) {
+            Add-Finding -Severity WARN -Code 'RP_LOOKUP_FAILED' `
+                -Message "Could not read registration state for provider '$ns' ($($entry.Reason))." `
+                -Hint "Run: az provider show --namespace $ns --query registrationState -o tsv"
+            continue
+        }
+        $state = $state.Trim()
+        if ($state -eq 'Registered') { continue }
+        if ($state -eq 'Registering') {
+            Add-Finding -Severity WARN -Code 'RP_REGISTERING' `
+                -Message "Provider '$ns' is currently '$state' — wait until it reaches 'Registered' before deploying." `
+                -Hint "Re-run preflight in a minute, or block on it with: az provider register --namespace $ns --wait"
+        }
+        elseif ($entry.Selected) {
+            Add-Finding -Severity FAIL -Code 'RP_NOT_REGISTERED' `
+                -Message "Provider '$ns' is '$state', not 'Registered'. Used for: $($entry.Reason)." `
+                -Hint "Run: az provider register --namespace $ns --wait"
+        }
+        else {
+            # Provider is referenced somewhere in the Bicep tree but the resource
+            # is not selected by the current parameters (feature-flagged off, or a
+            # namespace this script doesn't map). Surface it as advisory only so
+            # minimal/subset deployments (e.g. gpt-rag with Search/Cosmos/Bing
+            # disabled) don't fail preflight on providers they never deploy.
+            Add-Finding -Severity WARN -Code 'RP_NOT_REGISTERED_OPTIONAL' `
+                -Message "Provider '$ns' is '$state', not 'Registered'. Only needed if you enable: $($entry.Reason). Not selected by the current parameters, so not blocking." `
+                -Hint "If you plan to enable this feature, run: az provider register --namespace $ns --wait"
+        }
+    }
+}
+
+# --------------------------------------------------------------------------
 # Regional readiness (live, optional) — issue #72
 # --------------------------------------------------------------------------
 #
@@ -809,31 +1043,24 @@ function Test-ProviderLocation {
 }
 
 function Test-VmSku {
+    # Validates SKU availability + restrictions for the target region. Accepts
+    # a pre-fetched VmSkuInfo (from Get-VmSkuInfo) to avoid a second
+    # `az vm list-skus` round-trip when Test-RegionalVcpuQuota also needs it.
     param(
         [Parameter(Mandatory)] [string]$Location,
-        [Parameter(Mandatory)] [string]$VmSize
+        [Parameter(Mandatory)] [string]$VmSize,
+        $VmSkuInfo
     )
     if ([string]::IsNullOrWhiteSpace($Location) -or [string]::IsNullOrWhiteSpace($VmSize)) { return }
-    $skus = Invoke-AzCliRaw -Arguments @('vm', 'list-skus', '--location', $Location, '--size', $VmSize, '--all', '-o', 'json')
-    if (-not $skus) {
-        Add-Finding -Severity WARN -Code 'JUMPBOX_VM_LOOKUP' `
-            -Message "Could not query VM SKU '$VmSize' availability in $Location." `
-            -Hint "Run 'az vm list-skus --location $Location --size $VmSize --all' to investigate."
-        return
-    }
-    $match = @($skus | Where-Object { $_.name -eq $VmSize } | Select-Object -First 1)
-    if (-not $match) {
+    if (-not $VmSkuInfo) { $VmSkuInfo = Get-VmSkuInfo -Location $Location -VmSize $VmSize }
+    if (-not $VmSkuInfo) {
         Add-Finding -Severity FAIL -Code 'JUMPBOX_VM_NOT_FOUND' `
             -Message "Jumpbox VM size '$VmSize' is not offered in region '$Location'." `
             -Hint "Pick a different vmSize (AZURE_VM_SIZE) or a region that offers this SKU."
         return
     }
-    $restrictions = @()
-    if ($match.PSObject.Properties.Name -contains 'restrictions' -and $match.restrictions) {
-        $restrictions = @($match.restrictions | Where-Object { $_ })
-    }
-    if ($restrictions.Count -gt 0) {
-        $msgs = $restrictions | ForEach-Object {
+    if ($VmSkuInfo.Restrictions.Count -gt 0) {
+        $msgs = $VmSkuInfo.Restrictions | ForEach-Object {
             $reason = if ($_.reasonCode) { $_.reasonCode } else { 'Restricted' }
             "$reason ($($_.type): $($_.values -join ','))"
         }
@@ -883,16 +1110,170 @@ function Test-ModelQuota {
         if ($available -lt $capacity) {
             $failures += "$quotaName needs $capacity, $available available (used $($quota.currentValue) / limit $($quota.limit))."
         }
-        else {
-            Add-Finding -Severity PASS -Code 'MODEL_QUOTA_OK' `
-                -Message "Quota OK for ${modelName} (${skuName}) in ${Location}: $available available, $capacity requested."
-        }
     }
 
     if ($failures.Count -gt 0) {
         Add-Finding -Severity FAIL -Code 'MODEL_QUOTA_INSUFFICIENT' `
             -Message ("Insufficient AI model quota in '${Location}': " + ($failures -join ' ')) `
             -Hint "Request a quota increase (https://aka.ms/oai/quotaincrease), reduce sku.capacity in modelDeploymentList, or set AZURE_AI_FOUNDRY_LOCATION to a region with available quota."
+    }
+}
+
+# --------------------------------------------------------------------------
+# Regional capacity sub-checks folded in from
+# pipelines/tools/azure_region_capacity_checker.ps1. Same Azure APIs, scoped
+# to the single region the deployment will use rather than scoring a whole
+# region set. All read-only.
+# --------------------------------------------------------------------------
+
+function Get-CurrentAzureSubscriptionId {
+    $acct = Invoke-AzCliRaw -Arguments @('account', 'show', '-o', 'json')
+    if ($acct -and $acct.id) { return [string]$acct.id }
+    return $null
+}
+
+function Test-RegionalVcpuQuota {
+    # Checks vCPU quota for the SKU about to be deployed. Prefers the
+    # SKU-family quota counter (e.g. standardDSv5Family) because that's the
+    # bucket Azure actually debits, and falls back to 'Total Regional vCPUs'
+    # when no family info is supplied. RequiredHeadroom should be the SKU's
+    # vCPU count (from VmSkuInfo.VCpus) so the comparison reflects what the
+    # deployment will consume.
+    param(
+        [Parameter(Mandatory)] [string]$Location,
+        [Parameter(Mandatory)] [int]$RequiredHeadroom,
+        [string]$Family
+    )
+    if ([string]::IsNullOrWhiteSpace($Location)) { return }
+    $usage = Invoke-AzCliRaw -Arguments @('vm', 'list-usage', '--location', $Location, '-o', 'json')
+    if (-not $usage) {
+        Add-Finding -Severity WARN -Code 'VCPU_QUOTA_LOOKUP' `
+            -Message "Could not read regional vCPU quota for '$Location'." `
+            -Hint "Run: az vm list-usage --location $Location"
+        return
+    }
+
+    $target = $null
+    $scopeLabel = 'Total Regional vCPUs'
+    if (-not [string]::IsNullOrWhiteSpace($Family)) {
+        $target = @($usage | Where-Object { $_.name -and $_.name.value -eq $Family } | Select-Object -First 1)
+        if ($target) { $scopeLabel = "$Family quota" }
+    }
+    if (-not $target) {
+        $target = @($usage | Where-Object {
+            ($_.name -and $_.name.localizedValue -eq 'Total Regional vCPUs') -or ($_.localName -eq 'Total Regional vCPUs')
+        } | Select-Object -First 1)
+    }
+    if (-not $target) {
+        Add-Finding -Severity WARN -Code 'VCPU_QUOTA_MISSING' `
+            -Message "No matching vCPU quota entry (family='$Family') found for '$Location'."
+        return
+    }
+
+    $available = [int]$target.limit - [int]$target.currentValue
+    if ($available -le 0) {
+        Add-Finding -Severity FAIL -Code 'VCPU_QUOTA_EXHAUSTED' `
+            -Message "$scopeLabel exhausted in '$Location' (used $($target.currentValue) of $($target.limit))." `
+            -Hint "Request a quota increase or pick a different region."
+    }
+    elseif ($available -lt $RequiredHeadroom) {
+        Add-Finding -Severity WARN -Code 'VCPU_QUOTA_LOW' `
+            -Message "$scopeLabel headroom in '$Location' is $available (need >= $RequiredHeadroom)." `
+            -Hint "Reduce VM/container demand, request a quota increase, or pick another region."
+    }
+}
+
+function Test-CognitiveServicesQuotaHeadroom {
+    param(
+        [Parameter(Mandatory)] [string]$SubscriptionId,
+        [Parameter(Mandatory)] [string]$Location
+    )
+    if ([string]::IsNullOrWhiteSpace($Location) -or [string]::IsNullOrWhiteSpace($SubscriptionId)) { return }
+    $url = "https://management.azure.com/subscriptions/$SubscriptionId/providers/Microsoft.CognitiveServices/locations/$Location/usages?api-version=2023-05-01"
+    $payload = Invoke-AzCliRaw -Arguments @('rest', '--method', 'get', '--url', $url)
+    if (-not $payload) {
+        Add-Finding -Severity WARN -Code 'CS_QUOTA_LOOKUP' `
+            -Message "Could not read Cognitive Services usage for '$Location'." `
+            -Hint "Verify Microsoft.CognitiveServices is registered and the current identity has Reader on the subscription."
+        return
+    }
+    $items = @($payload.value)
+    if ($items.Count -eq 0) { return }
+    $hasHeadroom = $false
+    $nearLimit = $false
+    foreach ($item in $items) {
+        $current = [double]$item.currentValue
+        $limit = [double]$item.limit
+        if ($limit -gt $current) { $hasHeadroom = $true }
+        if ($limit -gt 0 -and (($limit - $current) / $limit) -lt 0.1) { $nearLimit = $true }
+    }
+    if (-not $hasHeadroom) {
+        Add-Finding -Severity FAIL -Code 'CS_QUOTA_AT_LIMIT' `
+            -Message "Cognitive Services quota in '$Location' is fully consumed across all reported metrics." `
+            -Hint "Request a quota increase (https://aka.ms/oai/quotaincrease) or pick a different region for AI Foundry."
+    }
+    elseif ($nearLimit) {
+        Add-Finding -Severity WARN -Code 'CS_QUOTA_TIGHT' `
+            -Message "Cognitive Services quota in '$Location' is within 10% of the limit on at least one metric."
+    }
+}
+
+function Test-AzureSearchSkuQuota {
+    param(
+        [Parameter(Mandatory)] [string]$SubscriptionId,
+        [Parameter(Mandatory)] [string]$Location,
+        [Parameter(Mandatory)] [string]$Sku
+    )
+    if ([string]::IsNullOrWhiteSpace($Location) -or [string]::IsNullOrWhiteSpace($SubscriptionId)) { return }
+    $url = "https://management.azure.com/subscriptions/$SubscriptionId/providers/Microsoft.Search/locations/$Location/usages?api-version=2025-05-01"
+    $payload = Invoke-AzCliRaw -Arguments @('rest', '--method', 'get', '--url', $url)
+    if (-not $payload) {
+        Add-Finding -Severity WARN -Code 'SEARCH_QUOTA_LOOKUP' `
+            -Message "Could not read Azure Search usage for '$Location'."
+        return
+    }
+    $skuCanonical = $Sku.ToLowerInvariant()
+    $target = @($payload.value | Where-Object { $_.name -and ([string]$_.name.value).ToLowerInvariant() -eq $skuCanonical } | Select-Object -First 1)
+    if (-not $target) {
+        Add-Finding -Severity WARN -Code 'SEARCH_SKU_UNAVAILABLE' `
+            -Message "Azure Search SKU '$Sku' is not listed for '$Location'." `
+            -Hint "Pick a supported SKU or region (see https://azure.github.io/AI-Landing-Zones/bicep/regional-considerations/)."
+        return
+    }
+    $available = [int]$target.limit - [int]$target.currentValue
+    if ([int]$target.limit -le 0 -or $available -le 0) {
+        Add-Finding -Severity FAIL -Code 'SEARCH_QUOTA_AT_LIMIT' `
+            -Message "Azure Search SKU '$Sku' quota in '$Location' is exhausted (used $($target.currentValue) of $($target.limit))." `
+            -Hint "Request a quota increase or pick another region/SKU."
+    }
+    elseif (([double]$available / [double]$target.limit) -lt 0.1) {
+        Add-Finding -Severity WARN -Code 'SEARCH_QUOTA_TIGHT' `
+            -Message "Azure Search SKU '$Sku' quota in '$Location' is nearly exhausted ($available of $($target.limit) available)."
+    }
+}
+
+function Test-CosmosAvailabilityZone {
+    param(
+        [Parameter(Mandatory)] [string]$Location
+    )
+    if ([string]::IsNullOrWhiteSpace($Location)) { return }
+    $query = '{online:properties.status, az:properties.isSubscriptionRegionAccessAllowedForAz, regular:properties.isSubscriptionRegionAccessAllowedForRegular, supportsAz:properties.supportsAvailabilityZone}'
+    $info = Invoke-AzCliRaw -Arguments @('cosmosdb', 'locations', 'show', '--location', $Location, '--query', $query, '-o', 'json')
+    if (-not $info) {
+        Add-Finding -Severity WARN -Code 'COSMOS_LOC_LOOKUP' `
+            -Message "Could not read Cosmos DB region metadata for '$Location'."
+        return
+    }
+    if ($info.online -and $info.online -ne 'Online') {
+        Add-Finding -Severity FAIL -Code 'COSMOS_NOT_ONLINE' `
+            -Message "Cosmos DB region '$Location' status is '$($info.online)', not 'Online'." `
+            -Hint "Pick a different region for cosmosLocation."
+        return
+    }
+    if (-not [bool]$info.az) {
+        Add-Finding -Severity WARN -Code 'COSMOS_NO_AZ' `
+            -Message "Cosmos DB Availability-Zone support is not enabled for your subscription in '$Location'." `
+            -Hint "Pick a region with AZ support if zonal redundancy is required."
     }
 }
 
@@ -932,8 +1313,8 @@ function Test-CosmosAnalyticalStorageRegionSupport {
 
     Add-Finding -Severity WARN -Code 'COSMOS_ANALYTICAL_REGION' `
         -Message "enableCosmosAnalyticalStorage=true and cosmosLocation='$cosmosLocation' is on the known-restrictive list. Azure has been observed to reject Cosmos DB account creation in this region/subscription combination with: 'Enabling analytical storage on account creation is not supported in this subscription/region. Please disable analytical storage on the account creation request and try again.' This flag cannot be toggled after the account is created, so a failed provision requires deleting the account before retrying." `
-        -Hint "If you do not actively consume Synapse Link or Fabric Mirroring, set enableCosmosAnalyticalStorage=false (or unset ENABLE_COSMOS_ANALYTICAL_STORAGE) and re-run preflight. If you have confirmed your subscription is allow-listed for analytical storage in '$cosmosLocation', you can ignore this WARN. See https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/93."
-}
+        -Hint "If you do not actively consume Synapse Link or Fabric Mirroring, set enableCosmosAnalyticalStorage=false (or unset ENABLE_COSMOS_ANALYTICAL_STORAGE) and re-run preflight. If you have confirmed your subscription is allow-listed for analytical storage in '$cosmosLocation',         you can ignore this WARN. See https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/93."
+        }
 
 function Test-RegionalReadiness {
     param([hashtable]$P)
@@ -1034,14 +1415,19 @@ function Test-RegionalReadiness {
             -Location $location -DisplayName 'Application Insights' -CodePrefix 'APPI'
     }
 
-    # Jumpbox VM SKU. deployJumpbox / deployVM are bool? — null means "follow the
-    # legacy umbrella". Treat any truthy value as opt-in.
-    $deployJump = ConvertTo-Bool $P['deployJumpbox']
-    $deployVmLegacy = ConvertTo-Bool $P['deployVM']
-    if ($deployJump -or $deployVmLegacy) {
+    # Jumpbox VM SKU. Resolve-DeployJumpbox mirrors main.bicep `_deployJumpbox`
+    # so the SKU + quota checks run whenever the deployment will actually create
+    # a jumpbox (including the common case where deployJumpbox is unset and
+    # networkIsolation=true defaults it to true).
+    $deployJump = Resolve-DeployJumpbox $P
+    $vmSkuInfo = $null
+    if ($deployJump) {
         $vmSize = Get-StringValue $P['vmSize']
         if (-not [string]::IsNullOrWhiteSpace($vmSize)) {
-            Test-VmSku -Location $location -VmSize $vmSize
+            # Single Azure lookup serves both the SKU-availability check and
+            # the family-specific vCPU quota check below.
+            $vmSkuInfo = Get-VmSkuInfo -Location $location -VmSize $vmSize
+            Test-VmSku -Location $location -VmSize $vmSize -VmSkuInfo $vmSkuInfo
         }
     }
 
@@ -1051,6 +1437,44 @@ function Test-RegionalReadiness {
         if ($models) {
             Test-ModelQuota -ModelDeployments $models -Location $aiFoundryLocation
         }
+    }
+
+    # Regional capacity sub-checks (folded in from
+    # pipelines/tools/azure_region_capacity_checker.ps1).
+    if ($deployJump -and $vmSkuInfo) {
+        if ($vmSkuInfo.VCpus -gt 0) {
+            # Headroom requirement = the SKU's vCPU count, against the SKU's
+            # family-specific quota counter (the bucket Azure actually debits).
+            Test-RegionalVcpuQuota -Location $location -RequiredHeadroom $vmSkuInfo.VCpus -Family $vmSkuInfo.Family
+        }
+        else {
+            # Get-VmSkuInfo couldn't read the SKU's vCPU capability, so we can't
+            # size the headroom requirement. Don't silently skip the quota check:
+            # warn that headroom can't be verified, and still run the check with a
+            # zero requirement so an already-exhausted family quota (available
+            # <= 0) is surfaced rather than masked.
+            Add-Finding -Severity WARN -Code 'VCPU_SKU_UNKNOWN' `
+                -Message "Could not determine the vCPU count for VM SKU '$($vmSkuInfo.Name)' in '$location'; vCPU headroom cannot be verified." `
+                -Hint "Confirm the SKU is offered in the region and re-run, or check family quota manually with: az vm list-usage --location $location"
+            Test-RegionalVcpuQuota -Location $location -RequiredHeadroom 0 -Family $vmSkuInfo.Family
+        }
+    }
+
+    # The Cognitive Services and Azure Search REST usage APIs need an explicit
+    # subscription ID. Resolve once and reuse for both calls.
+    $resolvedSubId = Get-CurrentAzureSubscriptionId
+    if (-not [string]::IsNullOrWhiteSpace($resolvedSubId)) {
+        if ($deployAiFoundry) {
+            Test-CognitiveServicesQuotaHeadroom -SubscriptionId $resolvedSubId -Location $aiFoundryLocation
+        }
+        if ($deploySearch) {
+            # main.bicep hardcodes the Search SKU to 'standard'; mirror that here.
+            Test-AzureSearchSkuQuota -SubscriptionId $resolvedSubId -Location $location -Sku 'standard'
+        }
+    }
+
+    if ($deployCosmos) {
+        Test-CosmosAvailabilityZone -Location $cosmosLocation
     }
 }
 
@@ -1113,6 +1537,7 @@ Test-Topology -P $effective
 Test-AllowedIpRanges -P $effective
 Test-LocalCidrSanity -P $effective
 Test-AzureResources -P $effective
+Test-ResourceProviders -P $effective
 Test-CosmosAnalyticalStorageRegionSupport -P $effective
 Test-RegionalReadiness -P $effective
 
