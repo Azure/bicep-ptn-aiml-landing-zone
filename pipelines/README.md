@@ -13,9 +13,13 @@ Always refer to the documentation above as the source of truth; the files in thi
 ## Current structure
 
 - `azuredevops/` — Azure DevOps CI/CD pipelines, templates, and setup docs.
-- `../tools/` — shared utility scripts used across CI/CD platforms:
-  - `azure_region_capacity_checker.ps1` — rank Azure regions by service support, VM SKU, vCPU, AI Search and Cognitive quota.
-  - `check-resource-providers.ps1` — optional pre-deploy check that the resource providers required by `main.bicep` are registered in the target subscription.
+
+Pre-deploy validation is provided by the repo-root preflight script,
+[`../scripts/Invoke-PreflightChecks.ps1`](../scripts/Invoke-PreflightChecks.ps1).
+It folds in checks that previously lived in standalone `tools/` scripts:
+
+- Regional capacity readiness — service/region support, VM SKU and vCPU quota, AI Search and Cognitive Services quota headroom.
+- Resource-provider registration — verifies the resource providers required by the deployment are registered in the target subscription.
 
 ## Planned expansion
 
