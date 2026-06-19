@@ -34,6 +34,7 @@ pr:
       - '*.json'
       - 'modules/**'
       - 'constants/**'
+      - 'pipelines/azuredevops/**'
     exclude:
       - '*.md'
       - 'media/**'
