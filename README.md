@@ -221,6 +221,7 @@ until the operator intentionally opts in.
 | `foundryIqFilterAddOnEnabled` / `FOUNDRY_IQ_FILTER_ADD_ON_ENABLED` | `true` | Enables GPT-RAG query-time security filtering for Pattern B. |
 | `foundryIqSecurityFieldName` / `FOUNDRY_IQ_SECURITY_FIELD_NAME` | `metadata_security_id` | Field used by the orchestrator to build Pattern B filters. |
 | `foundryIqMaxOutputDocuments` / `FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS` | Empty | Optional cap on documents returned by the knowledge base. |
+| `foundryIqContentExtractionMode` / `FOUNDRY_IQ_CONTENT_EXTRACTION_MODE` | `standard` | Native Blob content extraction mode. `standard` uses the Foundry IQ Content Understanding skill (layout and OCR) so scanned and image-only PDFs are ingested with text. `minimal` skips Content Understanding and only ingests text already present in the source. The setting is immutable on an existing Knowledge Source. |
 | `foundryIqBaseFilter` / `FOUNDRY_IQ_BASE_FILTER` | Empty | Optional persisted filter for the Pattern B knowledge source. |
 | `foundryIqSourceDataFields` / `FOUNDRY_IQ_SOURCE_DATA_FIELDS` | Template default | Fields exposed by the Pattern B knowledge source. |
 | `foundryIqSearchFields` / `FOUNDRY_IQ_SEARCH_FIELDS` | Template default | Searchable fields used by the Pattern B knowledge source. |
