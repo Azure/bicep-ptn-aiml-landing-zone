@@ -219,7 +219,28 @@ azd env set DEPLOY_AAF_AGENT_SVC false
 
 Use this when the spoke only needs AI Foundry hosted model inference. The AI Foundry account, project, and model deployments remain enabled, while the Agent Service Standard Setup and its associated AI Search, Storage, Cosmos DB, and Key Vault resources are skipped. `DEPLOY_SEARCH_SERVICE` remains independent and controls only the workload/RAG Search service.
 
-### 6.10. Sanity check
+### 6.10. Optional: GPT-RAG Foundry IQ Pattern B
+
+Use this only for a GPT-RAG environment that has been validated for Foundry IQ.
+Pattern B registers the existing GPT-RAG Azure AI Search index as a Foundry IQ
+`searchIndex` knowledge source.
+
+```pwsh
+azd env set RETRIEVAL_BACKEND foundry_iq
+azd env set FOUNDRY_IQ_PATTERN searchIndex
+azd env set FOUNDRY_IQ_API_VERSION 2026-05-01-preview
+azd env set FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN free
+azd env set FOUNDRY_IQ_FILTER_ADD_ON_ENABLED true
+```
+
+After `azd provision`, run `scripts/Configure-FoundryIQKnowledgeBase.ps1` from
+the jumpbox or another VNet-connected host to create or update the Search
+data-plane knowledge source and knowledge base. The caller needs **Search Service
+Contributor** on the Search service. Set
+`FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN=standard` only after billing
+approval.
+
+### 6.11. Sanity check
 
 ```pwsh
 azd env get-values | Sort-Object

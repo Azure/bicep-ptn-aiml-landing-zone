@@ -5,6 +5,10 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Added
+
+- **Foundry IQ runtime configuration groundwork for GPT-RAG** ([Azure/GPT-RAG#526](https://github.com/Azure/GPT-RAG/issues/526)). Added `retrievalBackend`, Foundry IQ Pattern A/B parameters, dedicated `KNOWLEDGE_BASE_CONNECTION_ID` stamping, Pattern B searchIndex knowledge-source settings, `knowledgeRetrieval` billing-plan configuration, preflight checks, and a post-provision helper script for creating the Azure AI Search data-plane knowledge source and knowledge base. `ENABLE_AGENTIC_RETRIEVAL` is now documented as deprecated but remains stamped for one-release compatibility.
+
 ### Fixed
 
 - **Regional preflight no longer emits non-actionable transient capacity warnings.** Removed the `SEARCH_CAPACITY`, `COSMOS_CAPACITY`, and `ACA_WORKLOAD_PROFILE_CAPACITY` warnings because Azure does not expose reliable pre-create APIs for those transient capacity pools. The preflight now stays focused on checks it can actually validate, such as provider/location support, VM SKU availability, and AI model quota.
