@@ -527,10 +527,8 @@ param foundryIqIsAdlsGen2 bool = false
 ])
 param foundryIqContentExtractionMode string = 'minimal'
 
-@description('Native Foundry IQ permission metadata to ingest for Blob or ADLS Gen2 security trimming.')
+@description('Native Foundry IQ permission metadata to ingest. Blob sources with foundryIqIsAdlsGen2=false support rbacScope and sensitivityLabels. ADLS Gen2 sources can override this to include userIds and groupIds when ACL metadata is required.')
 param foundryIqIngestionPermissionOptions array = [
-  'userIds'
-  'groupIds'
   'rbacScope'
 ]
 

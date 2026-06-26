@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v2.1.2] - 2026-06-26
+
+### Fixed
+
+- **Foundry IQ native Blob permission default matches the service contract.** `foundryIqIngestionPermissionOptions` now defaults to `['rbacScope']`, which Foundry IQ accepts for `azureBlob` Knowledge Sources when `foundryIqIsAdlsGen2=false`. ADLS Gen2 deployments can still override the parameter to include ACL-driven metadata such as `userIds` and `groupIds` when the source supports it.
+
 ## [v2.1.1] - 2026-06-26
 
 ### Added
