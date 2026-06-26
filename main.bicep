@@ -494,6 +494,13 @@ param foundryIqPattern string = 'searchIndex'
 @description('Azure AI Search / Foundry IQ data-plane API version for knowledge base retrieval and knowledge source operations. Use 2026-05-01-preview when native permissions or Pattern B filterAddOn are required.')
 param foundryIqApiVersion string = '2026-05-01-preview'
 
+@description('Azure AI Search knowledgeRetrieval billing plan for agentic retrieval. free uses the included allowance; standard enables pay-as-you-go billing after the free allowance.')
+@allowed([
+  'free'
+  'standard'
+])
+param foundryIqKnowledgeRetrievalBillingPlan string = 'free'
+
 @description('Foundry IQ knowledge base name to stamp into runtime configuration.')
 param knowledgeBaseName string = '${environmentName}-knowledge-base'
 
@@ -2822,6 +2829,7 @@ var _containerRuntimeEnv = [
   { name: 'KNOWLEDGE_BASE_ENDPOINT',   value: retrievalBackend == 'foundry_iq' ? 'https://${searchServiceName}.search.windows.net' : '' }
   { name: 'KNOWLEDGE_BASE_CONNECTION_ID', value: retrievalBackend == 'foundry_iq' ? '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.CognitiveServices/accounts/${aiFoundryAccountName}/projects/${aiFoundryProjectName}/connections/${knowledgeBaseConnectionName}' : '' }
   { name: 'FOUNDRY_IQ_API_VERSION',    value: retrievalBackend == 'foundry_iq' ? foundryIqApiVersion : '' }
+  { name: 'FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN', value: retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeRetrievalBillingPlan : '' }
   { name: 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? foundryIqKnowledgeSourceName : '' }
   { name: 'FOUNDRY_IQ_FILTER_ADD_ON_ENABLED', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? toLower(string(foundryIqFilterAddOnEnabled)) : 'false' }
   { name: 'FOUNDRY_IQ_SECURITY_FIELD_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? foundryIqSecurityFieldName : '' }
@@ -3995,6 +4003,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'RETRIEVAL_BACKEND', value: retrievalBackend, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_PATTERN', value: foundryIqPattern, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_API_VERSION', value: retrievalBackend == 'foundry_iq' ? foundryIqApiVersion : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN', value: retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeRetrievalBillingPlan : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? foundryIqKnowledgeSourceName : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_SEARCH_INDEX_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? foundryIqSearchIndexName : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_SEMANTIC_CONFIGURATION_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? foundryIqSemanticConfigurationName : '', label: appConfigLabel, contentType: 'text/plain' }

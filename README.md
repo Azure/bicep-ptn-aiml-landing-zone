@@ -40,10 +40,13 @@ Bicep stamps runtime configuration and creates a dedicated Foundry connection ID
   -KnowledgeBaseName "<knowledge-base-name>" `
   -KnowledgeSourceName "<knowledge-source-name>" `
   -SearchIndexName "<gpt-rag-index-name>" `
-  -SemanticConfigurationName "<semantic-config-name>"
+  -SemanticConfigurationName "<semantic-config-name>" `
+  -SearchServiceResourceId "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Search/searchServices/<search-name>" `
+  -KnowledgeRetrievalBillingPlan "free"
 ```
 
 The caller needs **Search Service Contributor** on the search service. Pattern B query-time `filterAddOn` requires `FOUNDRY_IQ_API_VERSION=2026-05-01-preview`.
+Set `-KnowledgeRetrievalBillingPlan standard` only when you want to opt in to pay-as-you-go agentic retrieval billing after the included free allowance.
 
 ## How to Deploy
 

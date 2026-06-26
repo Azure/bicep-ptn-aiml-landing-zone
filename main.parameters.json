@@ -24,6 +24,7 @@
     "retrievalBackend":                    { "value": "${RETRIEVAL_BACKEND=ai_search}" },
     "foundryIqPattern":                    { "value": "${FOUNDRY_IQ_PATTERN=searchIndex}" },
     "foundryIqApiVersion":                 { "value": "${FOUNDRY_IQ_API_VERSION=2026-05-01-preview}" },
+    "foundryIqKnowledgeRetrievalBillingPlan": { "value": "${FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN=free}" },
     "knowledgeBaseName":                   { "value": "${KNOWLEDGE_BASE_NAME=knowledge-base}" },
     "knowledgeBaseConnectionName":         { "value": "${KNOWLEDGE_BASE_CONNECTION_NAME=knowledge-base-connection}" },
     "foundryIqKnowledgeSourceName":        { "value": "${FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME=gpt-rag-search-index}" },

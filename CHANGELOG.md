@@ -7,7 +7,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ### Added
 
-- **Foundry IQ runtime configuration groundwork for GPT-RAG** ([Azure/GPT-RAG#526](https://github.com/Azure/GPT-RAG/issues/526)). Added `retrievalBackend`, Foundry IQ Pattern A/B parameters, dedicated `KNOWLEDGE_BASE_CONNECTION_ID` stamping, Pattern B searchIndex knowledge-source settings, preflight checks, and a post-provision helper script for creating the Azure AI Search data-plane knowledge source and knowledge base. `ENABLE_AGENTIC_RETRIEVAL` is now documented as deprecated but remains stamped for one-release compatibility.
+- **Foundry IQ runtime configuration groundwork for GPT-RAG** ([Azure/GPT-RAG#526](https://github.com/Azure/GPT-RAG/issues/526)). Added `retrievalBackend`, Foundry IQ Pattern A/B parameters, dedicated `KNOWLEDGE_BASE_CONNECTION_ID` stamping, Pattern B searchIndex knowledge-source settings, `knowledgeRetrieval` billing-plan configuration, preflight checks, and a post-provision helper script for creating the Azure AI Search data-plane knowledge source and knowledge base. `ENABLE_AGENTIC_RETRIEVAL` is now documented as deprecated but remains stamped for one-release compatibility.
 
 ### Fixed
 

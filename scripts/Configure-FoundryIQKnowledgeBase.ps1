@@ -38,6 +38,11 @@ param(
 
     [string]$BaseFilter = '',
 
+    [ValidateSet('', 'free', 'standard')]
+    [string]$KnowledgeRetrievalBillingPlan = '',
+
+    [string]$SearchServiceResourceId = '',
+
     [string]$Description = 'GPT-RAG Azure AI Search index registered as a Foundry IQ Pattern B knowledge source.'
 )
 
@@ -52,6 +57,14 @@ function Get-SearchToken {
     $token = & az account get-access-token --scope 'https://search.azure.com/.default' --query accessToken -o tsv
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
         throw 'Could not acquire an Azure AI Search data-plane token. Run az login and verify Search Service Contributor permissions.'
+    }
+    return $token.Trim()
+}
+
+function Get-ArmToken {
+    $token = & az account get-access-token --scope 'https://management.azure.com/.default' --query accessToken -o tsv
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
+        throw 'Could not acquire an Azure Resource Manager token. Run az login and verify permissions on the search service.'
     }
     return $token.Trim()
 }
@@ -89,6 +102,26 @@ function ConvertTo-FieldReferences {
     return $refs
 }
 
+function Set-KnowledgeRetrievalBillingPlan {
+    if ([string]::IsNullOrWhiteSpace($KnowledgeRetrievalBillingPlan)) { return }
+    if ([string]::IsNullOrWhiteSpace($SearchServiceResourceId)) {
+        throw 'SearchServiceResourceId is required when KnowledgeRetrievalBillingPlan is set.'
+    }
+
+    $armToken = Get-ArmToken
+    $uri = 'https://management.azure.com{0}?api-version=2026-03-01-preview' -f $SearchServiceResourceId
+    $body = @{
+        properties = @{
+            knowledgeRetrieval = $KnowledgeRetrievalBillingPlan
+        }
+    } | ConvertTo-Json -Depth 10
+
+    Invoke-RestMethod -Method 'PATCH' -Uri $uri -Headers @{
+        Authorization = "Bearer $armToken"
+        'Content-Type' = 'application/json'
+    } -Body $body | Out-Null
+}
+
 function Test-SearchIndexForFoundryIq {
     $index = Invoke-SearchRest -Method 'GET' -Path "indexes/$SearchIndexName" -Body $null
 
@@ -110,6 +143,10 @@ function Test-SearchIndexForFoundryIq {
 }
 
 $script:SearchToken = Get-SearchToken
+
+if (-not [string]::IsNullOrWhiteSpace($KnowledgeRetrievalBillingPlan) -and $PSCmdlet.ShouldProcess($SearchServiceResourceId, "Set knowledgeRetrieval billing plan to '$KnowledgeRetrievalBillingPlan'")) {
+    Set-KnowledgeRetrievalBillingPlan
+}
 
 Write-Host "[foundry-iq] Validating search index '$SearchIndexName' at '$SearchEndpoint'."
 Test-SearchIndexForFoundryIq

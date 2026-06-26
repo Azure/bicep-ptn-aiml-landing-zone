@@ -552,6 +552,18 @@ function Test-FoundryIqConfiguration {
             -Hint "Use 2026-05-01-preview when Pattern B query-time security trimming is enabled."
     }
 
+    $billingPlan = (Get-StringValue $P['foundryIqKnowledgeRetrievalBillingPlan']).Trim()
+    if ([string]::IsNullOrWhiteSpace($billingPlan)) { $billingPlan = 'free' }
+    if ($billingPlan -notin @('free', 'standard')) {
+        Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_BILLING_PLAN_INVALID' `
+            -Message "foundryIqKnowledgeRetrievalBillingPlan must be 'free' or 'standard'; got '$billingPlan'."
+    }
+    elseif ($billingPlan -eq 'free') {
+        Add-Finding -Severity INFO -Code 'FOUNDRYIQ_BILLING_FREE' `
+            -Message "Foundry IQ knowledgeRetrieval billing plan is free. Retrieval calls can fail after the included monthly allowance is exhausted." `
+            -Hint "Set FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN=standard to opt in to pay-as-you-go agentic retrieval billing."
+    }
+
     $knowledgeBaseName = (Get-StringValue $P['knowledgeBaseName']).Trim()
     if ([string]::IsNullOrWhiteSpace($knowledgeBaseName)) {
         Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_KB_NAME_REQUIRED' `
