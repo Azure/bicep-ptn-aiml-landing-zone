@@ -36,6 +36,7 @@
     "foundryIqFilterAddOnEnabled":         { "value": "${FOUNDRY_IQ_FILTER_ADD_ON_ENABLED=true}" },
     "foundryIqSecurityFieldName":          { "value": "${FOUNDRY_IQ_SECURITY_FIELD_NAME=metadata_security_id}" },
     "foundryIqMaxOutputDocuments":         { "value": "${FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS=}" },
+    "foundryIqContentExtractionMode":      { "value": "${FOUNDRY_IQ_CONTENT_EXTRACTION_MODE=standard}" },
 
     "aiSearchResourceId":                  { "value": null },
     "aiFoundryStorageAccountResourceId":   { "value": null },

@@ -520,12 +520,12 @@ param foundryIqStorageFolderPath string = ''
 @description('Set true when the native Foundry IQ azureBlob knowledge source points to an ADLS Gen2 account/container with hierarchical namespace enabled.')
 param foundryIqIsAdlsGen2 bool = false
 
-@description('Native Foundry IQ content extraction mode for the azureBlob knowledge source.')
+@description('Native Foundry IQ content extraction mode for the azureBlob knowledge source. standard uses the Content Understanding skill for layout and OCR, which is required for scanned and image-only PDFs. minimal skips Content Understanding and ingests only text already present in the source.')
 @allowed([
   'minimal'
   'standard'
 ])
-param foundryIqContentExtractionMode string = 'minimal'
+param foundryIqContentExtractionMode string = 'standard'
 
 @description('Native Foundry IQ permission metadata to ingest. Blob sources with foundryIqIsAdlsGen2=false support rbacScope and sensitivityLabels. ADLS Gen2 sources can override this to include userIds and groupIds when ACL metadata is required.')
 param foundryIqIngestionPermissionOptions array = [

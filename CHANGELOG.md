@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Default `foundryIqContentExtractionMode` is now `standard`.** The native Foundry IQ azureBlob knowledge source now defaults to `standard` content extraction so scanned and image-only PDFs are ingested with OCR by the Foundry IQ Content Understanding skill. Under the prior `minimal` default, such PDFs were ingested with empty content and silently unsearchable. Operators that only ingest text PDFs can opt down with `FOUNDRY_IQ_CONTENT_EXTRACTION_MODE=minimal` before provisioning. The setting is immutable on an existing Knowledge Source; changing it requires recreating the Knowledge Source and Knowledge Base. `standard` mode requires a Foundry resource in a [Content Understanding-supported region](https://learn.microsoft.com/azure/ai-services/content-understanding/service-limits#region-support), may require a one-time `PATCH /contentunderstanding/defaults` call against the Foundry resource on first use, has per-document limits of 300 pages and 5 minutes of processing time, and is billed through Content Understanding meters in addition to the Azure AI Search `knowledgeRetrieval` plan.
+- **`main.parameters.json` now substitutes `FOUNDRY_IQ_CONTENT_EXTRACTION_MODE` and defaults it to `standard`** so `azd env set` and the parameter file stay aligned with the Bicep default.
+
 ## [v2.1.2] - 2026-06-26
 
 ### Fixed
