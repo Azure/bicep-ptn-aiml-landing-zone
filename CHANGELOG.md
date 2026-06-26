@@ -3,11 +3,12 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v2.1.1] - 2026-06-26
 
 ### Added
 
 - **Foundry IQ runtime configuration groundwork for GPT-RAG** ([Azure/GPT-RAG#526](https://github.com/Azure/GPT-RAG/issues/526)). Added `retrievalBackend`, Foundry IQ Pattern A/B parameters, dedicated `KNOWLEDGE_BASE_CONNECTION_ID` stamping, Pattern B searchIndex knowledge-source settings, `knowledgeRetrieval` billing-plan configuration, preflight checks, and a post-provision helper script for creating the Azure AI Search data-plane knowledge source and knowledge base. `ENABLE_AGENTIC_RETRIEVAL` is now documented as deprecated but remains stamped for one-release compatibility.
+- **Foundry IQ defaults to native Blob or ADLS Knowledge Sources.** `foundryIqPattern` now defaults to `azureBlob`, while `searchIndex` remains available as explicit Pattern B opt-in. App Configuration now stamps the native Knowledge Source kind, container, folder path, ADLS mode, content extraction mode, and permission options so GPT-RAG can let Foundry IQ process files directly.
 
 ### Fixed
 
