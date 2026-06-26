@@ -3108,7 +3108,7 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
     sku: 'standard'
     replicaCount: 1
     partitionCount: 1
-    semanticSearch: 'disabled'
+    semanticSearch: 'standard'
 
     // Identity & Auth
     managedIdentities: {
@@ -3161,7 +3161,7 @@ module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' =
     sku: 'standard'
     replicaCount: 1
     partitionCount: 1
-    semanticSearch: 'disabled'
+    semanticSearch: 'standard'
 
     // Identity & Auth: system-assigned MI (AI Foundry project identity gets data-plane roles via AVM)
     managedIdentities: {
