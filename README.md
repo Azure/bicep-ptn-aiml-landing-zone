@@ -21,6 +21,7 @@ A handful of other quality-of-life additions:
 - **Decoupled hub components** — `deployJumpbox`, `deployBastion`, and `deployNatGateway` are now independent flags. No more all-or-nothing `deployVM`.
 - **Hub integration helpers** — `hubIntegration.hubVnetResourceId` creates the spoke→hub peering for you; `hubIntegration.egressNextHopIp` routes spoke egress through your hub firewall / NVA.
 - **Pre-flight validation** — `scripts/Invoke-PreflightChecks.ps1` runs automatically as an `azd preprovision` hook and catches the usual mistakes (CIDR overlap, undersized subnets, missing BYO resource IDs, conflicting flags) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
+- **Foundry IQ groundwork for GPT-RAG** — set `RETRIEVAL_BACKEND=foundry_iq` to stamp the orchestrator settings for a Foundry IQ knowledge base. `FOUNDRY_IQ_PATTERN=searchIndex` registers the existing GPT-RAG Azure AI Search index as a knowledge source and keeps GPT-RAG schema, chunking, runtime uploads, and query-time `filterAddOn` security trimming. `FOUNDRY_IQ_PATTERN=managed` is for Foundry-managed ingestion/source connectors; do not claim per-document trimming for plain Blob sources unless ADLS Gen2 ACLs, Purview, SharePoint, OneLake/Fabric, or Pattern B is used.
 
 **Pick a runbook to deploy:**
 
@@ -28,6 +29,21 @@ A handful of other quality-of-life additions:
 - **[Hub-and-spoke deployment](docs/runbook-hub-spoke.md)** — spoke inside an existing Landing Zone, hub provides the platform.
 
 If you're upgrading from v1.x, see the **[migration guide](docs/v2-migration.md)** — it shows what changed in v2 and the parameters you may need to update.
+
+### Foundry IQ Pattern B post-provision
+
+Bicep stamps runtime configuration and creates a dedicated Foundry connection ID for knowledge-base use, but Azure AI Search knowledge sources and knowledge bases are data-plane objects. After provisioning, create or update them with the signed-in Azure CLI identity:
+
+```powershell
+./scripts/Configure-FoundryIQKnowledgeBase.ps1 `
+  -SearchEndpoint "https://<search-name>.search.windows.net" `
+  -KnowledgeBaseName "<knowledge-base-name>" `
+  -KnowledgeSourceName "<knowledge-source-name>" `
+  -SearchIndexName "<gpt-rag-index-name>" `
+  -SemanticConfigurationName "<semantic-config-name>"
+```
+
+The caller needs **Search Service Contributor** on the search service. Pattern B query-time `filterAddOn` requires `FOUNDRY_IQ_API_VERSION=2026-05-01-preview`.
 
 ## How to Deploy
 

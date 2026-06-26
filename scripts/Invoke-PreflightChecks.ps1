@@ -510,6 +510,73 @@ function Test-LocalCidrSanity {
     }
 }
 
+function Test-FoundryIqConfiguration {
+    param([hashtable]$P)
+
+    $backend = (Get-StringValue $P['retrievalBackend']).Trim()
+    if ([string]::IsNullOrWhiteSpace($backend)) { $backend = 'ai_search' }
+    if ($backend -notin @('ai_search', 'foundry_iq')) {
+        Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_BACKEND_INVALID' `
+            -Message "retrievalBackend must be 'ai_search' or 'foundry_iq'; got '$backend'." `
+            -Hint "Set RETRIEVAL_BACKEND to ai_search for existing deployments or foundry_iq for Foundry IQ-backed deployments."
+        return
+    }
+    if ($backend -ne 'foundry_iq') { return }
+
+    $deployAiFoundry = ConvertTo-Bool $P['deployAiFoundry']
+    $deploySearchRaw = Get-StringValue $P['deploySearchService']
+    $deploySearch = if ([string]::IsNullOrWhiteSpace($deploySearchRaw)) { $true } else { ConvertTo-Bool $deploySearchRaw }
+    if (-not $deployAiFoundry) {
+        Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_FOUNDRY_REQUIRED' `
+            -Message "retrievalBackend is foundry_iq but deployAiFoundry is false." `
+            -Hint "Enable deployAiFoundry or keep RETRIEVAL_BACKEND=ai_search until a Foundry project and knowledge base exist."
+    }
+    if (-not $deploySearch) {
+        Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_SEARCH_REQUIRED' `
+            -Message "retrievalBackend is foundry_iq but deploySearchService is false." `
+            -Hint "Pattern B requires the GPT-RAG Azure AI Search service. If you use an external knowledge base, stamp KNOWLEDGE_BASE_* values outside this landing-zone module."
+    }
+
+    $pattern = (Get-StringValue $P['foundryIqPattern']).Trim()
+    if ([string]::IsNullOrWhiteSpace($pattern)) { $pattern = 'searchIndex' }
+    if ($pattern -notin @('managed', 'searchIndex')) {
+        Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_PATTERN_INVALID' `
+            -Message "foundryIqPattern must be 'managed' or 'searchIndex'; got '$pattern'."
+    }
+
+    $apiVersion = (Get-StringValue $P['foundryIqApiVersion']).Trim()
+    $filterAddOn = ConvertTo-Bool $P['foundryIqFilterAddOnEnabled']
+    if ($filterAddOn -and $apiVersion -ne '2026-05-01-preview') {
+        Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_FILTERADDON_API_VERSION' `
+            -Message "FOUNDRY_IQ_FILTER_ADD_ON_ENABLED requires foundryIqApiVersion 2026-05-01-preview; got '$apiVersion'." `
+            -Hint "Use 2026-05-01-preview when Pattern B query-time security trimming is enabled."
+    }
+
+    $knowledgeBaseName = (Get-StringValue $P['knowledgeBaseName']).Trim()
+    if ([string]::IsNullOrWhiteSpace($knowledgeBaseName)) {
+        Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_KB_NAME_REQUIRED' `
+            -Message "retrievalBackend is foundry_iq but knowledgeBaseName is empty."
+    }
+
+    if ($pattern -eq 'searchIndex') {
+        foreach ($requiredName in @('foundryIqKnowledgeSourceName', 'foundryIqSearchIndexName', 'foundryIqSemanticConfigurationName', 'foundryIqSecurityFieldName')) {
+            $value = (Get-StringValue $P[$requiredName]).Trim()
+            if ([string]::IsNullOrWhiteSpace($value)) {
+                Add-Finding -Severity FAIL -Code "FOUNDRYIQ_$($requiredName.ToUpperInvariant())_REQUIRED" `
+                    -Message "Pattern B requires parameter '$requiredName' to be set."
+            }
+        }
+        Add-Finding -Severity INFO -Code 'FOUNDRYIQ_PATTERN_B_SELECTED' `
+            -Message "Foundry IQ Pattern B selected: the existing GPT-RAG Azure AI Search index will be used as a searchIndex knowledge source." `
+            -Hint "Create or update the knowledge source/knowledge base after provisioning with scripts/Configure-FoundryIQKnowledgeBase.ps1; Bicep stamps runtime config and the dedicated connection ID."
+    }
+    else {
+        Add-Finding -Severity WARN -Code 'FOUNDRYIQ_PATTERN_A_MANAGED_LIMITATION' `
+            -Message "Foundry IQ Pattern A selected. Plain Blob sources provide container-level RBAC only; per-document trimming requires ADLS Gen2 ACLs, Purview, SharePoint, OneLake/Fabric, or Pattern B." `
+            -Hint "Do not claim per-document security for plain Blob managed ingestion."
+    }
+}
+
 # --------------------------------------------------------------------------
 # Azure lookups (live, optional)
 # --------------------------------------------------------------------------
@@ -1112,6 +1179,7 @@ if ($effective.Count -eq 0) {
 Test-Topology -P $effective
 Test-AllowedIpRanges -P $effective
 Test-LocalCidrSanity -P $effective
+Test-FoundryIqConfiguration -P $effective
 Test-AzureResources -P $effective
 Test-CosmosAnalyticalStorageRegionSupport -P $effective
 Test-RegionalReadiness -P $effective
