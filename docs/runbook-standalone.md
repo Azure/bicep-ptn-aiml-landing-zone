@@ -115,6 +115,26 @@ azd env set DEPLOY_AAF_AGENT_SVC false
 
 This keeps the AI Foundry account, project, and model deployments, but skips the Agent Service Standard Setup and its associated AI Search, Storage, Cosmos DB, and Key Vault resources. `DEPLOY_SEARCH_SERVICE` remains independent and controls only the workload/RAG Search service.
 
+#### Optional: GPT-RAG Foundry IQ Pattern B
+
+Use this only for a GPT-RAG environment that has been validated for Foundry IQ.
+Pattern B registers the existing GPT-RAG Azure AI Search index as a Foundry IQ
+`searchIndex` knowledge source.
+
+```pwsh
+azd env set RETRIEVAL_BACKEND foundry_iq
+azd env set FOUNDRY_IQ_PATTERN searchIndex
+azd env set FOUNDRY_IQ_API_VERSION 2026-05-01-preview
+azd env set FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN free
+azd env set FOUNDRY_IQ_FILTER_ADD_ON_ENABLED true
+```
+
+After `azd provision`, run `scripts/Configure-FoundryIQKnowledgeBase.ps1` to
+create or update the Search data-plane knowledge source and knowledge base. The
+caller needs **Search Service Contributor** on the Search service. Set
+`FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN=standard` only after billing
+approval.
+
 #### Optional: jumpbox post-config bootstrap
 
 `main.bicep` ships an `install.ps1` Custom Script Extension that installs az/azd/git/PowerShell modules and clones the repos listed in `manifest.json` into `C:\github\`. To run it during provisioning:

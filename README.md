@@ -21,7 +21,7 @@ A handful of other quality-of-life additions:
 - **Decoupled hub components** — `deployJumpbox`, `deployBastion`, and `deployNatGateway` are now independent flags. No more all-or-nothing `deployVM`.
 - **Hub integration helpers** — `hubIntegration.hubVnetResourceId` creates the spoke→hub peering for you; `hubIntegration.egressNextHopIp` routes spoke egress through your hub firewall / NVA.
 - **Pre-flight validation** — `scripts/Invoke-PreflightChecks.ps1` runs automatically as an `azd preprovision` hook and catches the usual mistakes (CIDR overlap, undersized subnets, missing BYO resource IDs, conflicting flags) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
-- **Foundry IQ groundwork for GPT-RAG** — set `RETRIEVAL_BACKEND=foundry_iq` to stamp the orchestrator settings for a Foundry IQ knowledge base. `FOUNDRY_IQ_PATTERN=searchIndex` registers the existing GPT-RAG Azure AI Search index as a knowledge source and keeps GPT-RAG schema, chunking, runtime uploads, and query-time `filterAddOn` security trimming. `FOUNDRY_IQ_PATTERN=managed` is for Foundry-managed ingestion/source connectors; do not claim per-document trimming for plain Blob sources unless ADLS Gen2 ACLs, Purview, SharePoint, OneLake/Fabric, or Pattern B is used.
+- **Foundry IQ groundwork for GPT-RAG:** set `RETRIEVAL_BACKEND=foundry_iq` to stamp the orchestrator settings for a Foundry IQ knowledge base. See [Foundry IQ for GPT-RAG](#foundry-iq-for-gpt-rag) for parameters, security expectations, billing, and the post-provision script.
 
 **Pick a runbook to deploy:**
 
@@ -29,24 +29,6 @@ A handful of other quality-of-life additions:
 - **[Hub-and-spoke deployment](docs/runbook-hub-spoke.md)** — spoke inside an existing Landing Zone, hub provides the platform.
 
 If you're upgrading from v1.x, see the **[migration guide](docs/v2-migration.md)** — it shows what changed in v2 and the parameters you may need to update.
-
-### Foundry IQ Pattern B post-provision
-
-Bicep stamps runtime configuration and creates a dedicated Foundry connection ID for knowledge-base use, but Azure AI Search knowledge sources and knowledge bases are data-plane objects. After provisioning, create or update them with the signed-in Azure CLI identity:
-
-```powershell
-./scripts/Configure-FoundryIQKnowledgeBase.ps1 `
-  -SearchEndpoint "https://<search-name>.search.windows.net" `
-  -KnowledgeBaseName "<knowledge-base-name>" `
-  -KnowledgeSourceName "<knowledge-source-name>" `
-  -SearchIndexName "<gpt-rag-index-name>" `
-  -SemanticConfigurationName "<semantic-config-name>" `
-  -SearchServiceResourceId "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Search/searchServices/<search-name>" `
-  -KnowledgeRetrievalBillingPlan "free"
-```
-
-The caller needs **Search Service Contributor** on the search service. Pattern B query-time `filterAddOn` requires `FOUNDRY_IQ_API_VERSION=2026-05-01-preview`.
-Set `-KnowledgeRetrievalBillingPlan standard` only when you want to opt in to pay-as-you-go agentic retrieval billing after the included free allowance.
 
 ## How to Deploy
 
@@ -218,6 +200,61 @@ Set `extendFirewallForJumpboxBootstrap=false` to skip the jumpbox-scoped rules w
 | No Foundry resources | `deployAiFoundry=false` |
 
 Use `DEPLOY_AAF_AGENT_SVC=false` when an external app only needs hosted model inference from Foundry and does not need Agent Service capability hosts or their associated state resources.
+
+### Foundry IQ for GPT-RAG
+
+The landing zone can stamp GPT-RAG runtime settings for a Foundry IQ knowledge
+base. Existing GPT-RAG deployments should stay on `RETRIEVAL_BACKEND=ai_search`
+until the operator intentionally opts in.
+
+| Parameter / env var | Default | Purpose |
+| --- | --- | --- |
+| `retrievalBackend` / `RETRIEVAL_BACKEND` | `ai_search` | Selects direct Azure AI Search or Foundry IQ. |
+| `foundryIqPattern` / `FOUNDRY_IQ_PATTERN` | `searchIndex` | `searchIndex` registers an existing GPT-RAG index. `managed` is for Foundry-managed sources. |
+| `knowledgeBaseName` / `KNOWLEDGE_BASE_NAME` | `knowledge-base` | Name stamped into `KNOWLEDGE_BASE_NAME`. |
+| `knowledgeBaseConnectionName` / `KNOWLEDGE_BASE_CONNECTION_NAME` | `knowledge-base-connection` | Dedicated AI Foundry Search connection for knowledge-base use. |
+| `foundryIqApiVersion` / `FOUNDRY_IQ_API_VERSION` | `2026-05-01-preview` | Required for per-user permissions and Pattern B `filterAddOn`. |
+| `foundryIqKnowledgeRetrievalBillingPlan` / `FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN` | `free` | Azure AI Search `knowledgeRetrieval` billing plan. Set `standard` only after billing approval. |
+| `foundryIqKnowledgeSourceName` / `FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME` | `gpt-rag-search-index` | Pattern B knowledge source name. |
+| `foundryIqSearchIndexName` / `FOUNDRY_IQ_SEARCH_INDEX_NAME` | `gpt-rag-index` | Existing Azure AI Search index to register for Pattern B. |
+| `foundryIqSemanticConfigurationName` / `FOUNDRY_IQ_SEMANTIC_CONFIGURATION_NAME` | `default` | Semantic configuration on the existing index. |
+| `foundryIqFilterAddOnEnabled` / `FOUNDRY_IQ_FILTER_ADD_ON_ENABLED` | `true` | Enables GPT-RAG query-time security filtering for Pattern B. |
+| `foundryIqSecurityFieldName` / `FOUNDRY_IQ_SECURITY_FIELD_NAME` | `metadata_security_id` | Field used by the orchestrator to build Pattern B filters. |
+| `foundryIqMaxOutputDocuments` / `FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS` | Empty | Optional cap on documents returned by the knowledge base. |
+| `foundryIqBaseFilter` / `FOUNDRY_IQ_BASE_FILTER` | Empty | Optional persisted filter for the Pattern B knowledge source. |
+| `foundryIqSourceDataFields` / `FOUNDRY_IQ_SOURCE_DATA_FIELDS` | Template default | Fields exposed by the Pattern B knowledge source. |
+| `foundryIqSearchFields` / `FOUNDRY_IQ_SEARCH_FIELDS` | Template default | Searchable fields used by the Pattern B knowledge source. |
+
+Security expectations:
+
+- Pattern B (`searchIndex`) keeps the existing GPT-RAG index and enforces
+  GPT-RAG security fields through query-time `filterAddOn`.
+- Native Foundry IQ permissions use `x-ms-query-source-authorization` and require
+  a source that ingests permissions, such as ADLS Gen2 ACLs, SharePoint,
+  OneLake/Fabric, or Purview labels.
+- Plain Blob storage is container-level RBAC for this purpose. Do not claim
+  per-document trimming for plain Blob unless Purview labels or an equivalent
+  per-document permission source are used.
+
+Bicep stamps runtime configuration and creates a dedicated Foundry connection
+ID, but Azure AI Search knowledge sources and knowledge bases are data-plane
+objects. After provisioning, create or update them with the signed-in Azure CLI
+identity:
+
+```powershell
+./scripts/Configure-FoundryIQKnowledgeBase.ps1 `
+  -SearchEndpoint "https://<search-name>.search.windows.net" `
+  -KnowledgeBaseName "<knowledge-base-name>" `
+  -KnowledgeSourceName "<knowledge-source-name>" `
+  -SearchIndexName "<gpt-rag-index-name>" `
+  -SemanticConfigurationName "<semantic-config-name>" `
+  -SearchServiceResourceId "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Search/searchServices/<search-name>" `
+  -KnowledgeRetrievalBillingPlan "free"
+```
+
+The caller needs **Search Service Contributor** on the Search service. Use
+`-KnowledgeRetrievalBillingPlan standard` only when you want to opt in to
+pay-as-you-go agentic retrieval billing after the included free allowance.
 
 ### Permissions
 
