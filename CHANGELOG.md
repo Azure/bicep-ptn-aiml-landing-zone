@@ -3,16 +3,18 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v2.1.4] - 2026-06-27
+
+### Fixed
+
+- **Zero Trust Foundry capability host provisioning** ([#110](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/110)). The agent subnet delegation now uses the canonical `Microsoft.App/environments` service name (capital `A`) so AmlRp accepts the subnet when auto-creating the `<account>@aml_aiagentservice` capability host during the Foundry account PUT. Previously the delegation literal was `Microsoft.app/environments` (lowercase `a`), which the AVM virtual-network module emitted for both the delegation `name` and `properties.serviceName`. AmlRp does a case-sensitive comparison against `serviceName` when validating that the agent subnet is delegated to the Azure Container Apps control plane. With the lowercase form it concluded the subnet was not delegated and surfaced a generic `BadRequest: Invalid vnet resource ID provided, or the virtual network could not be found` about 47 minutes into the deployment, even though the VNet and subnet were healthy. The `aca-environment-subnet` delegation was updated for consistency; ACA was tolerant of the lowercase form but the canonical casing avoids any further case-sensitive lookups. Standard mode deployments were unaffected because the Foundry account is created without network injection in that path.
+
+## [v2.1.3] - 2026-06-26
 
 ### Changed
 
 - **Default `foundryIqContentExtractionMode` is now `standard`.** The native Foundry IQ azureBlob knowledge source now defaults to `standard` content extraction so scanned and image-only PDFs are ingested with OCR by the Foundry IQ Content Understanding skill. Under the prior `minimal` default, such PDFs were ingested with empty content and silently unsearchable. Operators that only ingest text PDFs can opt down with `FOUNDRY_IQ_CONTENT_EXTRACTION_MODE=minimal` before provisioning. The setting is immutable on an existing Knowledge Source; changing it requires recreating the Knowledge Source and Knowledge Base. `standard` mode requires a Foundry resource in a [Content Understanding-supported region](https://learn.microsoft.com/azure/ai-services/content-understanding/service-limits#region-support), may require a one-time `PATCH /contentunderstanding/defaults` call against the Foundry resource on first use, has per-document limits of 300 pages and 5 minutes of processing time, and is billed through Content Understanding meters in addition to the Azure AI Search `knowledgeRetrieval` plan.
 - **`main.parameters.json` now substitutes `FOUNDRY_IQ_CONTENT_EXTRACTION_MODE` and defaults it to `standard`** so `azd env set` and the parameter file stay aligned with the Bicep default.
-
-### Fixed
-
-- **Zero Trust Foundry capability host provisioning** ([#110](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/110)). The agent subnet delegation now uses the canonical `Microsoft.App/environments` service name (capital `A`) so AmlRp accepts the subnet when auto-creating the `<account>@aml_aiagentservice` capability host during the Foundry account PUT. Previously the delegation literal was `Microsoft.app/environments` (lowercase `a`), which the AVM virtual-network module emitted for both the delegation `name` and `properties.serviceName`. AmlRp does a case-sensitive comparison against `serviceName` when validating that the agent subnet is delegated to the Azure Container Apps control plane. With the lowercase form it concluded the subnet was not delegated and surfaced a generic `BadRequest: Invalid vnet resource ID provided, or the virtual network could not be found` about 47 minutes into the deployment, even though the VNet and subnet were healthy. The `aca-environment-subnet` delegation was updated for consistency; ACA was tolerant of the lowercase form but the canonical casing avoids any further case-sensitive lookups. Standard mode deployments were unaffected because the Foundry account is created without network injection in that path.
 
 ## [v2.1.2] - 2026-06-26
 
