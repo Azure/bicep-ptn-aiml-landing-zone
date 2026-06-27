@@ -1253,7 +1253,14 @@ var baseSubnets = [
       {
         name: agentSubnetName
         addressPrefix: agentSubnetPrefix 
-        delegation: 'Microsoft.app/environments'
+        // Issue #110: the serviceName must be the canonical 'Microsoft.App/environments'
+        // (capital 'A'). The AVM virtual-network module emits the same string for both
+        // the delegation `name` and `properties.serviceName`, and AmlRp's capability
+        // host validator does a case-sensitive lookup on `serviceName` when creating
+        // `<account>@aml_aiagentservice`. With lowercase 'app', capability host create
+        // fails ~47min into provision with "Invalid vnet resource ID provided, or the
+        // virtual network could not be found." even though the VNet/subnet are healthy.
+        delegation: 'Microsoft.App/environments'
         routeTableResourceId: _effectiveRouteTableId
         serviceEndpoints: [
           'Microsoft.CognitiveServices'
@@ -1307,7 +1314,9 @@ var baseSubnets = [
       {
         name: acaEnvironmentSubnetName
         addressPrefix: acaEnvironmentSubnetPrefix  
-        delegation: 'Microsoft.app/environments'
+        // Match the agent-subnet delegation casing (see comment above). Canonical
+        // 'Microsoft.App/environments' avoids any case-sensitive lookup downstream.
+        delegation: 'Microsoft.App/environments'
         routeTableResourceId: _effectiveRouteTableId
         serviceEndpoints: [
           'Microsoft.AzureCosmosDB'
