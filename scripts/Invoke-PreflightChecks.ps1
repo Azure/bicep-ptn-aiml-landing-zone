@@ -538,10 +538,37 @@ function Test-FoundryIqConfiguration {
     }
 
     $pattern = (Get-StringValue $P['foundryIqPattern']).Trim()
-    if ([string]::IsNullOrWhiteSpace($pattern)) { $pattern = 'searchIndex' }
-    if ($pattern -notin @('managed', 'searchIndex')) {
+    if ([string]::IsNullOrWhiteSpace($pattern)) { $pattern = 'azureBlob' }
+    if ($pattern -notin @('azureBlob', 'managed', 'searchIndex')) {
         Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_PATTERN_INVALID' `
-            -Message "foundryIqPattern must be 'managed' or 'searchIndex'; got '$pattern'."
+            -Message "foundryIqPattern must be 'azureBlob', 'managed', or 'searchIndex'; got '$pattern'."
+    }
+
+    $sourceKind = (Get-StringValue $P['foundryIqKnowledgeSourceKind']).Trim()
+    if ([string]::IsNullOrWhiteSpace($sourceKind)) { $sourceKind = if ($pattern -eq 'searchIndex') { 'searchIndex' } else { 'azureBlob' } }
+    if ($sourceKind -notin @('azureBlob', 'searchIndex')) {
+        Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_SOURCE_KIND_INVALID' `
+            -Message "foundryIqKnowledgeSourceKind must be 'azureBlob' or 'searchIndex'; got '$sourceKind'."
+    }
+    elseif (($pattern -eq 'searchIndex' -and $sourceKind -ne 'searchIndex') -or ($pattern -ne 'searchIndex' -and $sourceKind -ne 'azureBlob')) {
+        Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_SOURCE_KIND_CONFLICT' `
+            -Message "foundryIqKnowledgeSourceKind '$sourceKind' conflicts with foundryIqPattern '$pattern'." `
+            -Hint "Use FOUNDRY_IQ_PATTERN=azureBlob with FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND=azureBlob for native Blob, or set both to searchIndex for Pattern B."
+    }
+
+    $permissionOptionsJson = (Get-StringValue $P['foundryIqIngestionPermissionOptionsJson']).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($permissionOptionsJson)) {
+        try {
+            $permissionOptions = $permissionOptionsJson | ConvertFrom-Json -NoEnumerate
+            if ($null -eq $permissionOptions -or $permissionOptions -isnot [array]) {
+                Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_PERMISSION_OPTIONS_INVALID' `
+                    -Message "foundryIqIngestionPermissionOptionsJson must be a JSON array; got '$permissionOptionsJson'."
+            }
+        }
+        catch {
+            Add-Finding -Severity FAIL -Code 'FOUNDRYIQ_PERMISSION_OPTIONS_INVALID' `
+                -Message "foundryIqIngestionPermissionOptionsJson must be valid JSON; got '$permissionOptionsJson'."
+        }
     }
 
     $apiVersion = (Get-StringValue $P['foundryIqApiVersion']).Trim()
@@ -583,7 +610,7 @@ function Test-FoundryIqConfiguration {
             -Hint "Create or update the knowledge source/knowledge base after provisioning with scripts/Configure-FoundryIQKnowledgeBase.ps1; Bicep stamps runtime config and the dedicated connection ID."
     }
     else {
-        Add-Finding -Severity WARN -Code 'FOUNDRYIQ_PATTERN_A_MANAGED_LIMITATION' `
+        Add-Finding -Severity WARN -Code 'FOUNDRYIQ_PATTERN_A_NATIVE_LIMITATION' `
             -Message "Foundry IQ Pattern A selected. Plain Blob sources provide container-level RBAC only; per-document trimming requires ADLS Gen2 ACLs, Purview, SharePoint, OneLake/Fabric, or Pattern B." `
             -Hint "Do not claim per-document security for plain Blob managed ingestion."
     }

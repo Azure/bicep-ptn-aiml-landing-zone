@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Foundry IQ native Blob defaults are consistent across parameter substitution and preflight.** `main.parameters.json` now defaults `FOUNDRY_IQ_PATTERN` to `azureBlob`, and the preflight validator accepts `azureBlob` as the default Pattern A value instead of treating `searchIndex` as the fallback.
+- **Foundry IQ native Blob runtime settings are parameterized for fresh GPT-RAG deployments.** Added parameter-file substitution for Knowledge Source kind, container, folder path, ADLS mode, extraction mode, ingestion permission options, and Pattern B filter add-on so App Configuration stays aligned with `azd env` values.
+
 ## [v2.1.4] - 2026-06-27
 
 ### Fixed
