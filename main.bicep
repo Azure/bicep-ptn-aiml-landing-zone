@@ -535,6 +535,9 @@ param foundryIqIsAdlsGen2 bool = false
 ])
 param foundryIqContentExtractionMode string = 'standard'
 
+@description('Optional Foundry AI Services endpoint for native Foundry IQ standard extraction. Leave empty to use https://<ai-foundry-account>.services.ai.azure.com/.')
+param foundryIqAiServicesEndpoint string = ''
+
 @description('Native Foundry IQ permission metadata to ingest. Blob sources with foundryIqIsAdlsGen2=false support rbacScope and sensitivityLabels. ADLS Gen2 sources can override this to include userIds and groupIds when ACL metadata is required.')
 param foundryIqIngestionPermissionOptions array = [
   'rbacScope'
@@ -4047,6 +4050,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'ENVIRONMENT_NAME',    value: environmentName,                        label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOYMENT_NAME',     value: deployment().name,                      label: appConfigLabel, contentType: 'text/plain' }
       { name: 'RESOURCE_TOKEN',      value: resourceToken,                          label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'SEARCH_RAG_INDEX_NAME', value: 'ragindex-${resourceToken}',           label: appConfigLabel, contentType: 'text/plain' }
       { name: 'ENABLE_AGENTIC_RETRIEVAL', value: toLower(string(enableAgenticRetrieval)), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'RETRIEVAL_BACKEND', value: retrievalBackend, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_PATTERN', value: foundryIqPattern, label: appConfigLabel, contentType: 'text/plain' }
@@ -4058,6 +4062,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'FOUNDRY_IQ_STORAGE_FOLDER_PATH', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? foundryIqStorageFolderPath : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_IS_ADLS_GEN2', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? toLower(string(foundryIqIsAdlsGen2)) : 'false', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_CONTENT_EXTRACTION_MODE', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? foundryIqContentExtractionMode : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'FOUNDRY_IQ_AI_SERVICES_ENDPOINT', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? (!empty(foundryIqAiServicesEndpoint) ? foundryIqAiServicesEndpoint : 'https://${aiFoundryAccountName}.services.ai.azure.com/') : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? string(effectiveFoundryIqIngestionPermissionOptions) : '[]', label: appConfigLabel, contentType: 'application/json' }
       { name: 'FOUNDRY_IQ_SEARCH_INDEX_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? foundryIqSearchIndexName : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_SEMANTIC_CONFIGURATION_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? foundryIqSemanticConfigurationName : '', label: appConfigLabel, contentType: 'text/plain' }

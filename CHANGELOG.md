@@ -9,6 +9,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 - **Foundry IQ native Blob defaults are consistent across parameter substitution and preflight.** `main.parameters.json` now defaults `FOUNDRY_IQ_PATTERN` to `azureBlob`, and the preflight validator accepts `azureBlob` as the default Pattern A value instead of treating `searchIndex` as the fallback.
 - **Foundry IQ native Blob runtime settings are parameterized for fresh GPT-RAG deployments.** Added parameter-file substitution for Knowledge Source kind, container, folder path, ADLS mode, extraction mode, ingestion permission options, and Pattern B filter add-on so App Configuration stays aligned with `azd env` values.
+- **Fresh Foundry IQ deployments now stamp the native Blob prerequisites used by GPT-RAG search setup.** App Configuration includes the deterministic `SEARCH_RAG_INDEX_NAME` and a `FOUNDRY_IQ_AI_SERVICES_ENDPOINT` value derived from the Foundry account unless the operator overrides it for an existing Foundry resource.
 
 ## [v2.1.4] - 2026-06-27
 

@@ -227,6 +227,7 @@ stay on `RETRIEVAL_BACKEND=ai_search` until the operator intentionally migrates.
 | `foundryIqSecurityFieldName` / `FOUNDRY_IQ_SECURITY_FIELD_NAME` | `metadata_security_id` | Field used by the orchestrator to build Pattern B filters. |
 | `foundryIqMaxOutputDocuments` / `FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS` | Empty | Optional cap on documents returned by the knowledge base. |
 | `foundryIqContentExtractionMode` / `FOUNDRY_IQ_CONTENT_EXTRACTION_MODE` | `standard` | Native Blob content extraction mode. `standard` uses the Foundry IQ Content Understanding skill (layout and OCR) so scanned and image-only PDFs are ingested with text. `minimal` skips Content Understanding and only ingests text already present in the source. The setting is immutable on an existing Knowledge Source. |
+| `foundryIqAiServicesEndpoint` / `FOUNDRY_IQ_AI_SERVICES_ENDPOINT` | Derived from the Foundry account | Required by Azure AI Search when `FOUNDRY_IQ_CONTENT_EXTRACTION_MODE=standard`. Leave empty for deployments that create the Foundry account, or set it to `https://<foundry-resource>.services.ai.azure.com/` when reusing an existing Foundry resource. |
 | `foundryIqBaseFilter` / `FOUNDRY_IQ_BASE_FILTER` | Empty | Optional persisted filter for the Pattern B knowledge source. |
 | `foundryIqSourceDataFields` / `FOUNDRY_IQ_SOURCE_DATA_FIELDS` | Template default | Fields exposed by the Pattern B knowledge source. |
 | `foundryIqSearchFields` / `FOUNDRY_IQ_SEARCH_FIELDS` | Template default | Searchable fields used by the Pattern B knowledge source. |
