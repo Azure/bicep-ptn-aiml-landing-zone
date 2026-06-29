@@ -3175,16 +3175,36 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
       }
     }
     sharedPrivateLinkResources: _networkIsolation
-      ? [
-          // {
-          //   groupId: 'blob'
-          //   #disable-next-line BCP318
-          //   privateLinkResourceId: storageAccount.outputs.resourceId
-          //   requestMessage: 'Automated link for Storage'
-          //   provisioningState: 'Succeeded'
-          //   status: 'Approved'
-          // }
+      ? concat(
+        deployStorageAccount
+          ? [
+          {
+            groupId: 'blob'
+            #disable-next-line BCP318
+            privateLinkResourceId: storageAccount.outputs.resourceId
+            requestMessage: 'Allow AI Search private indexing access to GPT-RAG documents storage.'
+          }
         ]
+          : [],
+        deployAiFoundry && retrievalBackend == 'foundry_iq'
+          ? [
+          {
+            groupId: 'openai_account'
+            privateLinkResourceId: resourceId('Microsoft.CognitiveServices/accounts', aiFoundryAccountName)
+            requestMessage: 'Allow AI Search private access to Azure OpenAI embeddings for Foundry IQ.'
+          }
+          {
+            groupId: 'foundry_account'
+            privateLinkResourceId: resourceId('Microsoft.CognitiveServices/accounts', aiFoundryAccountName)
+            requestMessage: 'Allow AI Search private access to Microsoft Foundry for Foundry IQ.'
+          }
+          {
+            groupId: 'cognitiveservices_account'
+            privateLinkResourceId: resourceId('Microsoft.CognitiveServices/accounts', aiFoundryAccountName)
+            requestMessage: 'Allow AI Search private access to Cognitive Services for Foundry IQ standard extraction.'
+          }
+        ]
+          : [])
       : []
   }
   dependsOn: [
@@ -4050,6 +4070,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'ENVIRONMENT_NAME',    value: environmentName,                        label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOYMENT_NAME',     value: deployment().name,                      label: appConfigLabel, contentType: 'text/plain' }
       { name: 'RESOURCE_TOKEN',      value: resourceToken,                          label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'NETWORK_ISOLATION',   value: toLower(string(_networkIsolation)),      label: appConfigLabel, contentType: 'text/plain' }
       { name: 'SEARCH_RAG_INDEX_NAME', value: 'ragindex-${resourceToken}',           label: appConfigLabel, contentType: 'text/plain' }
       { name: 'ENABLE_AGENTIC_RETRIEVAL', value: toLower(string(enableAgenticRetrieval)), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'RETRIEVAL_BACKEND', value: retrievalBackend, label: appConfigLabel, contentType: 'text/plain' }
