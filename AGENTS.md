@@ -301,6 +301,22 @@ Rules:
 
 ---
 
+## Branching and Release Flow
+
+- `develop` is the integration branch for ongoing work; `main` holds released,
+  tagged versions.
+- Before starting any new work, sync `develop` with `main` first. Never branch
+  from a `develop` that is behind a shipped release. Merge or fast-forward `main`
+  into `develop`, then create your feature branch from the updated `develop`.
+- Cut releases from `main`: land the validated change on `main`, tag the exact
+  version (for example `v2.1.6`, with the tag and the GitHub release title equal
+  to the version and no product prefix), and publish notes from `CHANGELOG.md`.
+- Right after a release, reconcile `develop` so it contains everything on `main`.
+  The next feature branch must start from a state that already includes the
+  release.
+
+---
+
 ## Semantic Versioning and Downstream Signals
 
 This landing zone uses semantic versioning. For every change, classify the
