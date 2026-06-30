@@ -477,12 +477,12 @@ param deployAAfAgentSvc bool = true
 @description('Deprecated. Kept for one release for compatibility with existing GPT-RAG deployments. Use retrievalBackend and the Foundry IQ parameters instead.')
 param enableAgenticRetrieval bool = false
 
-@description('Retrieval backend stamped into application runtime configuration. Existing deployments should keep ai_search unless they explicitly migrate.')
+@description('Retrieval backend stamped into application runtime configuration. New deployments default to foundry_iq. Existing deployments can keep ai_search until they explicitly migrate.')
 @allowed([
   'ai_search'
   'foundry_iq'
 ])
-param retrievalBackend string = 'ai_search'
+param retrievalBackend string = 'foundry_iq'
 
 @description('Foundry IQ knowledge pattern. azureBlob uses native Foundry IQ Blob or ADLS Gen2 ingestion and is the default. searchIndex registers the existing GPT-RAG Azure AI Search index as an opt-in legacy Pattern B knowledge source. managed is accepted as a compatibility alias for azureBlob.')
 @allowed([
@@ -511,6 +511,14 @@ param knowledgeBaseConnectionName string = '${environmentName}-knowledge-base-co
 @description('Foundry IQ knowledge source name. For azureBlob this is the native Blob or ADLS Gen2 source. For searchIndex this is the registered GPT-RAG Azure AI Search index source.')
 param foundryIqKnowledgeSourceName string = '${environmentName}-blob-ks'
 
+@description('Foundry IQ knowledge source kind stamped into runtime configuration. Leave empty to derive it from foundryIqPattern. Set to azureBlob for native Blob/ADLS sources or searchIndex for Pattern B.')
+@allowed([
+  ''
+  'azureBlob'
+  'searchIndex'
+])
+param foundryIqKnowledgeSourceKind string = ''
+
 @description('Storage container used by the native Foundry IQ azureBlob knowledge source.')
 param foundryIqStorageContainerName string = 'documents'
 
@@ -527,10 +535,16 @@ param foundryIqIsAdlsGen2 bool = false
 ])
 param foundryIqContentExtractionMode string = 'standard'
 
+@description('Optional Foundry AI Services endpoint for native Foundry IQ standard extraction. Leave empty to use https://<ai-foundry-account>.services.ai.azure.com/.')
+param foundryIqAiServicesEndpoint string = ''
+
 @description('Native Foundry IQ permission metadata to ingest. Blob sources with foundryIqIsAdlsGen2=false support rbacScope and sensitivityLabels. ADLS Gen2 sources can override this to include userIds and groupIds when ACL metadata is required.')
 param foundryIqIngestionPermissionOptions array = [
   'rbacScope'
 ]
+
+@description('JSON array override for native Foundry IQ permission metadata, intended for azd environment substitution from FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS. Leave empty to use foundryIqIngestionPermissionOptions.')
+param foundryIqIngestionPermissionOptionsJson string = ''
 
 @description('Existing GPT-RAG Azure AI Search index name to register as a Pattern B Foundry IQ searchIndex knowledge source.')
 param foundryIqSearchIndexName string = 'gpt-rag-index'
@@ -684,6 +698,11 @@ param containerAppsList array
 param workloadProfiles array = []
 
 param acrDnsSuffix string = (environment().name == 'AzureUSGovernment' ? 'azurecr.us' : environment().name == 'AzureChinaCloud'   ? 'azurecr.cn' : 'azurecr.io')
+
+var effectiveFoundryIqKnowledgeSourceKind = retrievalBackend == 'foundry_iq'
+  ? (!empty(foundryIqKnowledgeSourceKind) ? foundryIqKnowledgeSourceKind : (foundryIqPattern == 'searchIndex' ? 'searchIndex' : 'azureBlob'))
+  : ''
+var effectiveFoundryIqIngestionPermissionOptions = !empty(foundryIqIngestionPermissionOptionsJson) ? json(foundryIqIngestionPermissionOptionsJson) : foundryIqIngestionPermissionOptions
 
 // ----------------------------------------------------------------------
 // Cosmos DB Database params
@@ -2862,7 +2881,7 @@ var _containerRuntimeEnv = [
   { name: 'FOUNDRY_IQ_API_VERSION',    value: retrievalBackend == 'foundry_iq' ? foundryIqApiVersion : '' }
   { name: 'FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN', value: retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeRetrievalBillingPlan : '' }
   { name: 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME', value: retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeSourceName : '' }
-  { name: 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND', value: retrievalBackend == 'foundry_iq' ? (foundryIqPattern == 'searchIndex' ? 'searchIndex' : 'azureBlob') : '' }
+  { name: 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND', value: effectiveFoundryIqKnowledgeSourceKind }
   { name: 'FOUNDRY_IQ_FILTER_ADD_ON_ENABLED', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? toLower(string(foundryIqFilterAddOnEnabled)) : 'false' }
   { name: 'FOUNDRY_IQ_SECURITY_FIELD_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? foundryIqSecurityFieldName : '' }
   { name: 'FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS', value: retrievalBackend == 'foundry_iq' ? foundryIqMaxOutputDocuments : '' }
@@ -3156,16 +3175,20 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
       }
     }
     sharedPrivateLinkResources: _networkIsolation
-      ? [
-          // {
-          //   groupId: 'blob'
-          //   #disable-next-line BCP318
-          //   privateLinkResourceId: storageAccount.outputs.resourceId
-          //   requestMessage: 'Automated link for Storage'
-          //   provisioningState: 'Succeeded'
-          //   status: 'Approved'
-          // }
+      ? concat(
+        deployStorageAccount
+          ? [
+          {
+            groupId: 'blob'
+            #disable-next-line BCP318
+            privateLinkResourceId: storageAccount.outputs.resourceId
+            requestMessage: 'Allow AI Search private indexing access to GPT-RAG documents storage.'
+          }
         ]
+          : [],
+        deployAiFoundry && retrievalBackend == 'foundry_iq'
+          ? []
+          : [])
       : []
   }
   dependsOn: [
@@ -3173,6 +3196,45 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
     storageAccount!
   ]
 }
+
+resource searchServiceResource 'Microsoft.Search/searchServices@2025-05-01' existing = if (deploySearchService) {
+  name: searchServiceName
+}
+
+var searchFoundrySharedPrivateLinkResources = (_networkIsolation && deploySearchService && deployAiFoundry && retrievalBackend == 'foundry_iq')
+  ? [
+      {
+        name: 'spl-${searchServiceName}-openai_account-1'
+        groupId: 'openai_account'
+        requestMessage: 'Allow AI Search private access to Azure OpenAI embeddings for Foundry IQ.'
+      }
+      {
+        name: 'spl-${searchServiceName}-foundry_account-1'
+        groupId: 'foundry_account'
+        requestMessage: 'Allow AI Search private access to Microsoft Foundry for Foundry IQ.'
+      }
+      {
+        name: 'spl-${searchServiceName}-cognitiveservices_account-1'
+        groupId: 'cognitiveservices_account'
+        requestMessage: 'Allow AI Search private access to Cognitive Services for Foundry IQ standard extraction.'
+      }
+    ]
+  : []
+
+@batchSize(1)
+resource searchFoundrySharedPrivateLinks 'Microsoft.Search/searchServices/sharedPrivateLinkResources@2025-05-01' = [for spl in searchFoundrySharedPrivateLinkResources: {
+  parent: searchServiceResource
+  name: spl.name
+  properties: {
+    groupId: spl.groupId
+    privateLinkResourceId: resourceId('Microsoft.CognitiveServices/accounts', aiFoundryAccountName)
+    requestMessage: spl.requestMessage
+  }
+  dependsOn: [
+    aiFoundry
+    searchService
+  ]
+}]
 
 // Dedicated AI Search service for AI Foundry (separate from the application search).
 // Skipped when the consumer brings their own AI Foundry search via `aiSearchResourceId`.
@@ -4031,18 +4093,21 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'ENVIRONMENT_NAME',    value: environmentName,                        label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOYMENT_NAME',     value: deployment().name,                      label: appConfigLabel, contentType: 'text/plain' }
       { name: 'RESOURCE_TOKEN',      value: resourceToken,                          label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'NETWORK_ISOLATION',   value: toLower(string(_networkIsolation)),      label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'SEARCH_RAG_INDEX_NAME', value: 'ragindex-${resourceToken}',           label: appConfigLabel, contentType: 'text/plain' }
       { name: 'ENABLE_AGENTIC_RETRIEVAL', value: toLower(string(enableAgenticRetrieval)), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'RETRIEVAL_BACKEND', value: retrievalBackend, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_PATTERN', value: foundryIqPattern, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_API_VERSION', value: retrievalBackend == 'foundry_iq' ? foundryIqApiVersion : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN', value: retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeRetrievalBillingPlan : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME', value: retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeSourceName : '', label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND', value: retrievalBackend == 'foundry_iq' ? (foundryIqPattern == 'searchIndex' ? 'searchIndex' : 'azureBlob') : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND', value: effectiveFoundryIqKnowledgeSourceKind, label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_STORAGE_CONTAINER_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? foundryIqStorageContainerName : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_STORAGE_FOLDER_PATH', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? foundryIqStorageFolderPath : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_IS_ADLS_GEN2', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? toLower(string(foundryIqIsAdlsGen2)) : 'false', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_CONTENT_EXTRACTION_MODE', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? foundryIqContentExtractionMode : '', label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? string(foundryIqIngestionPermissionOptions) : '[]', label: appConfigLabel, contentType: 'application/json' }
+      { name: 'FOUNDRY_IQ_AI_SERVICES_ENDPOINT', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? (!empty(foundryIqAiServicesEndpoint) ? foundryIqAiServicesEndpoint : 'https://${aiFoundryAccountName}.services.ai.azure.com/') : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS', value: retrievalBackend == 'foundry_iq' && foundryIqPattern != 'searchIndex' ? string(effectiveFoundryIqIngestionPermissionOptions) : '[]', label: appConfigLabel, contentType: 'application/json' }
       { name: 'FOUNDRY_IQ_SEARCH_INDEX_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? foundryIqSearchIndexName : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_SEMANTIC_CONFIGURATION_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? foundryIqSemanticConfigurationName : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_SOURCE_DATA_FIELDS', value: string(foundryIqSourceDataFields), label: appConfigLabel, contentType: 'application/json' }
@@ -4199,7 +4264,7 @@ output KNOWLEDGE_BASE_ENDPOINT string = retrievalBackend == 'foundry_iq' && depl
 #disable-next-line BCP318
 output KNOWLEDGE_BASE_CONNECTION_ID string = retrievalBackend == 'foundry_iq' && deploySearchService && deployAiFoundry ? aiFoundryKnowledgeBaseSearchConnection.outputs.searchConnectionId : ''
 output FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME string = retrievalBackend == 'foundry_iq' ? foundryIqKnowledgeSourceName : ''
-output FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND string = retrievalBackend == 'foundry_iq' ? (foundryIqPattern == 'searchIndex' ? 'searchIndex' : 'azureBlob') : ''
+output FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND string = effectiveFoundryIqKnowledgeSourceKind
 
 // Azure AI Speech (#35)
 #disable-next-line BCP318

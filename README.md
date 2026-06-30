@@ -203,25 +203,31 @@ Use `DEPLOY_AAF_AGENT_SVC=false` when an external app only needs hosted model in
 
 ### Foundry IQ for GPT-RAG
 
-The landing zone can stamp GPT-RAG runtime settings for a Foundry IQ knowledge
-base. Existing GPT-RAG deployments should stay on `RETRIEVAL_BACKEND=ai_search`
-until the operator intentionally opts in.
+The landing zone stamps GPT-RAG runtime settings for a Foundry IQ knowledge
+base. New deployments default to Foundry IQ. Existing GPT-RAG deployments can
+stay on `RETRIEVAL_BACKEND=ai_search` until the operator intentionally migrates.
 
 | Parameter / env var | Default | Purpose |
 | --- | --- | --- |
-| `retrievalBackend` / `RETRIEVAL_BACKEND` | `ai_search` | Selects direct Azure AI Search or Foundry IQ. |
-| `foundryIqPattern` / `FOUNDRY_IQ_PATTERN` | `searchIndex` | `searchIndex` registers an existing GPT-RAG index. `managed` is for Foundry-managed sources. |
+| `retrievalBackend` / `RETRIEVAL_BACKEND` | `foundry_iq` | Selects direct Azure AI Search or Foundry IQ. Existing deployments can keep `ai_search` until they migrate. |
+| `foundryIqPattern` / `FOUNDRY_IQ_PATTERN` | `azureBlob` | `azureBlob` uses native Foundry IQ Blob or ADLS Gen2 ingestion. `managed` is accepted as a compatibility alias for `azureBlob`. `searchIndex` remains an explicit Pattern B opt-in for existing GPT-RAG Azure AI Search indexes. |
 | `knowledgeBaseName` / `KNOWLEDGE_BASE_NAME` | `knowledge-base` | Name stamped into `KNOWLEDGE_BASE_NAME`. |
 | `knowledgeBaseConnectionName` / `KNOWLEDGE_BASE_CONNECTION_NAME` | `knowledge-base-connection` | Dedicated AI Foundry Search connection for knowledge-base use. |
 | `foundryIqApiVersion` / `FOUNDRY_IQ_API_VERSION` | `2026-05-01-preview` | Required for per-user permissions and Pattern B `filterAddOn`. |
 | `foundryIqKnowledgeRetrievalBillingPlan` / `FOUNDRY_IQ_KNOWLEDGE_RETRIEVAL_BILLING_PLAN` | `free` | Azure AI Search `knowledgeRetrieval` billing plan. Set `standard` only after billing approval. |
-| `foundryIqKnowledgeSourceName` / `FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME` | `gpt-rag-search-index` | Pattern B knowledge source name. |
+| `foundryIqKnowledgeSourceName` / `FOUNDRY_IQ_KNOWLEDGE_SOURCE_NAME` | `knowledge-base-blob-ks` | Native Blob Knowledge Source name by default; also used as the Pattern B source name when `searchIndex` is selected. |
+| `foundryIqKnowledgeSourceKind` / `FOUNDRY_IQ_KNOWLEDGE_SOURCE_KIND` | `azureBlob` | Runtime Knowledge Source kind. Keep aligned with `foundryIqPattern`; use `searchIndex` only for Pattern B. |
+| `foundryIqStorageContainerName` / `FOUNDRY_IQ_STORAGE_CONTAINER_NAME` | `documents` | Blob or ADLS Gen2 container for native Foundry IQ ingestion. |
+| `foundryIqStorageFolderPath` / `FOUNDRY_IQ_STORAGE_FOLDER_PATH` | Empty | Optional folder path within the native Blob or ADLS Gen2 container. |
+| `foundryIqIsAdlsGen2` / `FOUNDRY_IQ_IS_ADLS_GEN2` | `false` | Set to `true` when the native source is an ADLS Gen2 account with hierarchical namespace. |
+| `foundryIqIngestionPermissionOptionsJson` / `FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS` | `["rbacScope"]` | JSON array of permission metadata to ingest for native Foundry IQ sources. |
 | `foundryIqSearchIndexName` / `FOUNDRY_IQ_SEARCH_INDEX_NAME` | `gpt-rag-index` | Existing Azure AI Search index to register for Pattern B. |
 | `foundryIqSemanticConfigurationName` / `FOUNDRY_IQ_SEMANTIC_CONFIGURATION_NAME` | `default` | Semantic configuration on the existing index. |
-| `foundryIqFilterAddOnEnabled` / `FOUNDRY_IQ_FILTER_ADD_ON_ENABLED` | `true` | Enables GPT-RAG query-time security filtering for Pattern B. |
+| `foundryIqFilterAddOnEnabled` / `FOUNDRY_IQ_FILTER_ADD_ON_ENABLED` | `false` | Enables GPT-RAG query-time security filtering for Pattern B. Leave `false` for native Blob. |
 | `foundryIqSecurityFieldName` / `FOUNDRY_IQ_SECURITY_FIELD_NAME` | `metadata_security_id` | Field used by the orchestrator to build Pattern B filters. |
 | `foundryIqMaxOutputDocuments` / `FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS` | Empty | Optional cap on documents returned by the knowledge base. |
 | `foundryIqContentExtractionMode` / `FOUNDRY_IQ_CONTENT_EXTRACTION_MODE` | `standard` | Native Blob content extraction mode. `standard` uses the Foundry IQ Content Understanding skill (layout and OCR) so scanned and image-only PDFs are ingested with text. `minimal` skips Content Understanding and only ingests text already present in the source. The setting is immutable on an existing Knowledge Source. |
+| `foundryIqAiServicesEndpoint` / `FOUNDRY_IQ_AI_SERVICES_ENDPOINT` | Derived from the Foundry account | Required by Azure AI Search when `FOUNDRY_IQ_CONTENT_EXTRACTION_MODE=standard`. Leave empty for deployments that create the Foundry account, or set it to `https://<foundry-resource>.services.ai.azure.com/` when reusing an existing Foundry resource. |
 | `foundryIqBaseFilter` / `FOUNDRY_IQ_BASE_FILTER` | Empty | Optional persisted filter for the Pattern B knowledge source. |
 | `foundryIqSourceDataFields` / `FOUNDRY_IQ_SOURCE_DATA_FIELDS` | Template default | Fields exposed by the Pattern B knowledge source. |
 | `foundryIqSearchFields` / `FOUNDRY_IQ_SEARCH_FIELDS` | Template default | Searchable fields used by the Pattern B knowledge source. |
