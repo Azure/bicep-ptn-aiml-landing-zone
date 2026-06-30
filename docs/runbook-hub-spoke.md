@@ -256,7 +256,7 @@ Confirm `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `AZURE_LOCATION=eastus2`, `A
 azd provision
 ```
 
-> A **pre-flight script** (`scripts/Invoke-PreflightChecks.ps1`) runs automatically as an `azd preprovision` hook before the deployment touches Azure. It validates the parameter set (CIDR ranges, BYO resources, conflicting flags) and fails fast on deterministic mistakes. To bypass it temporarily, set `$env:PREFLIGHT_SKIP = 'true'` before running `azd provision`. See [docs/v2-migration.md §6](./v2-migration.md#6-pre-flight-validation-script) for the full list of checks.
+> A **pre-flight script** (`scripts/Invoke-PreflightChecks.ps1`) runs automatically as an `azd preprovision` hook before the deployment touches Azure. It validates the parameter set (CIDR ranges, BYO resources, conflicting flags, and insufficient AI Foundry OpenAI model quota) and fails fast on deterministic mistakes. To bypass it temporarily, set `$env:PREFLIGHT_SKIP = 'true'` before running `azd provision`. See [docs/v2-migration.md §6](./v2-migration.md#6-pre-flight-validation-script) for the full list of checks.
 
 **Expected duration**: 25–35 minutes for a network-isolated spoke with all PEs and the AI Foundry account.
 
