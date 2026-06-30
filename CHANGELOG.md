@@ -8,6 +8,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 ### Changed
 
 - **`main.bicep` has clearer modular seams for the issue #87 maintainability track.** Container Apps naming, Dapr, and base environment shaping now use named locals; Azure Firewall rule construction is separated from the firewall resources; and private endpoint DNS zone groups are centralized in a single map. These are behavior-preserving refactors intended to reduce future edit risk in the large orchestration template.
+- **`main.bicep` is reduced by extracting large resource bodies into local modules (issue #87).** The Azure Firewall (policy, rule collection groups, public IP, diagnostics, and FQDN rule data) moved to `modules/networking/azure-firewall.bicep`; the per-app container control-plane role loops were consolidated into a single array-driven `resource-role-assignment` invocation; and the remaining cross-service control-plane role grants (Search, Storage, and AI Foundry project identities) were consolidated into one array-driven invocation. This is an internal maintainability refactor that moves code without changing any deployed resource, name, condition, dependency, or property value. The orchestration template went from roughly 4329 to 3698 lines.
 
 ## [v2.1.5] - 2026-06-30
 
