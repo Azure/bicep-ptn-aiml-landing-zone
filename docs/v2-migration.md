@@ -44,8 +44,14 @@ These were already partially solvable by hand-editing the template; v2.0.0 makes
 | Hub peering | Manual post-deploy | Spoke→hub created by `main.bicep`; reverse helper script shipped |
 | DNS link suffix | Single, fixed | Configurable `dnsZoneLinkSuffix` for multi-spoke shared zones |
 | Container app port | Always `8080` | Per-app `target_port` honored (still defaults to `8080`) |
+| Generated names | Legacy `resourceToken` pattern | Legacy remains the default; `resourceNamingMode=caf` is opt-in for new greenfield deployments |
 
 Internally, every v2.0.0 parameter has either a sensible default that reproduces v1.x behavior, or a `null`/empty default that means **"don't override"**. Apart from the explicit `deployVM` → `deployJumpbox`/`deployBastion`/`deployNatGateway` split, the v1.x mental model still works.
+
+Name generation also stays backward-compatible. Existing deployments should keep
+`RESOURCE_NAMING_MODE=legacy` unless they intentionally want a new greenfield
+environment with CAF-style generated names. Explicit `*Name` parameters still
+override generated names in either mode.
 
 ---
 

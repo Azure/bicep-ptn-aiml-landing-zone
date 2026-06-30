@@ -298,6 +298,25 @@ Rules:
 
 ---
 
+## Semantic Versioning and Downstream Signals
+
+This landing zone uses semantic versioning. For every change, classify the
+release impact with judgment:
+
+- **Major**: breaking parameter, output, naming, topology, or deployment
+  behavior changes.
+- **Minor**: backward-compatible features, new opt-in parameters, new modules,
+  or expanded supported scenarios.
+- **Patch**: bug fixes or internal refactors that do not add capabilities or
+  require consumers to change.
+
+When the impact is **major** or **minor**, explicitly call out that the public
+Portal experience and the Terraform landing-zone implementation need follow-up
+parity review or updates. Patch-only bug fixes do not require those downstream
+Portal/Terraform signals unless the fix changes a shared contract.
+
+---
+
 ## Do and Do Not
 
 Do:

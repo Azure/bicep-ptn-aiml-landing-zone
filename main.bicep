@@ -525,6 +525,25 @@ param useZoneRedundancy bool = false // Use Zone Redundancy
 @description('Unique token used to build deterministic resource names, derived from subscription ID, environment name, and location.')
 param resourceToken string = toLower(uniqueString(subscription().id, environmentName, location))
 
+@description('Controls generated resource names. Use `legacy` to preserve existing generated names. Use `caf` for new deployments that want Cloud Adoption Framework-style generated names. Explicit name parameters still override generated names.')
+@allowed([
+  'legacy'
+  'caf'
+])
+param resourceNamingMode string = 'legacy'
+
+@description('CAF naming token for the workload or application. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
+param cafWorkloadName string = 'ai'
+
+@description('CAF naming token for the environment, such as dev, test, prod, or a short project environment name. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
+param cafEnvironmentName string = environmentName
+
+@description('CAF naming token for the Azure region, preferably a short region code such as eus or weu. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
+param cafRegionName string = location
+
+@description('CAF naming instance token, such as 001. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
+param cafInstance string = '001'
+
 @description('Name of the Azure AI Foundry account to create or reference.')
 param aiFoundryAccountName string = '${const.abbrs.ai.aiFoundry}${resourceToken}'
 
@@ -584,6 +603,72 @@ param storageAccountName string = '${const.abbrs.storage.storageAccount}${resour
 
 @description('Name of the Virtual Network to isolate resources and enable private endpoints.')
 param vnetName string = '${const.abbrs.networking.virtualNetwork}${resourceToken}'
+
+var _cafNameStem = '${toLower(cafWorkloadName)}-${toLower(cafEnvironmentName)}-${toLower(cafRegionName)}-${toLower(cafInstance)}'
+var _cafCompactStem = replace(_cafNameStem, '-', '')
+
+var _legacyResourceNames = {
+  aiFoundryAccountName: '${const.abbrs.ai.aiFoundry}${resourceToken}'
+  aiFoundryProjectName: '${const.abbrs.ai.aiFoundryProject}${resourceToken}'
+  aiFoundryStorageAccountName: replace('${const.abbrs.storage.storageAccount}${const.abbrs.ai.aiFoundry}${resourceToken}', '-', '')
+  aiFoundrySearchServiceName: '${const.abbrs.ai.aiSearch}${const.abbrs.ai.aiFoundry}${resourceToken}'
+  aiFoundryCosmosDbName: '${const.abbrs.databases.cosmosDBDatabase}${const.abbrs.ai.aiFoundry}${resourceToken}'
+  bingSearchName: '${const.abbrs.ai.bing}${resourceToken}'
+  appConfigName: '${const.abbrs.configuration.appConfiguration}${resourceToken}'
+  appInsightsName: '${const.abbrs.managementGovernance.applicationInsights}${resourceToken}'
+  containerEnvName: '${const.abbrs.containers.containerAppsEnvironment}${resourceToken}'
+  containerRegistryName: '${const.abbrs.containers.containerRegistry}${resourceToken}'
+  dbAccountName: '${const.abbrs.databases.cosmosDBDatabase}${resourceToken}'
+  dbDatabaseName: '${const.abbrs.databases.cosmosDBDatabase}db${resourceToken}'
+  keyVaultName: '${const.abbrs.security.keyVault}${resourceToken}'
+  logAnalyticsWorkspaceName: '${const.abbrs.managementGovernance.logAnalyticsWorkspace}${resourceToken}'
+  searchServiceName: '${const.abbrs.ai.aiSearch}${resourceToken}'
+  speechServiceName: '${const.abbrs.ai.speechService}${resourceToken}'
+  storageAccountName: '${const.abbrs.storage.storageAccount}${resourceToken}'
+  vnetName: '${const.abbrs.networking.virtualNetwork}${resourceToken}'
+}
+
+var _cafResourceNames = {
+  aiFoundryAccountName: 'aif-${_cafNameStem}'
+  aiFoundryProjectName: 'aifp-${_cafNameStem}'
+  aiFoundryStorageAccountName: substring('staif${_cafCompactStem}', 0, min(length('staif${_cafCompactStem}'), 24))
+  aiFoundrySearchServiceName: 'srch-aif-${_cafNameStem}'
+  aiFoundryCosmosDbName: substring('cosmos-aif-${_cafNameStem}', 0, min(length('cosmos-aif-${_cafNameStem}'), 44))
+  bingSearchName: 'bing-${_cafNameStem}'
+  appConfigName: 'appcs-${_cafNameStem}'
+  appInsightsName: 'appi-${_cafNameStem}'
+  containerEnvName: 'cae-${_cafNameStem}'
+  containerRegistryName: substring('cr${_cafCompactStem}', 0, min(length('cr${_cafCompactStem}'), 50))
+  dbAccountName: substring('cosmos-${_cafNameStem}', 0, min(length('cosmos-${_cafNameStem}'), 44))
+  dbDatabaseName: 'cosmosdb-${_cafNameStem}'
+  keyVaultName: substring('kv-${_cafNameStem}', 0, min(length('kv-${_cafNameStem}'), 24))
+  logAnalyticsWorkspaceName: 'log-${_cafNameStem}'
+  searchServiceName: 'srch-${_cafNameStem}'
+  speechServiceName: 'spch-${_cafNameStem}'
+  storageAccountName: substring('st${_cafCompactStem}', 0, min(length('st${_cafCompactStem}'), 24))
+  vnetName: 'vnet-${_cafNameStem}'
+}
+
+var resourceNames = {
+  aiFoundryAccountName: !empty(aiFoundryAccountName) && !(resourceNamingMode == 'caf' && aiFoundryAccountName == _legacyResourceNames.aiFoundryAccountName) ? aiFoundryAccountName : (resourceNamingMode == 'caf' ? _cafResourceNames.aiFoundryAccountName : _legacyResourceNames.aiFoundryAccountName)
+  aiFoundryProjectName: !empty(aiFoundryProjectName) && !(resourceNamingMode == 'caf' && aiFoundryProjectName == _legacyResourceNames.aiFoundryProjectName) ? aiFoundryProjectName : (resourceNamingMode == 'caf' ? _cafResourceNames.aiFoundryProjectName : _legacyResourceNames.aiFoundryProjectName)
+  aiFoundryStorageAccountName: !empty(aiFoundryStorageAccountName) && !(resourceNamingMode == 'caf' && aiFoundryStorageAccountName == _legacyResourceNames.aiFoundryStorageAccountName) ? aiFoundryStorageAccountName : (resourceNamingMode == 'caf' ? _cafResourceNames.aiFoundryStorageAccountName : _legacyResourceNames.aiFoundryStorageAccountName)
+  aiFoundrySearchServiceName: !empty(aiFoundrySearchServiceName) && !(resourceNamingMode == 'caf' && aiFoundrySearchServiceName == _legacyResourceNames.aiFoundrySearchServiceName) ? aiFoundrySearchServiceName : (resourceNamingMode == 'caf' ? _cafResourceNames.aiFoundrySearchServiceName : _legacyResourceNames.aiFoundrySearchServiceName)
+  aiFoundryCosmosDbName: !empty(aiFoundryCosmosDbName) && !(resourceNamingMode == 'caf' && aiFoundryCosmosDbName == _legacyResourceNames.aiFoundryCosmosDbName) ? aiFoundryCosmosDbName : (resourceNamingMode == 'caf' ? _cafResourceNames.aiFoundryCosmosDbName : _legacyResourceNames.aiFoundryCosmosDbName)
+  bingSearchName: !empty(bingSearchName) && !(resourceNamingMode == 'caf' && bingSearchName == _legacyResourceNames.bingSearchName) ? bingSearchName : (resourceNamingMode == 'caf' ? _cafResourceNames.bingSearchName : _legacyResourceNames.bingSearchName)
+  appConfigName: !empty(appConfigName) && !(resourceNamingMode == 'caf' && appConfigName == _legacyResourceNames.appConfigName) ? appConfigName : (resourceNamingMode == 'caf' ? _cafResourceNames.appConfigName : _legacyResourceNames.appConfigName)
+  appInsightsName: !empty(appInsightsName) && !(resourceNamingMode == 'caf' && appInsightsName == _legacyResourceNames.appInsightsName) ? appInsightsName : (resourceNamingMode == 'caf' ? _cafResourceNames.appInsightsName : _legacyResourceNames.appInsightsName)
+  containerEnvName: !empty(containerEnvName) && !(resourceNamingMode == 'caf' && containerEnvName == _legacyResourceNames.containerEnvName) ? containerEnvName : (resourceNamingMode == 'caf' ? _cafResourceNames.containerEnvName : _legacyResourceNames.containerEnvName)
+  containerRegistryName: !empty(containerRegistryName) && !(resourceNamingMode == 'caf' && containerRegistryName == _legacyResourceNames.containerRegistryName) ? containerRegistryName : (resourceNamingMode == 'caf' ? _cafResourceNames.containerRegistryName : _legacyResourceNames.containerRegistryName)
+  dbAccountName: !empty(dbAccountName) && !(resourceNamingMode == 'caf' && dbAccountName == _legacyResourceNames.dbAccountName) ? dbAccountName : (resourceNamingMode == 'caf' ? _cafResourceNames.dbAccountName : _legacyResourceNames.dbAccountName)
+  dbDatabaseName: !empty(dbDatabaseName) && !(resourceNamingMode == 'caf' && dbDatabaseName == _legacyResourceNames.dbDatabaseName) ? dbDatabaseName : (resourceNamingMode == 'caf' ? _cafResourceNames.dbDatabaseName : _legacyResourceNames.dbDatabaseName)
+  keyVaultName: !empty(keyVaultName) && !(resourceNamingMode == 'caf' && keyVaultName == _legacyResourceNames.keyVaultName) ? keyVaultName : (resourceNamingMode == 'caf' ? _cafResourceNames.keyVaultName : _legacyResourceNames.keyVaultName)
+  logAnalyticsWorkspaceName: !empty(logAnalyticsWorkspaceName) && !(resourceNamingMode == 'caf' && logAnalyticsWorkspaceName == _legacyResourceNames.logAnalyticsWorkspaceName) ? logAnalyticsWorkspaceName : (resourceNamingMode == 'caf' ? _cafResourceNames.logAnalyticsWorkspaceName : _legacyResourceNames.logAnalyticsWorkspaceName)
+  searchServiceName: !empty(searchServiceName) && !(resourceNamingMode == 'caf' && searchServiceName == _legacyResourceNames.searchServiceName) ? searchServiceName : (resourceNamingMode == 'caf' ? _cafResourceNames.searchServiceName : _legacyResourceNames.searchServiceName)
+  speechServiceName: !empty(speechServiceName) && !(resourceNamingMode == 'caf' && speechServiceName == _legacyResourceNames.speechServiceName) ? speechServiceName : (resourceNamingMode == 'caf' ? _cafResourceNames.speechServiceName : _legacyResourceNames.speechServiceName)
+  storageAccountName: !empty(storageAccountName) && !(resourceNamingMode == 'caf' && storageAccountName == _legacyResourceNames.storageAccountName) ? storageAccountName : (resourceNamingMode == 'caf' ? _cafResourceNames.storageAccountName : _legacyResourceNames.storageAccountName)
+  vnetName: !empty(vnetName) && !(resourceNamingMode == 'caf' && vnetName == _legacyResourceNames.vnetName) ? vnetName : (resourceNamingMode == 'caf' ? _cafResourceNames.vnetName : _legacyResourceNames.vnetName)
+}
 
 // ----------------------------------------------------------------------
 // Azure AI Foundry Service params
@@ -948,7 +1033,7 @@ var _runtimeConfigIsContainerEnv = appRuntimeConfigurationMode == 'containerEnv'
 module bastionNsg 'modules/networking/bastion-nsg.bicep' = if (_deployBastion && deployNsgs) {
   name: 'bastionNsgDeployment'
   params: {
-    name: 'nsg-${vnetName}-${azureBastionSubnetName}'
+    name: 'nsg-${resourceNames.vnetName}-${azureBastionSubnetName}'
     location: location
     bastionAllowedSourceIPs: bastionAllowedSourceIPs
   }
@@ -962,7 +1047,7 @@ module bastionNsg 'modules/networking/bastion-nsg.bicep' = if (_deployBastion &&
 module appGwNsg 'modules/networking/appgw-nsg.bicep' = if (_publicIngressEnabled) {
   name: 'appGwNsgDeployment'
   params: {
-    name: 'nsg-${vnetName}-${azureAppGatewaySubnetName}'
+    name: 'nsg-${resourceNames.vnetName}-${azureAppGatewaySubnetName}'
     location: location
     allowedSourceAddressPrefixes: _publicIngressAllowedSources
   }
@@ -1246,7 +1331,7 @@ var subnets = baseSubnets
 module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIsolation && useExistingVNet && deploySubnets) {
   name: 'virtualNetworkSubnetsDeployment'
   params: {
-    vnetName: useExistingVNet ? varExistingVnetName : vnetName
+    vnetName: useExistingVNet ? varExistingVnetName : resourceNames.vnetName
     location: location
     resourceGroupName: useExistingVNet ? varExistingVnetResourceGroupName : resourceGroup().name
     subscriptionId: useExistingVNet ? varExistingVnetSubscriptionId : subscription().subscriptionId
@@ -1267,7 +1352,7 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_n
   params: {
     // VNet sized /16 to fit all subnets
     addressPrefixes: vnetAddressPrefixes
-    name: vnetName
+    name: resourceNames.vnetName
     location: location
 
     tags: _tags
@@ -1280,7 +1365,7 @@ module virtualNetwork 'br/public:avm/res/network/virtual-network:0.7.0' = if (_n
 // reference below ensures Bicep can attach the peering as a child without
 // the AVM module having to expose a peerings property.
 resource spokeVnetForPeering 'Microsoft.Network/virtualNetworks@2024-07-01' existing = if (_createSpokeToHubPeering) {
-  name: vnetName
+  name: resourceNames.vnetName
 }
 
 resource spokeToHubPeering 'Microsoft.Network/virtualNetworks/virtualNetworkPeerings@2024-07-01' = if (_createSpokeToHubPeering) {
@@ -1920,7 +2005,7 @@ module assignCosmosDBCosmosDbBuiltInDataContributorTestVm 'modules/security/cosm
     cosmosDbAccountName: cosmosDBAccount.outputs.name
     principalId: _testVmPrincipalId
     roleDefinitionGuid: const.roles.CosmosDBBuiltInDataContributor.guid
-    scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${dbAccountName}'
+    scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${resourceNames.dbAccountName}'
   }
 }
 
@@ -1992,26 +2077,26 @@ var _byoZoneOdsOpInsights  = !empty(existingPrivateDnsZoneOdsOpsInsightsResource
 var _byoZoneAzureAutomation= !empty(existingPrivateDnsZoneAzureAutomationResourceId ?? '')
 
 var _dnsZonesList = _deployPrivateDnsZones ? concat(
-  _byoZoneCogSvcs       ? [] : [ { dnsName: 'privatelink.cognitiveservices.azure.com', virtualNetworkLinkName: '${vnetName}-cogsvcs-link${_dnsZonesLinkSuffix}' } ],
-  _byoZoneOpenAi        ? [] : [ { dnsName: 'privatelink.openai.azure.com',            virtualNetworkLinkName: '${vnetName}-openai-link${_dnsZonesLinkSuffix}' } ],
-  _byoZoneAiServices    ? [] : [ { dnsName: 'privatelink.services.ai.azure.com',       virtualNetworkLinkName: '${vnetName}-aiservices-link${_dnsZonesLinkSuffix}' } ],
-  _byoZoneSearch        ? [] : [ { dnsName: 'privatelink.search.windows.net',          virtualNetworkLinkName: '${vnetName}-search-std-link${_dnsZonesLinkSuffix}' } ],
-  _byoZoneCosmos        ? [] : [ { dnsName: 'privatelink.documents.azure.com',         virtualNetworkLinkName: '${vnetName}-cosmos-std-link${_dnsZonesLinkSuffix}' } ],
-  _byoZoneBlob          ? [] : [ { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${vnetName}-blob-std-link${_dnsZonesLinkSuffix}' } ],
-  _byoZoneKeyVault      ? [] : [ { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${vnetName}-kv-link${_dnsZonesLinkSuffix}' } ],
-  _byoZoneAppConfig     ? [] : [ { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${vnetName}-appcfg-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneCogSvcs       ? [] : [ { dnsName: 'privatelink.cognitiveservices.azure.com', virtualNetworkLinkName: '${resourceNames.vnetName}-cogsvcs-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneOpenAi        ? [] : [ { dnsName: 'privatelink.openai.azure.com',            virtualNetworkLinkName: '${resourceNames.vnetName}-openai-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneAiServices    ? [] : [ { dnsName: 'privatelink.services.ai.azure.com',       virtualNetworkLinkName: '${resourceNames.vnetName}-aiservices-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneSearch        ? [] : [ { dnsName: 'privatelink.search.windows.net',          virtualNetworkLinkName: '${resourceNames.vnetName}-search-std-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneCosmos        ? [] : [ { dnsName: 'privatelink.documents.azure.com',         virtualNetworkLinkName: '${resourceNames.vnetName}-cosmos-std-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneBlob          ? [] : [ { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${resourceNames.vnetName}-blob-std-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneKeyVault      ? [] : [ { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${resourceNames.vnetName}-kv-link${_dnsZonesLinkSuffix}' } ],
+  _byoZoneAppConfig     ? [] : [ { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${resourceNames.vnetName}-appcfg-link${_dnsZonesLinkSuffix}' } ],
   (deployContainerApps && !_byoZoneContainerApps) ? [
-    { dnsName: 'privatelink.${location}.azurecontainerapps.io', virtualNetworkLinkName: '${vnetName}-containerapps-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.${location}.azurecontainerapps.io', virtualNetworkLinkName: '${resourceNames.vnetName}-containerapps-link${_dnsZonesLinkSuffix}' }
   ] : [],
   (deployContainerRegistry && !_byoZoneAcr) ? [
-    { dnsName: 'privatelink.${acrDnsSuffix}',                         virtualNetworkLinkName: '${vnetName}-containerregistry-link${_dnsZonesLinkSuffix}' }
+    { dnsName: 'privatelink.${acrDnsSuffix}',                         virtualNetworkLinkName: '${resourceNames.vnetName}-containerregistry-link${_dnsZonesLinkSuffix}' }
   ] : [],
   _deployAmpls ? concat(
-    _byoZoneAppInsights     ? [] : [ { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${vnetName}-appi-link${_dnsZonesLinkSuffix}' } ],
-    _byoZoneAzureMonitor    ? [] : [ { dnsName: 'privatelink.monitor.azure.com',           virtualNetworkLinkName: '${vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' } ],
-    _byoZoneOmsOpInsights   ? [] : [ { dnsName: 'privatelink.oms.opinsights.azure.com',    virtualNetworkLinkName: '${vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' } ],
-    _byoZoneOdsOpInsights   ? [] : [ { dnsName: 'privatelink.ods.opinsights.azure.com',    virtualNetworkLinkName: '${vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' } ],
-    _byoZoneAzureAutomation ? [] : [ { dnsName: 'privatelink.agentsvc.azure.automation.net', virtualNetworkLinkName: '${vnetName}-azure-automation-link${_dnsZonesLinkSuffix}' } ]
+    _byoZoneAppInsights     ? [] : [ { dnsName: 'privatelink.applicationinsights.io',      virtualNetworkLinkName: '${resourceNames.vnetName}-appi-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneAzureMonitor    ? [] : [ { dnsName: 'privatelink.monitor.azure.com',           virtualNetworkLinkName: '${resourceNames.vnetName}-azure-monitor-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneOmsOpInsights   ? [] : [ { dnsName: 'privatelink.oms.opinsights.azure.com',    virtualNetworkLinkName: '${resourceNames.vnetName}-oms-opinsights-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneOdsOpInsights   ? [] : [ { dnsName: 'privatelink.ods.opinsights.azure.com',    virtualNetworkLinkName: '${resourceNames.vnetName}-ods-opinsights-link${_dnsZonesLinkSuffix}' } ],
+    _byoZoneAzureAutomation ? [] : [ { dnsName: 'privatelink.agentsvc.azure.automation.net', virtualNetworkLinkName: '${resourceNames.vnetName}-azure-automation-link${_dnsZonesLinkSuffix}' } ]
   ) : []
 ) : []
 
@@ -2084,7 +2169,7 @@ var _peDnsZoneGroupCogSvcs = policyManagedPrivateDns ? null : {
 var _peList = concat(
   (_networkIsolation && deployStorageAccount) ? [
     {
-      name: '${const.abbrs.networking.privateEndpoint}${storageAccountName}'
+      name: '${const.abbrs.networking.privateEndpoint}${resourceNames.storageAccountName}'
       privateLinkServiceConnections: [
         {
           name: 'blobConnection${useExistingVNet?'-byon':''}'
@@ -2097,7 +2182,7 @@ var _peList = concat(
   ] : [],
   (_networkIsolation && deployCosmosDb) ? [
     {
-      name: '${const.abbrs.networking.privateEndpoint}${dbAccountName}'
+      name: '${const.abbrs.networking.privateEndpoint}${resourceNames.dbAccountName}'
       privateLinkServiceConnections: [
         {
           name: 'cosmosConnection${useExistingVNet?'-byon':''}'
@@ -2110,7 +2195,7 @@ var _peList = concat(
   ] : [],
   (_networkIsolation && deploySearchService) ? [
     {
-      name: '${const.abbrs.networking.privateEndpoint}${searchServiceName}'
+      name: '${const.abbrs.networking.privateEndpoint}${resourceNames.searchServiceName}'
       privateLinkServiceConnections: [
         {
           name: 'searchConnection${useExistingVNet?'-byon':''}'
@@ -2123,7 +2208,7 @@ var _peList = concat(
   ] : [],
   (_networkIsolation && _deployAiFoundrySearch) ? [
     {
-      name: '${const.abbrs.networking.privateEndpoint}${aiFoundrySearchServiceName}'
+      name: '${const.abbrs.networking.privateEndpoint}${resourceNames.aiFoundrySearchServiceName}'
       privateLinkServiceConnections: [
         {
           name: 'searchAIFConnection${useExistingVNet?'-byon':''}'
@@ -2136,7 +2221,7 @@ var _peList = concat(
   ] : [],
   (_networkIsolation && deployKeyVault) ? [
     {
-      name: '${const.abbrs.networking.privateEndpoint}${keyVaultName}'
+      name: '${const.abbrs.networking.privateEndpoint}${resourceNames.keyVaultName}'
       privateLinkServiceConnections: [
         {
           name: 'kvConnection${useExistingVNet?'-byon':''}'
@@ -2149,7 +2234,7 @@ var _peList = concat(
   ] : [],
   (_networkIsolation && deployAppConfig) ? [
     {
-      name: '${const.abbrs.networking.privateEndpoint}${appConfigName}'
+      name: '${const.abbrs.networking.privateEndpoint}${resourceNames.appConfigName}'
       privateLinkServiceConnections: [
         {
           name: 'appConfigConnection${useExistingVNet?'-byon':''}'
@@ -2162,7 +2247,7 @@ var _peList = concat(
   ] : [],
   (_networkIsolation && deployContainerEnv) ? [
     {
-      name: '${const.abbrs.networking.privateEndpoint}${containerEnvName}'
+      name: '${const.abbrs.networking.privateEndpoint}${resourceNames.containerEnvName}'
       privateLinkServiceConnections: [
         {
           name: 'ccaConnection'
@@ -2175,10 +2260,10 @@ var _peList = concat(
   ] : [],
   (_networkIsolation && deployContainerRegistry) ? [
     {
-      name: '${const.abbrs.networking.privateEndpoint}${containerRegistryName}'
+      name: '${const.abbrs.networking.privateEndpoint}${resourceNames.containerRegistryName}'
       privateLinkServiceConnections: [
         {
-          name: '${containerRegistryName}-registry-connection'
+          name: '${resourceNames.containerRegistryName}-registry-connection'
           #disable-next-line BCP318
           properties: { privateLinkServiceId: containerRegistry.id, groupIds: ['registry'] }
         }
@@ -2188,7 +2273,7 @@ var _peList = concat(
   ] : [],
   (_networkIsolation && deploySpeechService) ? [
     {
-      name: '${const.abbrs.networking.privateEndpoint}${speechServiceName}'
+      name: '${const.abbrs.networking.privateEndpoint}${resourceNames.speechServiceName}'
       privateLinkServiceConnections: [
         {
           name: 'speechConnection${useExistingVNet?'-byon':''}'
@@ -2257,7 +2342,7 @@ var _dnsZoneAzureAutomationId = !empty(existingPrivateDnsZoneAzureAutomationReso
 
 //AI Foundry Account User Managed Identity
 resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI) {
-  name: '${const.abbrs.security.managedIdentity}${aiFoundryAccountName}'
+  name: '${const.abbrs.security.managedIdentity}${resourceNames.aiFoundryAccountName}'
   location: location
 }
 
@@ -2278,7 +2363,7 @@ resource aiFoundryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-
 module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (_deployAiFoundryStorage) {
   name: 'aiFoundryStorage-${resourceToken}-deployment'
   params: {
-    name: aiFoundryStorageAccountName
+    name: resourceNames.aiFoundryStorageAccountName
     location: location
     tags: _tags
     skuName: aiFoundryStorageSku
@@ -2308,7 +2393,7 @@ module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (
 
 // 16.1 AI Foundry Configuration
 module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
-  name: '${aiFoundryAccountName}-${resourceToken}-deployment'
+  name: '${resourceNames.aiFoundryAccountName}-${resourceToken}-deployment'
   params: {
     // Required
     baseName: substring(resourceToken, 0, 10)
@@ -2330,7 +2415,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     privateEndpointSubnetResourceId: _networkIsolation ? varPeSubnetId : ''
 
     aiFoundryConfiguration: {
-      accountName: aiFoundryAccountName
+      accountName: resourceNames.aiFoundryAccountName
       allowProjectManagement: deployAfProject
       createCapabilityHosts: _deployAiFoundryAgentService
       location: location
@@ -2339,8 +2424,8 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
 
       project: deployAfProject
         ? {
-            name: aiFoundryProjectName
-            displayName: empty(aiFoundryProjectDisplayName) ? aiFoundryProjectName : aiFoundryProjectDisplayName!
+            name: resourceNames.aiFoundryProjectName
+            displayName: empty(aiFoundryProjectDisplayName) ? resourceNames.aiFoundryProjectName : aiFoundryProjectDisplayName!
             description: empty(aiFoundryProjectDescription) ? 'This is the default project for AI Foundry.' : aiFoundryProjectDescription!
           }
         : null
@@ -2425,14 +2510,14 @@ var varAfNetworkingOverride = _networkIsolation
 var varAfAiSearchCfgComplete = _deployAiFoundryAgentService ? {
   #disable-next-line BCP318
   existingResourceId: _useExistingAiFoundrySearch ? aiSearchResourceId : searchServiceAIFoundry.outputs.resourceId
-  name: aiFoundrySearchServiceName
+  name: resourceNames.aiFoundrySearchServiceName
   privateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneSearchId : null
   roleAssignments: []
 } : {}
 
 var varAfCosmosCfgComplete = _deployAiFoundryAgentService ? {
   existingResourceId: _useExistingAiFoundryCosmos ? aiFoundryCosmosDBAccountResourceId : null
-  name: aiFoundryCosmosDbName
+  name: resourceNames.aiFoundryCosmosDbName
   privateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneCosmosId : null
   roleAssignments: []
 } : {}
@@ -2452,7 +2537,7 @@ var varAfKVCfgComplete = _deployAiFoundryAgentService ? {
 var varAfStorageCfgComplete = _deployAiFoundryAgentService ? {
   #disable-next-line BCP318
   existingResourceId: _useExistingAiFoundryStorage ? aiFoundryStorageAccountResourceId : aiFoundryStorageAccount.outputs.resourceId
-  name: aiFoundryStorageAccountName
+  name: resourceNames.aiFoundryStorageAccountName
   blobPrivateDnsZoneResourceId: (_networkIsolation && !policyManagedPrivateDns) ? _dnsZoneBlobId : null
   roleAssignments: []
 } : {}
@@ -2475,7 +2560,7 @@ module bingSearchConnection 'modules/bing-search/main.bicep' = if (deployAiFound
   params: {
     accountName: aiFoundry!.outputs.aiServicesName
     projectName: aiFoundry!.outputs.aiProjectName
-    bingSearchName: bingSearchName
+    bingSearchName: resourceNames.bingSearchName
   }
   dependsOn: [
     aiFoundry!
@@ -2487,11 +2572,11 @@ module bingSearchConnection 'modules/bing-search/main.bicep' = if (deployAiFound
 
 // Bing Search Connection
 module aiFoundryBingConnection 'modules/ai-foundry/connection-bing-search-tool.bicep' = if (deployAiFoundry && deployGroundingWithBing) {
-  name: '${bingSearchName}-connection'
+  name: '${resourceNames.bingSearchName}-connection'
   params: {
     account_name: aiFoundry!.outputs.aiServicesName
     project_name: aiFoundry!.outputs.aiProjectName
-    bingSearchName: bingSearchName
+    bingSearchName: resourceNames.bingSearchName
   }
   dependsOn: [
     aiFoundry!
@@ -2544,7 +2629,7 @@ module aiFoundryConnectionStorage 'modules/ai-foundry/connection-storage-account
 var appInsightsInvalidLocations = ['westcentralus']
 
 resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (_createAppInsights) {
-  name: appInsightsName
+  name: resourceNames.appInsightsName
   location: contains(appInsightsInvalidLocations, location) ? 'eastus' : location
   kind: 'web'
   tags: _tags
@@ -2607,7 +2692,7 @@ module privateEndpointPrivateLinkScope 'modules/networking/private-endpoint.bice
 }
 
 resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_deployAmpls) {
-  name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${logAnalyticsWorkspaceName}'!
+  name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${resourceNames.logAnalyticsWorkspaceName}'!
   properties :{
     #disable-next-line BCP318
     linkedResourceId: _lawResourceId
@@ -2618,7 +2703,7 @@ resource privateLinkScopedResources1 'microsoft.insights/privatelinkscopes/scope
 }
 
 resource privateLinkScopedResources2 'microsoft.insights/privatelinkscopes/scopedresources@2021-07-01-preview' = if (_deployAmpls) {
-  name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${appInsightsName}'!
+  name: '${const.abbrs.networking.privateLinkScope}${resourceToken}/${resourceNames.appInsightsName}'!
   properties :{
     linkedResourceId: _appInsightsResourceId
   }
@@ -2632,13 +2717,13 @@ resource privateLinkScopedResources2 'microsoft.insights/privatelinkscopes/scope
 
 //Container Apps Env User Managed Identity
 resource containerEnvUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI && deployContainerEnv) {
-  name: '${const.abbrs.security.managedIdentity}${containerEnvName}'
+  name: '${const.abbrs.security.managedIdentity}${resourceNames.containerEnvName}'
   location: location
 }
 
 // Container Apps Environment
 resource containerEnv 'Microsoft.App/managedEnvironments@2025-01-01' = if (deployContainerEnv) {
-  name: containerEnvName
+  name: resourceNames.containerEnvName
   location: location
   tags: _tags
   identity: {
@@ -2669,13 +2754,13 @@ resource containerEnv 'Microsoft.App/managedEnvironments@2025-01-01' = if (deplo
 
 //Container Registry User Managed Identity
 resource containerRegistryUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI && deployContainerRegistry) {
-  name: '${const.abbrs.security.managedIdentity}${containerRegistryName}'
+  name: '${const.abbrs.security.managedIdentity}${resourceNames.containerRegistryName}'
   location: location
 }
 
 // Container Registry
 resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = if (deployContainerRegistry) {
-  name: containerRegistryName
+  name: resourceNames.containerRegistryName
   location: location
   tags: _tags
   sku: {
@@ -2750,20 +2835,20 @@ var _containerRuntimeEnv = [
   { name: 'ENABLE_AGENTIC_RETRIEVAL',  value: toLower(string(enableAgenticRetrieval)) }
   { name: 'LOG_LEVEL',                 value: 'INFO' }
   { name: 'ENABLE_CONSOLE_LOGGING',    value: 'true' }
-  { name: 'AI_FOUNDRY_ACCOUNT_NAME',   value: aiFoundryAccountName }
-  { name: 'AI_FOUNDRY_PROJECT_NAME',   value: aiFoundryProjectName }
-  { name: 'AI_FOUNDRY_ACCOUNT_ENDPOINT', value: 'https://${aiFoundryAccountName}.cognitiveservices.azure.com/' }
-  { name: 'AI_FOUNDRY_OPENAI_ENDPOINT',  value: 'https://${aiFoundryAccountName}.openai.azure.com/' }
-  { name: 'APP_INSIGHTS_NAME',         value: appInsightsName }
-  { name: 'CONTAINER_ENV_NAME',        value: containerEnvName }
-  { name: 'CONTAINER_REGISTRY_NAME',   value: containerRegistryName }
-  { name: 'CONTAINER_REGISTRY_LOGIN_SERVER', value: '${containerRegistryName}.azurecr.io' }
-  { name: 'DATABASE_ACCOUNT_NAME',     value: dbAccountName }
-  { name: 'DATABASE_NAME',             value: dbDatabaseName }
-  { name: 'SEARCH_SERVICE_NAME',       value: searchServiceName }
-  { name: 'STORAGE_ACCOUNT_NAME',      value: storageAccountName }
-  { name: 'KEY_VAULT_NAME',            value: keyVaultName }
-  { name: 'APP_CONFIG_NAME',           value: appConfigName }
+  { name: 'AI_FOUNDRY_ACCOUNT_NAME',   value: resourceNames.aiFoundryAccountName }
+  { name: 'AI_FOUNDRY_PROJECT_NAME',   value: resourceNames.aiFoundryProjectName }
+  { name: 'AI_FOUNDRY_ACCOUNT_ENDPOINT', value: 'https://${resourceNames.aiFoundryAccountName}.cognitiveservices.azure.com/' }
+  { name: 'AI_FOUNDRY_OPENAI_ENDPOINT',  value: 'https://${resourceNames.aiFoundryAccountName}.openai.azure.com/' }
+  { name: 'APP_INSIGHTS_NAME',         value: resourceNames.appInsightsName }
+  { name: 'CONTAINER_ENV_NAME',        value: resourceNames.containerEnvName }
+  { name: 'CONTAINER_REGISTRY_NAME',   value: resourceNames.containerRegistryName }
+  { name: 'CONTAINER_REGISTRY_LOGIN_SERVER', value: '${resourceNames.containerRegistryName}.azurecr.io' }
+  { name: 'DATABASE_ACCOUNT_NAME',     value: resourceNames.dbAccountName }
+  { name: 'DATABASE_NAME',             value: resourceNames.dbDatabaseName }
+  { name: 'SEARCH_SERVICE_NAME',       value: resourceNames.searchServiceName }
+  { name: 'STORAGE_ACCOUNT_NAME',      value: resourceNames.storageAccountName }
+  { name: 'KEY_VAULT_NAME',            value: resourceNames.keyVaultName }
+  { name: 'APP_CONFIG_NAME',           value: resourceNames.appConfigName }
   { name: 'APP_RUNTIME_CONFIGURATION_MODE', value: appRuntimeConfigurationMode }
 ]
 
@@ -2816,7 +2901,7 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
             _runtimeConfigIsAppConfig ? [
               {
                 name: 'APP_CONFIG_ENDPOINT'
-                value: 'https://${appConfigName}.azconfig.io'
+                value: 'https://${resourceNames.appConfigName}.azconfig.io'
               }
             ] : [],
             [
@@ -2874,14 +2959,14 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
 
 //Cosmos User Managed Identity
 resource cosmosUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI) {
-  name: '${const.abbrs.security.managedIdentity}${dbAccountName}'
+  name: '${const.abbrs.security.managedIdentity}${resourceNames.dbAccountName}'
   location: location
 }
 
 module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' = if (deployCosmosDb) {
   name: 'CosmosDBAccount'
   params: {
-    name: dbAccountName
+    name: resourceNames.dbAccountName
     location: cosmosLocation
     managedIdentities: {
       systemAssigned: _useUAI ? false : true
@@ -2916,7 +3001,7 @@ module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' =
     tags: _tags
     sqlDatabases: [
       {
-        name: dbDatabaseName
+        name: resourceNames.dbDatabaseName
         throughput: dbDatabaseThroughput
         containers: [
           for container in databaseContainersList: {
@@ -2940,7 +3025,7 @@ module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' =
 //////////////////////////////////////////////////////////////////////////
 
 resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' = if (deployKeyVault) {
-  name: keyVaultName
+  name: resourceNames.keyVaultName
   location: location
   tags: _tags
   properties: {
@@ -2977,7 +3062,7 @@ resource secret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = [for (config, i
 //////////////////////////////////////////////////////////////////////////
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if (_createLogAnalytics) {
-  name: logAnalyticsWorkspaceName
+  name: resourceNames.logAnalyticsWorkspaceName
   location: location
   tags: _tags
   identity: {
@@ -2999,14 +3084,14 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if
 
 //Search Service User Managed Identity
 resource searchServiceUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI && deploySearchService) {
-  name: '${const.abbrs.security.managedIdentity}${searchServiceName}'
+  name: '${const.abbrs.security.managedIdentity}${resourceNames.searchServiceName}'
   location: _searchServiceLocation
 }
 
 module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (deploySearchService) {
   name: 'searchService'
   params: {
-    name: searchServiceName
+    name: resourceNames.searchServiceName
     location: _searchServiceLocation
     publicNetworkAccess: _publicNetworkAccess
     networkRuleSet: _applyIpRules ? {
@@ -3061,7 +3146,7 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
 module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' = if (_deployAiFoundrySearch) {
   name: 'searchServiceAIFoundry'
   params: {
-    name: aiFoundrySearchServiceName
+    name: resourceNames.aiFoundrySearchServiceName
     location: _searchServiceLocation
     publicNetworkAccess: _publicNetworkAccess
     networkRuleSet: _applyIpRules ? {
@@ -3116,7 +3201,7 @@ module searchServiceAIFoundry 'br/public:avm/res/search/search-service:0.11.1' =
 module speechService 'br/public:avm/res/cognitive-services/account:0.13.2' = if (deploySpeechService) {
   name: 'speechService'
   params: {
-    name: speechServiceName
+    name: resourceNames.speechServiceName
     location: _speechServiceLocation
     tags: _tags
     kind: 'SpeechServices'
@@ -3124,7 +3209,7 @@ module speechService 'br/public:avm/res/cognitive-services/account:0.13.2' = if 
 
     // customSubDomainName is required for AAD auth and private endpoints.
     // Pinning it to the account name keeps the FQDN deterministic.
-    customSubDomainName: speechServiceName
+    customSubDomainName: resourceNames.speechServiceName
 
     publicNetworkAccess: _publicNetworkAccess
     networkAcls: _applyIpRules ? {
@@ -3159,7 +3244,7 @@ module speechService 'br/public:avm/res/cognitive-services/account:0.13.2' = if 
 module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = if (deployStorageAccount) {
   name: 'storageAccountSolution'
   params: {
-    name: storageAccountName
+    name: resourceNames.storageAccountName
     location: location
     publicNetworkAccess: _publicNetworkAccess
     skuName: 'Standard_LRS'
@@ -3315,7 +3400,7 @@ module assignCosmosDBCosmosDbBuiltInDataContributorExecutor 'modules/security/co
     cosmosDbAccountName: cosmosDBAccount.outputs.name
     principalId: principalId
     roleDefinitionGuid: const.roles.CosmosDBBuiltInDataContributor.guid
-    scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${dbAccountName}'
+    scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${resourceNames.dbAccountName}'
   }
 }
 
@@ -3501,7 +3586,7 @@ module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/securi
       #disable-next-line BCP318
       principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
       roleDefinitionGuid: const.roles.CosmosDBBuiltInDataContributor.guid
-      scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${dbAccountName}'
+      scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${resourceNames.dbAccountName}'
     }
   }
 ]
@@ -3734,7 +3819,7 @@ module assignStorageStorageBlobDataReaderAIFoundryProject 'modules/security/reso
 //////////////////////////////////////////////////////////////////////////
 
 resource appConfig 'Microsoft.AppConfiguration/configurationStores@2024-05-01' = if (deployAppConfig) {
-  name: appConfigName
+  name: resourceNames.appConfigName
   location: location
   tags: _tags
   sku: {
@@ -3810,7 +3895,7 @@ module publicIngressM 'modules/networking/public-ingress.bicep' = if (_publicIng
     sslCertSecretId: publicIngress.?sslCertSecretId ?? ''
     frontendHostName: publicIngress.?frontendHostName ?? ''
     keyVaultResourceId: deployKeyVault ? keyVault.id : ''
-    keyVaultName: deployKeyVault ? keyVaultName : ''
+    keyVaultName: deployKeyVault ? resourceNames.keyVaultName : ''
   }
 }
 
@@ -3853,7 +3938,7 @@ var _modelDeploymentSettings = [
     name: modelDeployment.name
     version: modelDeployment.model.version         
     apiVersion: modelDeployment.?apiVersion ?? '2025-01-01-preview' 
-    endpoint: 'https://${aiFoundryAccountName}.openai.azure.com/' 
+    endpoint: 'https://${resourceNames.aiFoundryAccountName}.openai.azure.com/'
   }
 ]
 
@@ -3942,20 +4027,20 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'AZURE_SPEECH_RESOURCE_ID', value: deploySpeechService ? speechService.outputs.resourceId : '', label: appConfigLabel, contentType: 'text/plain' }
       
       // ── Resource Names ───────────────────────────────────────────────────
-      { name: 'AI_FOUNDRY_ACCOUNT_NAME', value: aiFoundryAccountName, label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'AI_FOUNDRY_PROJECT_NAME', value: aiFoundryProjectName, label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'AI_FOUNDRY_STORAGE_ACCOUNT_NAME', value: aiFoundryStorageAccountName, label: appConfigLabel, contentType: 'text/plain'}
-      { name: 'APP_CONFIG_NAME', value: appConfigName, label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'APP_INSIGHTS_NAME', value: appInsightsName, label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'CONTAINER_ENV_NAME', value: containerEnvName, label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'CONTAINER_REGISTRY_NAME', value: containerRegistryName, label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'CONTAINER_REGISTRY_LOGIN_SERVER', value: '${containerRegistryName}.azurecr.io', label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'DATABASE_ACCOUNT_NAME', value: dbAccountName, label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'DATABASE_NAME', value: dbDatabaseName, label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'SEARCH_SERVICE_NAME', value: searchServiceName, label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'AZURE_SPEECH_RESOURCE_NAME', value: deploySpeechService ? speechServiceName : '', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'AI_FOUNDRY_ACCOUNT_NAME', value: resourceNames.aiFoundryAccountName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'AI_FOUNDRY_PROJECT_NAME', value: resourceNames.aiFoundryProjectName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'AI_FOUNDRY_STORAGE_ACCOUNT_NAME', value: resourceNames.aiFoundryStorageAccountName, label: appConfigLabel, contentType: 'text/plain'}
+      { name: 'APP_CONFIG_NAME', value: resourceNames.appConfigName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'APP_INSIGHTS_NAME', value: resourceNames.appInsightsName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'CONTAINER_ENV_NAME', value: resourceNames.containerEnvName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'CONTAINER_REGISTRY_NAME', value: resourceNames.containerRegistryName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'CONTAINER_REGISTRY_LOGIN_SERVER', value: '${resourceNames.containerRegistryName}.azurecr.io', label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'DATABASE_ACCOUNT_NAME', value: resourceNames.dbAccountName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'DATABASE_NAME', value: resourceNames.dbDatabaseName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'SEARCH_SERVICE_NAME', value: resourceNames.searchServiceName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'AZURE_SPEECH_RESOURCE_NAME', value: deploySpeechService ? resourceNames.speechServiceName : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'AZURE_SPEECH_REGION', value: deploySpeechService ? _speechServiceLocation : '', label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'STORAGE_ACCOUNT_NAME', value: storageAccountName, label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'STORAGE_ACCOUNT_NAME', value: resourceNames.storageAccountName, label: appConfigLabel, contentType: 'text/plain' }
 
       // ── Feature flagging ─────────────────────────────────────────────────
       { name: 'DEPLOY_APP_CONFIG', value: string(deployAppConfig), label: appConfigLabel, contentType: 'text/plain' }
@@ -4056,7 +4141,7 @@ output AZURE_SPEECH_RESOURCE_ID string = deploySpeechService ? speechService.out
 #disable-next-line BCP318
 output AZURE_SPEECH_ENDPOINT string = deploySpeechService ? speechService.outputs.endpoint : ''
 output AZURE_SPEECH_REGION string = deploySpeechService ? _speechServiceLocation : ''
-output AZURE_SPEECH_RESOURCE_NAME string = deploySpeechService ? speechServiceName : ''
+output AZURE_SPEECH_RESOURCE_NAME string = deploySpeechService ? resourceNames.speechServiceName : ''
 
 // ──────────────────────────────────────────────────────────────────────
 // Public Ingress (#49) — surface the gateway for downstream automation
@@ -4084,7 +4169,7 @@ output APP_GATEWAY_SUBNET_RESOURCE_ID string = _networkIsolation ? '${virtualNet
 output VNET_RESOURCE_ID string = virtualNetworkResourceId
 #disable-next-line BCP318
 output KEY_VAULT_RESOURCE_ID string = deployKeyVault ? keyVault.id : ''
-output KEY_VAULT_NAME string = deployKeyVault ? keyVaultName : ''
+output KEY_VAULT_NAME string = deployKeyVault ? resourceNames.keyVaultName : ''
 #disable-next-line BCP318
 output LOG_ANALYTICS_RESOURCE_ID string = _lawResourceId
 output APP_INSIGHTS_RESOURCE_ID string = _appInsightsResourceId

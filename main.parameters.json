@@ -95,6 +95,12 @@
     "deploySoftware":                       { "value": "${DEPLOY_SOFTWARE=true}" },
     "deployPostgres":                       { "value": "${DEPLOY_POSTGRES=false}" },
 
+    "resourceNamingMode":                   { "value": "${RESOURCE_NAMING_MODE=legacy}" },
+    "cafWorkloadName":                      { "value": "${CAF_WORKLOAD_NAME=ai}" },
+    "cafEnvironmentName":                   { "value": "${CAF_ENVIRONMENT_NAME=dev}" },
+    "cafRegionName":                        { "value": "${CAF_REGION_NAME=eus}" },
+    "cafInstance":                          { "value": "${CAF_INSTANCE=001}" },
+
     "aiFoundryAccountName":                  { "value": null },
     "aiFoundryProjectName":                  { "value": null },
     "aiFoundryProjectDisplayName":           { "value": null },

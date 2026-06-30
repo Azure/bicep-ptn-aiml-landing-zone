@@ -75,6 +75,27 @@ azd provision
 ```
 > **Optional:** You can change parameter values in `main.parameters.json` or set them using `azd env set` before running `azd provision`. The latter applies only to parameters that support environment variable substitution.
 
+### Resource naming
+
+By default, generated resource names use the existing landing-zone pattern based
+on `resourceToken`, so upgrades do not rename existing resources. For new
+greenfield environments, set `RESOURCE_NAMING_MODE=caf` to opt in to
+Cloud Adoption Framework-style generated names:
+
+```
+azd env set RESOURCE_NAMING_MODE caf
+azd env set CAF_WORKLOAD_NAME contosoai
+azd env set CAF_ENVIRONMENT_NAME dev
+azd env set CAF_REGION_NAME eus
+azd env set CAF_INSTANCE 001
+```
+
+Explicit resource-name parameters such as `aiFoundryAccountName`,
+`containerRegistryName`, `keyVaultName`, `storageAccountName`, and `vnetName`
+continue to override generated names in both naming modes. Keep
+`RESOURCE_NAMING_MODE=legacy` for existing deployments unless you intentionally
+want a greenfield environment with new CAF-style names.
+
 ### Zero Trust Deployment
 
 For deployments that **require network isolation**.
