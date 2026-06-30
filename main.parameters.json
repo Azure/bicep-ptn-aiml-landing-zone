@@ -12,6 +12,7 @@
     "speechServiceLocation":                 { "value": "${AZURE_SPEECH_LOCATION}" },
     "deploymentTags":                      { "value": {} },
     "principalId":                         { "value": "${AZURE_PRINCIPAL_ID}" },
+    "principalType":                       { "value": "${AZURE_PRINCIPAL_TYPE=User}" },
 
     "networkIsolation":                    { "value": "${NETWORK_ISOLATION}" },
     "allowedIpRanges":                     { "value": [] },

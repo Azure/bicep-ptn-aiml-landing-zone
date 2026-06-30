@@ -278,6 +278,7 @@ v2.0.0 ships a read-only pre-flight script — **`scripts/Invoke-PreflightChecks
 | **BYO Private DNS** | Each `existingPrivateDnsZone*ResourceId` points at a zone whose name matches the expected `privatelink.<namespace>` convention; zone exists in Azure |
 | **BYO observability** | `existingLogAnalyticsWorkspaceResourceId`, `existingApplicationInsightsResourceId`, `existingBastionResourceId`, `existingNatGatewayResourceId`, `hubIntegrationExistingRouteTableResourceId` exist in Azure |
 | **Hub VNet overlap** | When `hubIntegrationHubVnetResourceId` is set, the spoke's `vnetAddressPrefixes` do not overlap any of the hub's address prefixes (peering would fail) |
+| **Regional readiness** | Provider/location support, jumpbox VM SKU availability, and AI Foundry OpenAI model quota for each OpenAI-format `modelDeploymentList` entry in the AI Foundry region |
 
 ### How it runs
 

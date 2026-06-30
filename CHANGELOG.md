@@ -9,6 +9,12 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 - **CAF-aligned generated resource names are now available as an opt-in mode** ([#83](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/83), [#87](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/87)). `resourceNamingMode` defaults to `legacy` so existing deployments keep the current generated names. New greenfield environments can set `RESOURCE_NAMING_MODE=caf` with `CAF_WORKLOAD_NAME`, `CAF_ENVIRONMENT_NAME`, `CAF_REGION_NAME`, and `CAF_INSTANCE` to generate Cloud Adoption Framework-style names. Explicit `*Name` parameters continue to override generated names in both modes.
 
+## [v2.0.20] - 2026-06-18
+
+### Fixed
+
+- **Preflight now preserves structured parameters before regional model quota checks** ([#103](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/103)). `Expand-ParamValue` no longer coerces arrays and objects such as `modelDeploymentList` into strings while expanding `${VAR}` tokens. The AI model quota preflight can now inspect requested OpenAI deployments and fail early with `MODEL_QUOTA_INSUFFICIENT` when the requested capacity exceeds available regional quota, instead of reporting "All checks passed" and letting ARM fail later.
+
 ## [v2.0.19] - 2026-06-17
 
 ### Fixed

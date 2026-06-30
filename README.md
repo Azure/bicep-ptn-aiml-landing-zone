@@ -20,7 +20,7 @@ A handful of other quality-of-life additions:
 - **`allowedIpRanges`** — let named CIDRs reach the data plane of Storage, Key Vault, Cosmos DB, AI Search, ACR, AI Foundry, and App Configuration without disabling private endpoints. Use this when developers need to query the workload from their laptops without routing through Bastion.
 - **Decoupled hub components** — `deployJumpbox`, `deployBastion`, and `deployNatGateway` are now independent flags. No more all-or-nothing `deployVM`.
 - **Hub integration helpers** — `hubIntegration.hubVnetResourceId` creates the spoke→hub peering for you; `hubIntegration.egressNextHopIp` routes spoke egress through your hub firewall / NVA.
-- **Pre-flight validation** — `scripts/Invoke-PreflightChecks.ps1` runs automatically as an `azd preprovision` hook and catches the usual mistakes (CIDR overlap, undersized subnets, missing BYO resource IDs, conflicting flags) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
+- **Pre-flight validation** — `scripts/Invoke-PreflightChecks.ps1` runs automatically as an `azd preprovision` hook and catches the usual mistakes (CIDR overlap, undersized subnets, missing BYO resource IDs, conflicting flags, and insufficient AI Foundry OpenAI model quota) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
 - **AI Foundry project naming** — `aiFoundryProjectName`, `aiFoundryProjectDisplayName`, and `aiFoundryProjectDescription` let consumers customize the deployed AI Foundry project instead of using a hardcoded default.
 
 **Pick a runbook to deploy:**

@@ -133,7 +133,7 @@ You can leave it off (`false`) and run the bootstrap manually after RDP'ing into
 azd provision
 ```
 
-> A **pre-flight script** (`scripts/Invoke-PreflightChecks.ps1`) runs automatically as an `azd preprovision` hook before the deployment touches Azure. It validates the parameter set and fails fast on deterministic mistakes (CIDR overlap, missing BYO resources, conflicting flags). Bypass with `$env:PREFLIGHT_SKIP = 'true'` if needed. See [docs/v2-migration.md §6](./v2-migration.md#6-pre-flight-validation-script).
+> A **pre-flight script** (`scripts/Invoke-PreflightChecks.ps1`) runs automatically as an `azd preprovision` hook before the deployment touches Azure. It validates the parameter set and fails fast on deterministic mistakes (CIDR overlap, missing BYO resources, conflicting flags, and insufficient AI Foundry OpenAI model quota). Bypass with `$env:PREFLIGHT_SKIP = 'true'` if needed. See [docs/v2-migration.md §6](./v2-migration.md#6-pre-flight-validation-script).
 
 **Expected duration**:
 

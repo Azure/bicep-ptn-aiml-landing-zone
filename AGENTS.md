@@ -282,11 +282,14 @@ Where landing-zone documentation lives:
     topology, or migration steps change.
 - **Public AI Landing Zone site (separate repo):** the narrative published at
   https://azure.github.io/AI-Landing-Zones/bicep is sourced from the
-  `Azure/AI-Landing-Zones` repository (built from its `gh-pages` branch), not
-  from this repo. When a change alters the public bicep landing-zone story
-  (architecture, design areas, consumer-facing parameters/flags, what's-new),
-  open a **companion PR in `Azure/AI-Landing-Zones`** and link it from this
-  PR's description.
+  `Azure/AI-Landing-Zones` repository, where the documentation source now lives
+  on the `main` branch (the full MkDocs project under `docs/` and `mkdocs.yml`),
+  not in this repo. The site is built and published automatically to the
+  `gh-pages` branch on every push to `main`, so `gh-pages` is generated output,
+  not the source you edit. When a change alters the public bicep landing-zone
+  story (architecture, design areas, consumer-facing parameters/flags,
+  what's-new), open a **companion PR against `main` of `Azure/AI-Landing-Zones`**
+  and link it from this PR's description.
 
 Rules:
 - A change is **not done** until the matching docs are updated, or you have
