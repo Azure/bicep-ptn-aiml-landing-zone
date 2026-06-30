@@ -76,6 +76,58 @@ Assert-True 'Contains: /16 contains /24 inside' (Test-CidrContains '10.0.0.0/16'
 Assert-True 'Contains: /16 does not contain /24 outside' (-not (Test-CidrContains '10.0.0.0/16' '10.1.0.0/24'))
 
 # --------------------------------------------------------------------------
+Write-Host 'Parameter expansion preserves structured values' -ForegroundColor Cyan
+
+$envValues = @{ ENVIRONMENT_NAME = 'ailz-test' }
+$expandedString = Expand-ParamValue -Raw 'rg-${ENVIRONMENT_NAME=default}' -EnvValues $envValues
+Assert-True 'String parameters still expand env tokens' ($expandedString -eq 'rg-ailz-test')
+
+$objectValue = [pscustomobject]@{ name = 'text-embedding-3-large'; capacity = 100 }
+$expandedObject = Expand-ParamValue -Raw $objectValue -EnvValues $envValues
+Assert-True 'Object parameter values are preserved' ([object]::ReferenceEquals($objectValue, $expandedObject))
+
+$arrayValue = @(
+    [pscustomobject]@{ model = [pscustomobject]@{ format = 'OpenAI'; name = 'text-embedding-3-large' }; sku = [pscustomobject]@{ name = 'Standard'; capacity = 100 } }
+)
+$expandedArray = Expand-ParamValue -Raw $arrayValue -EnvValues $envValues
+Assert-True 'Array parameter values are preserved' (-not ($expandedArray -is [string]) -and @($expandedArray).Count -eq 1 -and $expandedArray[0].model.name -eq 'text-embedding-3-large')
+
+$paramsFile = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("ailz-preflight-params-{0}.json" -f ([guid]::NewGuid()))
+try {
+    @'
+{
+  "parameters": {
+    "resourceGroupName": {
+      "value": "rg-${ENVIRONMENT_NAME=default}"
+    },
+    "modelDeploymentList": {
+      "value": [
+        {
+          "model": {
+            "format": "OpenAI",
+            "name": "text-embedding-3-large"
+          },
+          "sku": {
+            "name": "Standard",
+            "capacity": 100
+          }
+        }
+      ]
+    }
+  }
+}
+'@ | Set-Content -Path $paramsFile -Encoding utf8
+    function Get-AzdEnvValues { return @{ ENVIRONMENT_NAME = 'ailz-test' } }
+    Reset-Findings
+    $effectiveParams = Get-EffectiveParameters -Path $paramsFile
+    Assert-True 'Get-EffectiveParameters expands string values' ($effectiveParams['resourceGroupName'] -eq 'rg-ailz-test')
+    Assert-True 'Get-EffectiveParameters preserves modelDeploymentList as array' (-not ($effectiveParams['modelDeploymentList'] -is [string]) -and @($effectiveParams['modelDeploymentList']).Count -eq 1 -and $effectiveParams['modelDeploymentList'][0].sku.capacity -eq 100)
+}
+finally {
+    Remove-Item -Path $paramsFile -ErrorAction SilentlyContinue
+}
+
+# --------------------------------------------------------------------------
 Write-Host 'Topology: policy + BYO DNS conflict' -ForegroundColor Cyan
 Reset-Findings
 Test-Topology -P @{
@@ -238,6 +290,36 @@ finally {
 }
 Assert-True 'REGIONAL_SKIPPED INFO present' (Test-FindingPresent 'REGIONAL_SKIPPED')
 Assert-True 'Only one finding emitted under skip' (@($script:Findings).Count -eq 1)
+
+# --------------------------------------------------------------------------
+Write-Host 'Regional readiness: model quota fails when requested capacity exceeds availability' -ForegroundColor Cyan
+Reset-Findings
+function Invoke-AzCliRaw {
+    param([string[]]$Arguments)
+    if (($Arguments -join ' ') -eq 'cognitiveservices usage list --location westus3 -o json') {
+        return @(
+            [pscustomobject]@{
+                name         = [pscustomobject]@{ value = 'OpenAI.Standard.text-embedding-3-large' }
+                currentValue = 300
+                limit        = 350
+            }
+        )
+    }
+    return $null
+}
+Test-ModelQuota -Location 'westus3' -ModelDeployments @(
+    [pscustomobject]@{
+        model = [pscustomobject]@{
+            format = 'OpenAI'
+            name   = 'text-embedding-3-large'
+        }
+        sku   = [pscustomobject]@{
+            name     = 'Standard'
+            capacity = 100
+        }
+    }
+)
+Assert-True 'MODEL_QUOTA_INSUFFICIENT FAIL raised' (Test-FindingPresent 'MODEL_QUOTA_INSUFFICIENT')
 
 # --------------------------------------------------------------------------
 Write-Host 'Regional readiness: -SkipAzureLookups suppresses block entirely' -ForegroundColor Cyan

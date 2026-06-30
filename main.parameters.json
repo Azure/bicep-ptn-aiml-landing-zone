@@ -12,6 +12,7 @@
     "speechServiceLocation":                 { "value": "${AZURE_SPEECH_LOCATION}" },
     "deploymentTags":                      { "value": {} },
     "principalId":                         { "value": "${AZURE_PRINCIPAL_ID}" },
+    "principalType":                       { "value": "${AZURE_PRINCIPAL_TYPE=User}" },
 
     "networkIsolation":                    { "value": "${NETWORK_ISOLATION}" },
     "allowedIpRanges":                     { "value": [] },
@@ -116,6 +117,12 @@
     "deployVM":                             { "value": "${DEPLOY_VM=null}" },
     "deploySoftware":                       { "value": "${DEPLOY_SOFTWARE=true}" },
     "deployPostgres":                       { "value": "${DEPLOY_POSTGRES=false}" },
+
+    "resourceNamingMode":                   { "value": "${RESOURCE_NAMING_MODE=legacy}" },
+    "cafWorkloadName":                      { "value": "${CAF_WORKLOAD_NAME=ai}" },
+    "cafEnvironmentName":                   { "value": "${CAF_ENVIRONMENT_NAME=dev}" },
+    "cafRegionName":                        { "value": "${CAF_REGION_NAME=eus}" },
+    "cafInstance":                          { "value": "${CAF_INSTANCE=001}" },
 
     "aiFoundryAccountName":                  { "value": null },
     "aiFoundryProjectName":                  { "value": null },

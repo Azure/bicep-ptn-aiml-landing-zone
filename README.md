@@ -20,7 +20,8 @@ A handful of other quality-of-life additions:
 - **`allowedIpRanges`** — let named CIDRs reach the data plane of Storage, Key Vault, Cosmos DB, AI Search, ACR, AI Foundry, and App Configuration without disabling private endpoints. Use this when developers need to query the workload from their laptops without routing through Bastion.
 - **Decoupled hub components** — `deployJumpbox`, `deployBastion`, and `deployNatGateway` are now independent flags. No more all-or-nothing `deployVM`.
 - **Hub integration helpers** — `hubIntegration.hubVnetResourceId` creates the spoke→hub peering for you; `hubIntegration.egressNextHopIp` routes spoke egress through your hub firewall / NVA.
-- **Pre-flight validation** — `scripts/Invoke-PreflightChecks.ps1` runs automatically as an `azd preprovision` hook and catches the usual mistakes (CIDR overlap, undersized subnets, missing BYO resource IDs, conflicting flags) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
+- **Pre-flight validation** — `scripts/Invoke-PreflightChecks.ps1` runs automatically as an `azd preprovision` hook and catches the usual mistakes (CIDR overlap, undersized subnets, missing BYO resource IDs, conflicting flags, and insufficient AI Foundry OpenAI model quota) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
+- **AI Foundry project naming** — `aiFoundryProjectName`, `aiFoundryProjectDisplayName`, and `aiFoundryProjectDescription` let consumers customize the deployed AI Foundry project instead of using a hardcoded default.
 - **Foundry IQ groundwork for GPT-RAG:** set `RETRIEVAL_BACKEND=foundry_iq` to stamp the orchestrator settings for a Foundry IQ knowledge base. See [Foundry IQ for GPT-RAG](#foundry-iq-for-gpt-rag) for parameters, security expectations, billing, and the post-provision script.
 
 **Pick a runbook to deploy:**
@@ -74,6 +75,27 @@ azd auth login
 azd provision
 ```
 > **Optional:** You can change parameter values in `main.parameters.json` or set them using `azd env set` before running `azd provision`. The latter applies only to parameters that support environment variable substitution.
+
+### Resource naming
+
+By default, generated resource names use the existing landing-zone pattern based
+on `resourceToken`, so upgrades do not rename existing resources. For new
+greenfield environments, set `RESOURCE_NAMING_MODE=caf` to opt in to
+Cloud Adoption Framework-style generated names:
+
+```
+azd env set RESOURCE_NAMING_MODE caf
+azd env set CAF_WORKLOAD_NAME contosoai
+azd env set CAF_ENVIRONMENT_NAME dev
+azd env set CAF_REGION_NAME eus
+azd env set CAF_INSTANCE 001
+```
+
+Explicit resource-name parameters such as `aiFoundryAccountName`,
+`containerRegistryName`, `keyVaultName`, `storageAccountName`, and `vnetName`
+continue to override generated names in both naming modes. Keep
+`RESOURCE_NAMING_MODE=legacy` for existing deployments unless you intentionally
+want a greenfield environment with new CAF-style names.
 
 ### Zero Trust Deployment
 

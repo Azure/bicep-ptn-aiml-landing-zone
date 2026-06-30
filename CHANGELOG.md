@@ -5,6 +5,10 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Added
+
+- **CAF-aligned generated resource names are now available as an opt-in mode** ([#83](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/83), [#87](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/87)). `resourceNamingMode` defaults to `legacy` so existing deployments keep the current generated names. New greenfield environments can set `RESOURCE_NAMING_MODE=caf` with `CAF_WORKLOAD_NAME`, `CAF_ENVIRONMENT_NAME`, `CAF_REGION_NAME`, and `CAF_INSTANCE` to generate Cloud Adoption Framework-style names. Explicit `*Name` parameters continue to override generated names in both modes.
+
 ### Changed
 
 - **`main.bicep` has clearer modular seams for the issue #87 maintainability track.** Container Apps naming, Dapr, and base environment shaping now use named locals; Azure Firewall rule construction is separated from the firewall resources; and private endpoint DNS zone groups are centralized in a single map. These are behavior-preserving refactors intended to reduce future edit risk in the large orchestration template.
@@ -43,6 +47,20 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 - **Foundry IQ runtime configuration groundwork for GPT-RAG** ([Azure/GPT-RAG#526](https://github.com/Azure/GPT-RAG/issues/526)). Added `retrievalBackend`, Foundry IQ Pattern A/B parameters, dedicated `KNOWLEDGE_BASE_CONNECTION_ID` stamping, Pattern B searchIndex knowledge-source settings, `knowledgeRetrieval` billing-plan configuration, preflight checks, and a post-provision helper script for creating the Azure AI Search data-plane knowledge source and knowledge base. `ENABLE_AGENTIC_RETRIEVAL` is now documented as deprecated but remains stamped for one-release compatibility.
 - **Foundry IQ defaults to native Blob or ADLS Knowledge Sources.** `foundryIqPattern` now defaults to `azureBlob`, while `searchIndex` remains available as explicit Pattern B opt-in. App Configuration now stamps the native Knowledge Source kind, container, folder path, ADLS mode, content extraction mode, and permission options so GPT-RAG can let Foundry IQ process files directly.
+
+## [v2.0.20] - 2026-06-18
+
+### Fixed
+
+- **Preflight now preserves structured parameters before regional model quota checks** ([#103](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/103)). `Expand-ParamValue` no longer coerces arrays and objects such as `modelDeploymentList` into strings while expanding `${VAR}` tokens. The AI model quota preflight can now inspect requested OpenAI deployments and fail early with `MODEL_QUOTA_INSUFFICIENT` when the requested capacity exceeds available regional quota, instead of reporting "All checks passed" and letting ARM fail later.
+
+## [v2.0.19] - 2026-06-17
+
+### Fixed
+
+- **AI Foundry project deployments now honor `aiFoundryProjectName`** ([#101](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/101)). The template already exposed `aiFoundryProjectName` and published it to App Configuration as `AI_FOUNDRY_PROJECT_NAME`, but the AI Foundry project resource still used the hardcoded name `aifoundry-default-project`. The deployed project name now follows the parameterized naming pattern, the display name defaults to that same generated project name, and both display name and description can still be customized with `aiFoundryProjectDisplayName` and `aiFoundryProjectDescription`.
+
+## [v2.0.18] - 2026-06-16
 
 ### Fixed
 

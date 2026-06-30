@@ -282,11 +282,14 @@ Where landing-zone documentation lives:
     topology, or migration steps change.
 - **Public AI Landing Zone site (separate repo):** the narrative published at
   https://azure.github.io/AI-Landing-Zones/bicep is sourced from the
-  `Azure/AI-Landing-Zones` repository (built from its `gh-pages` branch), not
-  from this repo. When a change alters the public bicep landing-zone story
-  (architecture, design areas, consumer-facing parameters/flags, what's-new),
-  open a **companion PR in `Azure/AI-Landing-Zones`** and link it from this
-  PR's description.
+  `Azure/AI-Landing-Zones` repository, where the documentation source now lives
+  on the `main` branch (the full MkDocs project under `docs/` and `mkdocs.yml`),
+  not in this repo. The site is built and published automatically to the
+  `gh-pages` branch on every push to `main`, so `gh-pages` is generated output,
+  not the source you edit. When a change alters the public bicep landing-zone
+  story (architecture, design areas, consumer-facing parameters/flags,
+  what's-new), open a **companion PR against `main` of `Azure/AI-Landing-Zones`**
+  and link it from this PR's description.
 
 Rules:
 - A change is **not done** until the matching docs are updated, or you have
@@ -295,6 +298,25 @@ Rules:
   you touched and update every place it appears.
 - Treat any drift between the published site and the deployed behavior as a
   bug, not a cosmetic issue.
+
+---
+
+## Semantic Versioning and Downstream Signals
+
+This landing zone uses semantic versioning. For every change, classify the
+release impact with judgment:
+
+- **Major**: breaking parameter, output, naming, topology, or deployment
+  behavior changes.
+- **Minor**: backward-compatible features, new opt-in parameters, new modules,
+  or expanded supported scenarios.
+- **Patch**: bug fixes or internal refactors that do not add capabilities or
+  require consumers to change.
+
+When the impact is **major** or **minor**, explicitly call out that the public
+Portal experience and the Terraform landing-zone implementation need follow-up
+parity review or updates. Patch-only bug fixes do not require those downstream
+Portal/Terraform signals unless the fix changes a shared contract.
 
 ---
 
