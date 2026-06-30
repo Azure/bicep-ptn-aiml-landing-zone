@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **`main.bicep` has clearer modular seams for the issue #87 maintainability track.** Container Apps naming, Dapr, and base environment shaping now use named locals; Azure Firewall rule construction is separated from the firewall resources; and private endpoint DNS zone groups are centralized in a single map. These are behavior-preserving refactors intended to reduce future edit risk in the large orchestration template.
+
 ## [v2.1.5] - 2026-06-30
 
 ### Fixed

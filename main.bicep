@@ -1255,6 +1255,169 @@ var _firewallAcrTaskOsPackageFqdns = [
   'packages.microsoft.com'
 ]
 
+// Azure Firewall rejects ApplicationRules whose targetFqdns is an empty
+// array with `BadRequest: "The request is invalid."` at the ARM
+// request-validation layer (no rule-collection-group operation is even
+// created). Build the full set of rules here, then filter out any whose
+// targetFqdns ended up empty due to disabled feature flags (for example
+// deployJumpbox=false or deployAcrTaskAgentPool=false). This keeps every rule
+// definition co-located while ensuring the ARM payload only ever contains rules
+// with at least one FQDN target.
+var _firewallDefaultApplicationRules = filter([
+  {
+    ruleType: 'ApplicationRule'
+    name: 'AllowMicrosoftContainerRegistry'
+    protocols: [
+      { protocolType: 'Https', port: 443 }
+    ]
+    targetFqdns: _firewallEssentialContainerFqdns
+    sourceAddresses: ['*']
+  }
+  {
+    ruleType: 'ApplicationRule'
+    name: 'AllowEntraIdAuth'
+    protocols: [
+      { protocolType: 'Https', port: 443 }
+    ]
+    targetFqdns: _firewallEssentialAuthFqdns
+    sourceAddresses: ['*']
+  }
+  {
+    ruleType: 'ApplicationRule'
+    name: 'AllowGitHub'
+    protocols: [
+      { protocolType: 'Https', port: 443 }
+    ]
+    targetFqdns: _firewallEssentialGitHubFqdns
+    sourceAddresses: ['*']
+  }
+  {
+    ruleType: 'ApplicationRule'
+    name: 'AllowContainerAppsPlatform'
+    protocols: [
+      { protocolType: 'Https', port: 443 }
+    ]
+    targetFqdns: _firewallEssentialPlatformFqdns
+    sourceAddresses: ['*']
+  }
+  {
+    ruleType: 'ApplicationRule'
+    name: 'AllowJumpboxBootstrap'
+    protocols: [
+      { protocolType: 'Https', port: 443 }
+      { protocolType: 'Http', port: 80 }
+    ]
+    targetFqdns: extendFirewallForJumpboxBootstrap ? concat(_firewallVmBootstrapFqdns, _firewallSpeechFqdns) : []
+    sourceAddresses: [jumpboxSubnetPrefix]
+  }
+  {
+    ruleType: 'ApplicationRule'
+    name: 'AllowJumpboxDevRuntimes'
+    protocols: [
+      { protocolType: 'Https', port: 443 }
+    ]
+    targetFqdns: extendFirewallForJumpboxBootstrap ? _firewallDevRuntimeFqdns : []
+    sourceAddresses: [jumpboxSubnetPrefix]
+  }
+  {
+    ruleType: 'ApplicationRule'
+    name: 'AllowJumpboxEditors'
+    protocols: [
+      { protocolType: 'Https', port: 443 }
+    ]
+    targetFqdns: extendFirewallForJumpboxBootstrap ? _firewallEditorFqdns : []
+    sourceAddresses: [jumpboxSubnetPrefix]
+  }
+  {
+    ruleType: 'ApplicationRule'
+    name: 'AllowJumpboxAcme'
+    protocols: [
+      { protocolType: 'Https', port: 443 }
+    ]
+    targetFqdns: extendFirewallForJumpboxBootstrap ? _firewallJumpboxAcmeFqdns : []
+    sourceAddresses: [jumpboxSubnetPrefix]
+  }
+  {
+    ruleType: 'ApplicationRule'
+    name: 'AllowAcrTasks'
+    protocols: [
+      { protocolType: 'Https', port: 443 }
+    ]
+    targetFqdns: _firewallAcrTaskFqdns
+    sourceAddresses: [devopsBuildAgentsSubnetPrefix]
+  }
+  {
+    ruleType: 'ApplicationRule'
+    name: 'AllowAcrTaskDevRuntimes'
+    protocols: [
+      { protocolType: 'Https', port: 443 }
+    ]
+    targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? union(_firewallDevRuntimeFqdns, additionalAcrTaskBuildFqdns) : []
+    sourceAddresses: [devopsBuildAgentsSubnetPrefix]
+  }
+  {
+    ruleType: 'ApplicationRule'
+    name: 'AllowAcrTaskOsPackages'
+    protocols: [
+      { protocolType: 'Https', port: 443 }
+      { protocolType: 'Http', port: 80 }
+    ]
+    targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? _firewallAcrTaskOsPackageFqdns : []
+    sourceAddresses: [devopsBuildAgentsSubnetPrefix]
+  }
+], rule => !empty(rule.targetFqdns))
+
+var _firewallDefaultRuleCollections = [
+  {
+    ruleCollectionType: 'FirewallPolicyFilterRuleCollection'
+    name: 'AllowEssentialOutbound'
+    priority: 100
+    action: {
+      type: 'Allow'
+    }
+    rules: _firewallDefaultApplicationRules
+  }
+]
+
+var _firewallAcsMediaRules = [
+  {
+    ruleType: 'NetworkRule'
+    name: 'AllowAcsMediaUdp'
+    ipProtocols: ['UDP']
+    sourceAddresses: [
+      jumpboxSubnetPrefix
+      acaEnvironmentSubnetPrefix
+      agentSubnetPrefix
+    ]
+    destinationAddresses: ['AzureCloud']
+    destinationPorts: ['3478-3481']
+  }
+  {
+    ruleType: 'NetworkRule'
+    name: 'AllowAcsMediaTcp'
+    ipProtocols: ['TCP']
+    sourceAddresses: [
+      jumpboxSubnetPrefix
+      acaEnvironmentSubnetPrefix
+      agentSubnetPrefix
+    ]
+    destinationAddresses: ['AzureCloud']
+    destinationPorts: ['443', '3478-3481']
+  }
+]
+
+var _firewallAcsMediaRuleCollections = [
+  {
+    ruleCollectionType: 'FirewallPolicyFilterRuleCollection'
+    name: 'AllowAcsMedia'
+    priority: 100
+    action: {
+      type: 'Allow'
+    }
+    rules: _firewallAcsMediaRules
+  }
+]
+
 // Route Table for egress traffic control through Azure Firewall (or external NVA, Gap 6).
 // Created only when network isolation is on AND no existing RT is provided via
 // `hubIntegrationExistingRouteTableResourceId`.
@@ -1505,127 +1668,7 @@ resource firewallPolicyDefaultRuleCollectionGroup 'Microsoft.Network/firewallPol
   name: 'DefaultRuleCollectionGroup'
   properties: {
     priority: 200
-    ruleCollections: [
-      {
-        ruleCollectionType: 'FirewallPolicyFilterRuleCollection'
-        name: 'AllowEssentialOutbound'
-        priority: 100
-        action: {
-          type: 'Allow'
-        }
-        // Azure Firewall rejects ApplicationRules whose targetFqdns is an empty
-        // array with `BadRequest: "The request is invalid."` at the ARM
-        // request-validation layer (no rule-collection-group operation is even
-        // created). Build the full set of rules below, then filter out any
-        // whose targetFqdns ended up empty due to disabled feature flags
-        // (e.g. deployJumpbox=false, deployAcrTaskAgentPool=false). This keeps
-        // every rule definition co-located while ensuring the ARM payload only
-        // ever contains rules with at least one FQDN target.
-        rules: filter([
-          {
-            ruleType: 'ApplicationRule'
-            name: 'AllowMicrosoftContainerRegistry'
-            protocols: [
-              { protocolType: 'Https', port: 443 }
-            ]
-            targetFqdns: _firewallEssentialContainerFqdns
-            sourceAddresses: ['*']
-          }
-          {
-            ruleType: 'ApplicationRule'
-            name: 'AllowEntraIdAuth'
-            protocols: [
-              { protocolType: 'Https', port: 443 }
-            ]
-            targetFqdns: _firewallEssentialAuthFqdns
-            sourceAddresses: ['*']
-          }
-          {
-            ruleType: 'ApplicationRule'
-            name: 'AllowGitHub'
-            protocols: [
-              { protocolType: 'Https', port: 443 }
-            ]
-            targetFqdns: _firewallEssentialGitHubFqdns
-            sourceAddresses: ['*']
-          }
-          {
-            ruleType: 'ApplicationRule'
-            name: 'AllowContainerAppsPlatform'
-            protocols: [
-              { protocolType: 'Https', port: 443 }
-            ]
-            targetFqdns: _firewallEssentialPlatformFqdns
-            sourceAddresses: ['*']
-          }
-          {
-            ruleType: 'ApplicationRule'
-            name: 'AllowJumpboxBootstrap'
-            protocols: [
-              { protocolType: 'Https', port: 443 }
-              { protocolType: 'Http', port: 80 }
-            ]
-            targetFqdns: extendFirewallForJumpboxBootstrap ? concat(_firewallVmBootstrapFqdns, _firewallSpeechFqdns) : []
-            sourceAddresses: [jumpboxSubnetPrefix]
-          }
-          {
-            ruleType: 'ApplicationRule'
-            name: 'AllowJumpboxDevRuntimes'
-            protocols: [
-              { protocolType: 'Https', port: 443 }
-            ]
-            targetFqdns: extendFirewallForJumpboxBootstrap ? _firewallDevRuntimeFqdns : []
-            sourceAddresses: [jumpboxSubnetPrefix]
-          }
-          {
-            ruleType: 'ApplicationRule'
-            name: 'AllowJumpboxEditors'
-            protocols: [
-              { protocolType: 'Https', port: 443 }
-            ]
-            targetFqdns: extendFirewallForJumpboxBootstrap ? _firewallEditorFqdns : []
-            sourceAddresses: [jumpboxSubnetPrefix]
-          }
-          {
-            ruleType: 'ApplicationRule'
-            name: 'AllowJumpboxAcme'
-            protocols: [
-              { protocolType: 'Https', port: 443 }
-            ]
-            targetFqdns: extendFirewallForJumpboxBootstrap ? _firewallJumpboxAcmeFqdns : []
-            sourceAddresses: [jumpboxSubnetPrefix]
-          }
-          {
-            ruleType: 'ApplicationRule'
-            name: 'AllowAcrTasks'
-            protocols: [
-              { protocolType: 'Https', port: 443 }
-            ]
-            targetFqdns: _firewallAcrTaskFqdns
-            sourceAddresses: [devopsBuildAgentsSubnetPrefix]
-          }
-          {
-            ruleType: 'ApplicationRule'
-            name: 'AllowAcrTaskDevRuntimes'
-            protocols: [
-              { protocolType: 'Https', port: 443 }
-            ]
-            targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? union(_firewallDevRuntimeFqdns, additionalAcrTaskBuildFqdns) : []
-            sourceAddresses: [devopsBuildAgentsSubnetPrefix]
-          }
-          {
-            ruleType: 'ApplicationRule'
-            name: 'AllowAcrTaskOsPackages'
-            protocols: [
-              { protocolType: 'Https', port: 443 }
-              { protocolType: 'Http', port: 80 }
-            ]
-            targetFqdns: (_deployAcrTaskAgentPool && extendFirewallForAcrTaskBuilds) ? _firewallAcrTaskOsPackageFqdns : []
-            sourceAddresses: [devopsBuildAgentsSubnetPrefix]
-          }
-        ], rule => !empty(rule.targetFqdns))
-      }
-    ]
+    ruleCollections: _firewallDefaultRuleCollections
   }
 }
 
@@ -1647,42 +1690,7 @@ resource firewallPolicyAcsMediaRuleCollectionGroup 'Microsoft.Network/firewallPo
   name: 'AcsMediaRuleCollectionGroup'
   properties: {
     priority: 300
-    ruleCollections: [
-      {
-        ruleCollectionType: 'FirewallPolicyFilterRuleCollection'
-        name: 'AllowAcsMedia'
-        priority: 100
-        action: {
-          type: 'Allow'
-        }
-        rules: [
-          {
-            ruleType: 'NetworkRule'
-            name: 'AllowAcsMediaUdp'
-            ipProtocols: ['UDP']
-            sourceAddresses: [
-              jumpboxSubnetPrefix
-              acaEnvironmentSubnetPrefix
-              agentSubnetPrefix
-            ]
-            destinationAddresses: ['AzureCloud']
-            destinationPorts: ['3478-3481']
-          }
-          {
-            ruleType: 'NetworkRule'
-            name: 'AllowAcsMediaTcp'
-            ipProtocols: ['TCP']
-            sourceAddresses: [
-              jumpboxSubnetPrefix
-              acaEnvironmentSubnetPrefix
-              agentSubnetPrefix
-            ]
-            destinationAddresses: ['AzureCloud']
-            destinationPorts: ['443', '3478-3481']
-          }
-        ]
-      }
-    ]
+    ruleCollections: _firewallAcsMediaRuleCollections
   }
   dependsOn: [
     firewallPolicyDefaultRuleCollectionGroup
@@ -2141,53 +2149,55 @@ module privateDnsZones 'modules/networking/private-dns-zones.bicep' = if (_deplo
 // Private Endpoints (consolidated into a single for-loop module with @batchSize(1) to keep compiled ARM template under 4 MB while preserving serialized PE creation).
 ///////////////////////////////////////////////////////////////////////////
 
-var _peDnsZoneGroupBlob = policyManagedPrivateDns ? null : {
-  name: 'blobDnsZoneGroup'
-  privateDnsZoneGroupConfigs: [
-    { name: 'blobARecord', privateDnsZoneResourceId: _dnsZoneBlobId }
-  ]
-}
-var _peDnsZoneGroupCosmos = policyManagedPrivateDns ? null : {
-  name: 'cosmosDnsZoneGroup'
-  privateDnsZoneGroupConfigs: [
-    { name: 'cosmosARecord', privateDnsZoneResourceId: _dnsZoneCosmosId }
-  ]
-}
-var _peDnsZoneGroupSearch = policyManagedPrivateDns ? null : {
-  name: 'searchDnsZoneGroup'
-  privateDnsZoneGroupConfigs: [
-    { name: 'searchARecord', privateDnsZoneResourceId: _dnsZoneSearchId }
-  ]
-}
-var _peDnsZoneGroupKeyVault = policyManagedPrivateDns ? null : {
-  name: 'kvDnsZoneGroup'
-  privateDnsZoneGroupConfigs: [
-    { name: 'kvARecord', privateDnsZoneResourceId: _dnsZoneKeyVaultId }
-  ]
-}
-var _peDnsZoneGroupAppConfig = policyManagedPrivateDns ? null : {
-  name: 'appConfigDnsZoneGroup'
-  privateDnsZoneGroupConfigs: [
-    { name: 'appConfigARecord', privateDnsZoneResourceId: _dnsZoneAppConfigId }
-  ]
-}
-var _peDnsZoneGroupContainerApps = policyManagedPrivateDns ? null : {
-  name: 'ccaDnsZoneGroup'
-  privateDnsZoneGroupConfigs: [
-    { name: 'ccaARecord', privateDnsZoneResourceId: _dnsZoneContainerAppsId }
-  ]
-}
-var _peDnsZoneGroupAcr = policyManagedPrivateDns ? null : {
-  name: 'acrDnsZoneGroup'
-  privateDnsZoneGroupConfigs: [
-    { name: 'acr', privateDnsZoneResourceId: _dnsZoneAcrId }
-  ]
-}
-var _peDnsZoneGroupCogSvcs = policyManagedPrivateDns ? null : {
-  name: 'cogSvcsDnsZoneGroup'
-  privateDnsZoneGroupConfigs: [
-    { name: 'cogSvcsARecord', privateDnsZoneResourceId: _dnsZoneCogSvcsId }
-  ]
+var _peDnsZoneGroups = {
+  blob: policyManagedPrivateDns ? null : {
+    name: 'blobDnsZoneGroup'
+    privateDnsZoneGroupConfigs: [
+      { name: 'blobARecord', privateDnsZoneResourceId: _dnsZoneBlobId }
+    ]
+  }
+  cosmos: policyManagedPrivateDns ? null : {
+    name: 'cosmosDnsZoneGroup'
+    privateDnsZoneGroupConfigs: [
+      { name: 'cosmosARecord', privateDnsZoneResourceId: _dnsZoneCosmosId }
+    ]
+  }
+  search: policyManagedPrivateDns ? null : {
+    name: 'searchDnsZoneGroup'
+    privateDnsZoneGroupConfigs: [
+      { name: 'searchARecord', privateDnsZoneResourceId: _dnsZoneSearchId }
+    ]
+  }
+  keyVault: policyManagedPrivateDns ? null : {
+    name: 'kvDnsZoneGroup'
+    privateDnsZoneGroupConfigs: [
+      { name: 'kvARecord', privateDnsZoneResourceId: _dnsZoneKeyVaultId }
+    ]
+  }
+  appConfig: policyManagedPrivateDns ? null : {
+    name: 'appConfigDnsZoneGroup'
+    privateDnsZoneGroupConfigs: [
+      { name: 'appConfigARecord', privateDnsZoneResourceId: _dnsZoneAppConfigId }
+    ]
+  }
+  containerApps: policyManagedPrivateDns ? null : {
+    name: 'ccaDnsZoneGroup'
+    privateDnsZoneGroupConfigs: [
+      { name: 'ccaARecord', privateDnsZoneResourceId: _dnsZoneContainerAppsId }
+    ]
+  }
+  acr: policyManagedPrivateDns ? null : {
+    name: 'acrDnsZoneGroup'
+    privateDnsZoneGroupConfigs: [
+      { name: 'acr', privateDnsZoneResourceId: _dnsZoneAcrId }
+    ]
+  }
+  cognitiveServices: policyManagedPrivateDns ? null : {
+    name: 'cogSvcsDnsZoneGroup'
+    privateDnsZoneGroupConfigs: [
+      { name: 'cogSvcsARecord', privateDnsZoneResourceId: _dnsZoneCogSvcsId }
+    ]
+  }
 }
 
 var _peList = concat(
@@ -2201,7 +2211,7 @@ var _peList = concat(
           properties: { privateLinkServiceId: storageAccount.outputs.resourceId, groupIds: ['blob'] }
         }
       ]
-      privateDnsZoneGroup: _peDnsZoneGroupBlob
+      privateDnsZoneGroup: _peDnsZoneGroups.?blob
     }
   ] : [],
   (_networkIsolation && deployCosmosDb) ? [
@@ -2214,7 +2224,7 @@ var _peList = concat(
           properties: { privateLinkServiceId: cosmosDBAccount.outputs.resourceId, groupIds: ['Sql'] }
         }
       ]
-      privateDnsZoneGroup: _peDnsZoneGroupCosmos
+      privateDnsZoneGroup: _peDnsZoneGroups.?cosmos
     }
   ] : [],
   (_networkIsolation && deploySearchService) ? [
@@ -2227,7 +2237,7 @@ var _peList = concat(
           properties: { privateLinkServiceId: searchService.outputs.resourceId, groupIds: ['searchService'] }
         }
       ]
-      privateDnsZoneGroup: _peDnsZoneGroupSearch
+      privateDnsZoneGroup: _peDnsZoneGroups.?search
     }
   ] : [],
   (_networkIsolation && _deployAiFoundrySearch) ? [
@@ -2240,7 +2250,7 @@ var _peList = concat(
           properties: { privateLinkServiceId: searchServiceAIFoundry.outputs.resourceId, groupIds: ['searchService'] }
         }
       ]
-      privateDnsZoneGroup: _peDnsZoneGroupSearch
+      privateDnsZoneGroup: _peDnsZoneGroups.?search
     }
   ] : [],
   (_networkIsolation && deployKeyVault) ? [
@@ -2253,7 +2263,7 @@ var _peList = concat(
           properties: { privateLinkServiceId: keyVault.id, groupIds: ['vault'] }
         }
       ]
-      privateDnsZoneGroup: _peDnsZoneGroupKeyVault
+      privateDnsZoneGroup: _peDnsZoneGroups.?keyVault
     }
   ] : [],
   (_networkIsolation && deployAppConfig) ? [
@@ -2266,7 +2276,7 @@ var _peList = concat(
           properties: { privateLinkServiceId: appConfig.id, groupIds: ['configurationStores'] }
         }
       ]
-      privateDnsZoneGroup: _peDnsZoneGroupAppConfig
+      privateDnsZoneGroup: _peDnsZoneGroups.?appConfig
     }
   ] : [],
   (_networkIsolation && deployContainerEnv) ? [
@@ -2279,7 +2289,7 @@ var _peList = concat(
           properties: { privateLinkServiceId: containerEnv.id, groupIds: ['managedEnvironments'] }
         }
       ]
-      privateDnsZoneGroup: _peDnsZoneGroupContainerApps
+      privateDnsZoneGroup: _peDnsZoneGroups.?containerApps
     }
   ] : [],
   (_networkIsolation && deployContainerRegistry) ? [
@@ -2292,7 +2302,7 @@ var _peList = concat(
           properties: { privateLinkServiceId: containerRegistry.id, groupIds: ['registry'] }
         }
       ]
-      privateDnsZoneGroup: _peDnsZoneGroupAcr
+      privateDnsZoneGroup: _peDnsZoneGroups.?acr
     }
   ] : [],
   (_networkIsolation && deploySpeechService) ? [
@@ -2305,7 +2315,7 @@ var _peList = concat(
           properties: { privateLinkServiceId: speechService.outputs.resourceId, groupIds: ['account'] }
         }
       ]
-      privateDnsZoneGroup: _peDnsZoneGroupCogSvcs
+      privateDnsZoneGroup: _peDnsZoneGroups.?cognitiveServices
     }
   ] : []
 )
@@ -2904,12 +2914,45 @@ var _containerRuntimeEnv = [
   { name: 'APP_RUNTIME_CONFIGURATION_MODE', value: appRuntimeConfigurationMode }
 ]
 
+var _containerAppNames = [
+  for app in containerAppsList: empty(app.name) ? '${const.abbrs.containers.containerApp}${resourceToken}-${app.service_name}' : app.name
+]
+
+var _containerAppDaprConfigs = [
+  for app in containerAppsList: app.?dapr.?enabled == true ? {
+    enabled: true
+    appId: app.?dapr.?appId ?? app.service_name
+    appPort: int(app.?dapr.?appPort ?? app.?target_port ?? 8080)
+    appProtocol: app.?dapr.?appProtocol ?? 'http'
+    enableApiLogging: app.?dapr.?enableApiLogging ?? false
+  } : null
+]
+
+var _containerAppBaseEnvironmentVariables = [
+  for app in containerAppsList: concat(
+    // APP_CONFIG_ENDPOINT is only meaningful when the App Configuration
+    // store is the source of runtime configuration (Issue #89).
+    _runtimeConfigIsAppConfig ? [
+      {
+        name: 'APP_CONFIG_ENDPOINT'
+        value: 'https://${appConfigName}.azconfig.io'
+      }
+    ] : [],
+    [
+      {
+        name: 'AZURE_TENANT_ID'
+        value: subscription().tenantId
+      }
+    ]
+  )
+]
+
 @batchSize(4)
 module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
   for (app, index) in containerAppsList: if (deployContainerApps) {
-    name: empty(app.name) ? '${const.abbrs.containers.containerApp}${resourceToken}-${app.service_name}' : app.name
+    name: _containerAppNames[index]
     params: {
-      name: empty(app.name) ? '${const.abbrs.containers.containerApp}${resourceToken}-${app.service_name}' : app.name
+      name: _containerAppNames[index]
       location: location
       #disable-next-line BCP318
       environmentResourceId: containerEnv.id
@@ -2920,13 +2963,7 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
       ingressTransport: 'auto'
       ingressAllowInsecure: false
 
-      dapr: app.?dapr.?enabled == true ? {
-        enabled: true
-        appId: app.?dapr.?appId ?? app.service_name
-        appPort: int(app.?dapr.?appPort ?? app.?target_port ?? 8080)
-        appProtocol: app.?dapr.?appProtocol ?? 'http'
-        enableApiLogging: app.?dapr.?enableApiLogging ?? false
-      } : null
+      dapr: _containerAppDaprConfigs[index]
 
       managedIdentities: {
         systemAssigned: (_useUAI) ? false : true
@@ -2948,28 +2985,11 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
             memory: app.?memory ?? '1.0Gi'
           }
           env: concat(
-            // APP_CONFIG_ENDPOINT is only meaningful when the App Configuration
-            // store is the source of runtime configuration (Issue #89).
-            _runtimeConfigIsAppConfig ? [
-              {
-                name: 'APP_CONFIG_ENDPOINT'
-                value: 'https://${appConfigName}.azconfig.io'
-              }
-            ] : [],
-            [
-              {
-                name: 'AZURE_TENANT_ID'
-                value: subscription().tenantId
-              }
-            ],
+            _containerAppBaseEnvironmentVariables[index],
             // Only inject AZURE_CLIENT_ID when a UAI is actually configured (#38).
             // Emitting an empty AZURE_CLIENT_ID alongside AZURE_TENANT_ID breaks
-            // DefaultAzureCredential on the SystemAssigned path: EnvironmentCredential
-            // sees both vars and tries to authenticate with the empty client_id, then
-            // ManagedIdentityCredential hits the Container Apps IMDS proxy with the
-            // empty client_id and gets HTTP 500 invalid_scope. With the var omitted,
-            // ManagedIdentityCredential picks up the platform-injected
-            // IDENTITY_ENDPOINT / IDENTITY_HEADER and uses the SystemAssigned MI.
+            // DefaultAzureCredential on the SystemAssigned path. With the var omitted,
+            // ManagedIdentityCredential uses the platform-injected SystemAssigned MI.
             _useUAI ? [
               {
                 name: 'AZURE_CLIENT_ID'
