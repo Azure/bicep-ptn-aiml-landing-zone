@@ -3187,23 +3187,7 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
         ]
           : [],
         deployAiFoundry && retrievalBackend == 'foundry_iq'
-          ? [
-          {
-            groupId: 'openai_account'
-            privateLinkResourceId: resourceId('Microsoft.CognitiveServices/accounts', aiFoundryAccountName)
-            requestMessage: 'Allow AI Search private access to Azure OpenAI embeddings for Foundry IQ.'
-          }
-          {
-            groupId: 'foundry_account'
-            privateLinkResourceId: resourceId('Microsoft.CognitiveServices/accounts', aiFoundryAccountName)
-            requestMessage: 'Allow AI Search private access to Microsoft Foundry for Foundry IQ.'
-          }
-          {
-            groupId: 'cognitiveservices_account'
-            privateLinkResourceId: resourceId('Microsoft.CognitiveServices/accounts', aiFoundryAccountName)
-            requestMessage: 'Allow AI Search private access to Cognitive Services for Foundry IQ standard extraction.'
-          }
-        ]
+          ? []
           : [])
       : []
   }
@@ -3212,6 +3196,45 @@ module searchService 'br/public:avm/res/search/search-service:0.11.1' = if (depl
     storageAccount!
   ]
 }
+
+resource searchServiceResource 'Microsoft.Search/searchServices@2025-05-01' existing = if (deploySearchService) {
+  name: searchServiceName
+}
+
+var searchFoundrySharedPrivateLinkResources = (_networkIsolation && deploySearchService && deployAiFoundry && retrievalBackend == 'foundry_iq')
+  ? [
+      {
+        name: 'spl-${searchServiceName}-openai_account-1'
+        groupId: 'openai_account'
+        requestMessage: 'Allow AI Search private access to Azure OpenAI embeddings for Foundry IQ.'
+      }
+      {
+        name: 'spl-${searchServiceName}-foundry_account-1'
+        groupId: 'foundry_account'
+        requestMessage: 'Allow AI Search private access to Microsoft Foundry for Foundry IQ.'
+      }
+      {
+        name: 'spl-${searchServiceName}-cognitiveservices_account-1'
+        groupId: 'cognitiveservices_account'
+        requestMessage: 'Allow AI Search private access to Cognitive Services for Foundry IQ standard extraction.'
+      }
+    ]
+  : []
+
+@batchSize(1)
+resource searchFoundrySharedPrivateLinks 'Microsoft.Search/searchServices/sharedPrivateLinkResources@2025-05-01' = [for spl in searchFoundrySharedPrivateLinkResources: {
+  parent: searchServiceResource
+  name: spl.name
+  properties: {
+    groupId: spl.groupId
+    privateLinkResourceId: resourceId('Microsoft.CognitiveServices/accounts', aiFoundryAccountName)
+    requestMessage: spl.requestMessage
+  }
+  dependsOn: [
+    aiFoundry
+    searchService
+  ]
+}]
 
 // Dedicated AI Search service for AI Foundry (separate from the application search).
 // Skipped when the consumer brings their own AI Foundry search via `aiSearchResourceId`.
