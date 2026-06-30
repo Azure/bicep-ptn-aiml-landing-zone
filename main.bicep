@@ -3215,23 +3215,59 @@ module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep'
   }
 ]
 
-// AI Foundry Account - Cognitive Services User -> Search Service (for agentic retrieval vectorizers)
-module assignAiFoundryAccountCognitiveServicesUserSearch 'modules/security/resource-role-assignment.bicep' = if (deployAiFoundry && deploySearchService) {
-  name: 'assignAiFoundryAccountCognitiveServicesUserSearch'
+// Cross-service control-plane role assignments (consolidated; see #87).
+// Each entry is conditionally included exactly as before; the underlying
+// guid(principalId, roleDefinitionId, resourceId) keeps deployed role
+// assignment GUIDs identical regardless of the deployment/module name.
+var _crossServiceRoleAssignments = concat(
+  // AI Foundry Account - Cognitive Services User -> Search Service (for agentic retrieval vectorizers)
+  (deployAiFoundry && deploySearchService) ? [
+    {
+      #disable-next-line BCP318
+      principalId: (_useUAI) ? searchServiceUAI.properties.principalId : searchService.outputs.systemAssignedMIPrincipalId!
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
+      resourceId: aiFoundryAccountResourceId
+      principalType: 'ServicePrincipal'
+    }
+  ] : [],
+  // Storage Account - Storage Blob Data Reader -> Search Service
+  (deployStorageAccount && deploySearchService) ? [
+    {
+      #disable-next-line BCP318
+      principalId: (_useUAI) ? searchServiceUAI.properties.principalId : searchService.outputs.systemAssignedMIPrincipalId!
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.StorageBlobDataReader.guid)
+      #disable-next-line BCP318
+      resourceId: storageAccount.outputs.resourceId
+      principalType: 'ServicePrincipal'
+    }
+  ] : [],
+  // Search Service - Search Index Data Reader -> AiFoundryProject
+  (deployAiFoundry && deploySearchService) ? [
+    {
+      principalId: aiFoundry!.outputs.aiProjectPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.SearchIndexDataReader.guid)
+      #disable-next-line BCP318
+      resourceId: searchService.outputs.resourceId
+      principalType: 'ServicePrincipal'
+    }
+  ] : [],
+  // Storage Account - Storage Blob Data Reader -> AiFoundry Project
+  (deployAiFoundry && deployStorageAccount) ? [
+    {
+      principalId: aiFoundry!.outputs.aiProjectPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.StorageBlobDataReader.guid)
+      #disable-next-line BCP318
+      resourceId: storageAccount.outputs.resourceId
+      principalType: 'ServicePrincipal'
+    }
+  ] : []
+)
+
+module assignCrossServiceRoles 'modules/security/resource-role-assignment.bicep' = if ((deployAiFoundry && deploySearchService) || (deployStorageAccount && deploySearchService) || (deployAiFoundry && deployStorageAccount)) {
+  name: 'assignCrossServiceRoles'
   params: {
-    name: 'assignAiFoundryAccountCognitiveServicesUserSearch'
-    roleAssignments: [
-      {
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? searchServiceUAI.properties.principalId : searchService.outputs.systemAssignedMIPrincipalId!
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.CognitiveServicesUser.guid
-        )
-        resourceId: aiFoundryAccountResourceId
-        principalType: 'ServicePrincipal'
-      }
-    ]
+    name: 'assignCrossServiceRoles'
+    roleAssignments: _crossServiceRoleAssignments
   }
 }
 
@@ -3253,72 +3289,11 @@ module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/securi
   }
 ]
 
-// Storage Account - Storage Blob Data Reader -> Search Service
-module assignStorageStorageBlobDataReaderSearch 'modules/security/resource-role-assignment.bicep' = if (deployStorageAccount && deploySearchService) {
-  name: 'assignStorageStorageBlobDataReaderSearch'
-  params: {
-    name: 'assignStorageStorageBlobDataReaderSearch'
-    roleAssignments: [
-      {
-        #disable-next-line BCP318
-        principalId: (_useUAI) ? searchServiceUAI.properties.principalId : searchService.outputs.systemAssignedMIPrincipalId!
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.StorageBlobDataReader.guid
-        )
-        #disable-next-line BCP318
-        resourceId: storageAccount.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-    ]
-  }
-}
-
-// Search Service - Search Index Data Reader -> AiFoundryProject
-module assignSearchSearchIndexDataReaderAIFoundryProject 'modules/security/resource-role-assignment.bicep' = if (deployAiFoundry && deploySearchService) {
-  name: 'assignSearchSearchIndexDataReaderAIFoundryProject'
-  params: {
-    name: 'assignSearchSearchIndexDataReaderAIFoundryProject'
-    roleAssignments: [
-      {
-        principalId: aiFoundry!.outputs.aiProjectPrincipalId
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.SearchIndexDataReader.guid
-        )
-        #disable-next-line BCP318
-        resourceId: searchService.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-    ]
-  }
-}
-
 // NOTE: Search Service Contributor for the AI Foundry Project identity on the
 // Search service is already created by the AVM AI Foundry module (avm/ptn/ai-ml/ai-foundry)
 // when aiSearchConfiguration is provided. Creating it again here causes a
 // RoleAssignmentExists conflict because both produce the same deterministic GUID.
 // Intentionally omitted.
-
-// Storage Account - Storage Blob Data Reader -> AiFoundry Project
-module assignStorageStorageBlobDataReaderAIFoundryProject 'modules/security/resource-role-assignment.bicep' = if (deployAiFoundry && deployStorageAccount) {
-  name: 'assignStorageStorageBlobDataReaderAIFoundryProject'
-  params: {
-    name: 'assignStorageStorageBlobDataReaderAIFoundryProject'
-    roleAssignments: [
-      {
-        principalId: aiFoundry!.outputs.aiProjectPrincipalId
-        roleDefinitionId: subscriptionResourceId(
-          'Microsoft.Authorization/roleDefinitions',
-          const.roles.StorageBlobDataReader.guid
-        )
-        #disable-next-line BCP318
-        resourceId: storageAccount.outputs.resourceId
-        principalType: 'ServicePrincipal'
-      }
-    ]
-  }
-}
 
 //////////////////////////////////////////////////////////////////////////
 // App Configuration Settings Service
