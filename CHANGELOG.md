@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v2.1.6] - 2026-06-30
 
 ### Added
 
@@ -11,8 +11,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ### Changed
 
-- **`main.bicep` has clearer modular seams for the issue #87 maintainability track.** Container Apps naming, Dapr, and base environment shaping now use named locals; Azure Firewall rule construction is separated from the firewall resources; and private endpoint DNS zone groups are centralized in a single map. These are behavior-preserving refactors intended to reduce future edit risk in the large orchestration template.
-- **`main.bicep` is reduced by extracting large resource bodies into local modules (issue #87).** The Azure Firewall (policy, rule collection groups, public IP, diagnostics, and FQDN rule data) moved to `modules/networking/azure-firewall.bicep`; the per-app container control-plane role loops were consolidated into a single array-driven `resource-role-assignment` invocation; and the remaining cross-service control-plane role grants (Search, Storage, and AI Foundry project identities) were consolidated into one array-driven invocation. This is an internal maintainability refactor that moves code without changing any deployed resource, name, condition, dependency, or property value. The orchestration template went from roughly 4329 to 3698 lines.
+- **`main.bicep` is smaller and easier to maintain (issue [#87](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/87)).** Large resource bodies were moved out of the monolithic orchestration template into local modules, with no change to any deployed resource, name, condition, dependency, or property value. The Azure Firewall (policy, rule collection groups, public IP, diagnostics, and FQDN rule data) moved to `modules/networking/azure-firewall.bicep` and now exposes its private IP as a module output that feeds the spoke default route. The per-app container control-plane role loops and the remaining cross-service control-plane role grants (Search, Storage, and AI Foundry project identities) were consolidated into array-driven `resource-role-assignment` invocations. Container Apps naming, Dapr, and base-environment shaping now use named locals, and private endpoint DNS zone groups are centralized in a single map. The template went from roughly 4329 to 3387 lines. This is an internal refactor only; existing deployments are unaffected.
 
 ## [v2.1.5] - 2026-06-30
 
