@@ -3519,131 +3519,128 @@ module assignCosmosDBCosmosDbBuiltInDataContributorExecutor 'modules/security/co
   }
 }
 
-// Key Vault Service - Key Vault Secrets User -> ContainerApp (per-app loop preserved)
-module assignKeyVaultSecretsUserAca 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployKeyVault && contains(app.roles, const.roles.KeyVaultSecretsUser.key)) {
-    name: 'assignKeyVaultSecretsUserAca-${app.service_name}'
+// Container App control-plane role assignments (consolidated).
+// Each app gets a single array-driven module invocation that builds the full
+// set of control-plane roles it qualifies for, replacing the previous
+// per-role per-app loops. Role assignment names are deterministic
+// (guid(principalId, roleDefinitionId, resourceId)), so consolidating the
+// deployment invocations does not change the deployed role assignment set.
+// Cosmos DB data-plane assignments stay in their dedicated module below.
+module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep' = [
+  for (app, i) in containerAppsList: if (deployContainerApps && ((deployKeyVault && contains(app.roles, const.roles.KeyVaultSecretsUser.key)) || (deployAppConfig && _runtimeConfigIsAppConfig && contains(app.roles, const.roles.AppConfigurationDataReader.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesOpenAIUser.key)) || (deploySpeechService && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployContainerRegistry && contains(app.roles, const.roles.AcrPull.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataReader.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataReader.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDelegator.key)))) {
+    name: 'assignContainerAppRoles-${app.service_name}'
     params: {
-      name: 'assignKeyVaultSecretsUserAca-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId(
-            'Microsoft.Authorization/roleDefinitions',
-            const.roles.KeyVaultSecretsUser.guid
-          )
-          #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          #disable-next-line BCP318
-          resourceId: keyVault.id
-          principalType: 'ServicePrincipal'
-        }
-      ]
-    }
-  }
-]
-
-// App Configuration Settings Service - App Configuration Data Reader -> ContainerApp
-module assignAppConfigAppConfigurationDataReaderContainerApps 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployAppConfig && _runtimeConfigIsAppConfig && contains(
-    app.roles,
-    const.roles.AppConfigurationDataReader.key
-  )) {
-    name: 'assignAppConfigAppConfigurationDataReader-${app.service_name}'
-    params: {
-      name: 'assignAppConfigAppConfigurationDataReader-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId(
-            'Microsoft.Authorization/roleDefinitions',
-            const.roles.AppConfigurationDataReader.guid
-          )
-          #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          #disable-next-line BCP318
-          resourceId: appConfig.id
-          principalType: 'ServicePrincipal'
-        }
-      ]
-    }
-  }
-]
-
-// AI Foundry Account - Cognitive Services User -> ContainerApp
-module assignAiFoundryAccountCognitiveServicesUserContainerApps 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployAiFoundry && contains(
-    app.roles,
-    const.roles.CognitiveServicesUser.key
-  )) {
-    name: 'assignAIFoundryAccountCognitiveServicesUser-${app.service_name}'
-    params: {
-      name: 'assignAIFoundryAccountCognitiveServicesUser-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId(
-            'Microsoft.Authorization/roleDefinitions',
-            const.roles.CognitiveServicesUser.guid
-          )
-          #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          resourceId: aiFoundryAccountResourceId
-          principalType: 'ServicePrincipal'
-        }
-      ]
-    }
-  }
-]
-
-// AI Foundry Account - Cognitive Services OpenAI User -> ContainerApp
-module assignAIFoundryCogServOAIUserContainerApps 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployAiFoundry && contains(
-    app.roles,
-    const.roles.CognitiveServicesOpenAIUser.key
-  )) {
-    name: 'assignAIFoundryCogServOAIUserContainerApps-${app.service_name}'
-    params: {
-      name: 'assignAIFoundryCogServOAIUserContainerApps-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId(
-            'Microsoft.Authorization/roleDefinitions',
-            const.roles.CognitiveServicesOpenAIUser.guid
-          )
-          #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          resourceId: aiFoundryAccountResourceId
-          principalType: 'ServicePrincipal'
-        }
-      ]
-    }
-  }
-]
-
-// Speech Service - Cognitive Services User -> ContainerApp (#35)
-// Granted whenever a container app declares the `CognitiveServicesUser` role
-// token in its `roles` array AND `deploySpeechService=true`. Idempotent with
-// the AI Foundry assignment of the same role token because the two have
-// different `resourceId` scopes.
-module assignSpeechCognitiveServicesUserContainerApps 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deploySpeechService && contains(
-    app.roles,
-    const.roles.CognitiveServicesUser.key
-  )) {
-    name: 'assignSpeechCognitiveServicesUser-${app.service_name}'
-    params: {
-      name: 'assignSpeechCognitiveServicesUser-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId(
-            'Microsoft.Authorization/roleDefinitions',
-            const.roles.CognitiveServicesUser.guid
-          )
-          #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          #disable-next-line BCP318
-          resourceId: speechService.outputs.resourceId
-          principalType: 'ServicePrincipal'
-        }
-      ]
+      name: 'assignContainerAppRoles-${app.service_name}'
+      roleAssignments: concat(
+        (deployKeyVault && contains(app.roles, const.roles.KeyVaultSecretsUser.key)) ? [
+          {
+            roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultSecretsUser.guid)
+            #disable-next-line BCP318
+            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            #disable-next-line BCP318
+            resourceId: keyVault.id
+            principalType: 'ServicePrincipal'
+          }
+        ] : [],
+        (deployAppConfig && _runtimeConfigIsAppConfig && contains(app.roles, const.roles.AppConfigurationDataReader.key)) ? [
+          {
+            roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AppConfigurationDataReader.guid)
+            #disable-next-line BCP318
+            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            #disable-next-line BCP318
+            resourceId: appConfig.id
+            principalType: 'ServicePrincipal'
+          }
+        ] : [],
+        (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesUser.key)) ? [
+          {
+            roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
+            #disable-next-line BCP318
+            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            resourceId: aiFoundryAccountResourceId
+            principalType: 'ServicePrincipal'
+          }
+        ] : [],
+        (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesOpenAIUser.key)) ? [
+          {
+            roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesOpenAIUser.guid)
+            #disable-next-line BCP318
+            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            resourceId: aiFoundryAccountResourceId
+            principalType: 'ServicePrincipal'
+          }
+        ] : [],
+        (deploySpeechService && contains(app.roles, const.roles.CognitiveServicesUser.key)) ? [
+          {
+            roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
+            #disable-next-line BCP318
+            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            #disable-next-line BCP318
+            resourceId: speechService.outputs.resourceId
+            principalType: 'ServicePrincipal'
+          }
+        ] : [],
+        (deployContainerRegistry && contains(app.roles, const.roles.AcrPull.key)) ? [
+          {
+            roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPull.guid)
+            #disable-next-line BCP318
+            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            #disable-next-line BCP318
+            resourceId: containerRegistry.id
+            principalType: 'ServicePrincipal'
+          }
+        ] : [],
+        (deploySearchService && contains(app.roles, const.roles.SearchIndexDataReader.key)) ? [
+          {
+            roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.SearchIndexDataReader.guid)
+            #disable-next-line BCP318
+            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            #disable-next-line BCP318
+            resourceId: searchService.outputs.resourceId
+            principalType: 'ServicePrincipal'
+          }
+        ] : [],
+        (deploySearchService && contains(app.roles, const.roles.SearchIndexDataContributor.key)) ? [
+          {
+            roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.SearchIndexDataContributor.guid)
+            #disable-next-line BCP318
+            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            #disable-next-line BCP318
+            resourceId: searchService.outputs.resourceId
+            principalType: 'ServicePrincipal'
+          }
+        ] : [],
+        (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataContributor.key)) ? [
+          {
+            roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.StorageBlobDataContributor.guid)
+            #disable-next-line BCP318
+            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            #disable-next-line BCP318
+            resourceId: storageAccount.outputs.resourceId
+            principalType: 'ServicePrincipal'
+          }
+        ] : [],
+        (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataReader.key)) ? [
+          {
+            roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.StorageBlobDataReader.guid)
+            #disable-next-line BCP318
+            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            #disable-next-line BCP318
+            resourceId: storageAccount.outputs.resourceId
+            principalType: 'ServicePrincipal'
+          }
+        ] : [],
+        (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDelegator.key)) ? [
+          {
+            roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.StorageBlobDelegator.guid)
+            #disable-next-line BCP318
+            principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
+            #disable-next-line BCP318
+            resourceId: storageAccount.outputs.resourceId
+            principalType: 'ServicePrincipal'
+          }
+        ] : []
+      )
     }
   }
 ]
@@ -3668,26 +3665,6 @@ module assignAiFoundryAccountCognitiveServicesUserSearch 'modules/security/resou
   }
 }
 
-// Azure Container Registry Service - AcrPull -> ContainerApp
-module assignCrAcrPullContainerApps 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployContainerRegistry && contains(app.roles, const.roles.AcrPull.key)) {
-    name: 'assignCrAcrPull-${app.service_name}'
-    params: {
-      name: 'assignCrAcrPull-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPull.guid)
-          #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          #disable-next-line BCP318
-          resourceId: containerRegistry.id
-          principalType: 'ServicePrincipal'
-        }
-      ]
-    }
-  }
-]
-
 // Cosmos DB Account - Cosmos DB Built-in Data Contributor -> ContainerApp
 module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/security/cosmos-data-plane-role-assignment.bicep' = [
   for (app, i) in containerAppsList: if (deployContainerApps && deployCosmosDb && contains(
@@ -3702,159 +3679,6 @@ module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/securi
       principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
       roleDefinitionGuid: const.roles.CosmosDBBuiltInDataContributor.guid
       scopePath: '/subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${dbAccountName}'
-    }
-  }
-]
-
-// Key Vault Service - Key Vault Secrets User -> ContainerApp
-module assignKeyVaultKeyVaultSecretsUserContainerApps 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployKeyVault && contains(app.roles, const.roles.KeyVaultSecretsUser.key)) {
-    name: 'assignKeyVaultKeyVaultSecretsUser-${app.service_name}'
-    params: {
-      name: 'assignKeyVaultKeyVaultSecretsUser-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId(
-            'Microsoft.Authorization/roleDefinitions',
-            const.roles.KeyVaultSecretsUser.guid
-          )
-          #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          #disable-next-line BCP318
-          resourceId: keyVault.id
-          principalType: 'ServicePrincipal'
-        }
-      ]
-    }
-  }
-]
-
-// Search Service - Search Index Data Reader -> ContainerApp
-module assignSearchSearchIndexDataReaderContainerApps 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deploySearchService && contains(
-    app.roles,
-    const.roles.SearchIndexDataReader.key
-  )) {
-    name: 'assignSearchSearchIndexDataReader-${app.service_name}'
-    params: {
-      name: 'assignSearchSearchIndexDataReader-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId(
-            'Microsoft.Authorization/roleDefinitions',
-            const.roles.SearchIndexDataReader.guid
-          )
-          #disable-next-line BCP318
-          principalId: (_useUAI)  ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          #disable-next-line BCP318
-          resourceId: searchService.outputs.resourceId
-          principalType: 'ServicePrincipal'
-        }
-      ]
-    }
-  }
-]
-
-// Search Service - Search Index Data Contributor -> ContainerApp
-module assignSearchSearchIndexDataContributorContainerApps 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deploySearchService && contains(
-    app.roles,
-    const.roles.SearchIndexDataContributor.key
-  )) {
-    name: 'assignSearchSearchIndexDataContributor-${app.service_name}'
-    params: {
-      name: 'assignSearchSearchIndexDataContributor-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId(
-            'Microsoft.Authorization/roleDefinitions',
-            const.roles.SearchIndexDataContributor.guid
-          )
-          #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId  : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          #disable-next-line BCP318
-          resourceId: searchService.outputs.resourceId
-          principalType: 'ServicePrincipal'
-        }
-      ]
-    }
-  }
-]
-
-// Storage Account - Storage Blob Data Contributor -> ContainerApp
-module assignStorageStorageBlobDataContributorAca 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployStorageAccount && contains(
-    app.roles,
-    const.roles.StorageBlobDataContributor.key
-  )) {
-    name: 'assignStorageStorageBlobDataContributor-${app.service_name}'
-    params: {
-      name: 'assignStorageStorageBlobDataContributor-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId(
-            'Microsoft.Authorization/roleDefinitions',
-            const.roles.StorageBlobDataContributor.guid
-          )
-          #disable-next-line BCP318
-          principalId: (_useUAI) ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          #disable-next-line BCP318
-          resourceId: storageAccount.outputs.resourceId
-          principalType: 'ServicePrincipal'
-        }
-      ]
-    }
-  }
-]
-
-// Storage Account - Storage Blob Data Reader -> ContainerApp
-module assignStorageStorageBlobDataReaderAca 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployStorageAccount && contains(
-    app.roles,
-    const.roles.StorageBlobDataReader.key
-  )) {
-    name: 'assignStorageStorageBlobDataReaderAca-${app.service_name}'
-    params: {
-      name: 'assignStorageStorageBlobDataReaderAca-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId(
-            'Microsoft.Authorization/roleDefinitions',
-            const.roles.StorageBlobDataReader.guid
-          )
-          #disable-next-line BCP318
-          principalId: (_useUAI)  ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          #disable-next-line BCP318
-          resourceId: storageAccount.outputs.resourceId
-          principalType: 'ServicePrincipal'
-        }
-      ]
-    }
-  }
-]
-
-// Storage Account - Storage Blob Data Delegator -> ContainerApp
-module assignStorageStorageBlobDataDelegatorAca 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployStorageAccount && contains(
-    app.roles,
-    const.roles.StorageBlobDelegator.key
-  )) {
-    name: 'assignStorageStorageBlobDataDelegatorAca-${app.service_name}'
-    params: {
-      name: 'assignStorageStorageBlobDataDelegatorAca-${app.service_name}'
-      roleAssignments: [
-        {
-          roleDefinitionId: subscriptionResourceId(
-            'Microsoft.Authorization/roleDefinitions',
-            const.roles.StorageBlobDelegator.guid
-          )
-          #disable-next-line BCP318
-          principalId: (_useUAI)  ? containerAppsUAI[i].properties.principalId : containerApps[i].outputs.systemAssignedMIPrincipalId!
-          #disable-next-line BCP318
-          resourceId: storageAccount.outputs.resourceId
-          principalType: 'ServicePrincipal'
-        }
-      ]
     }
   }
 ]
