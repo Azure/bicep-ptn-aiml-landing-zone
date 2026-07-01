@@ -108,10 +108,6 @@ Explicit resource-name parameters such as `aiFoundryAccountName`,
 `containerRegistryName`, `keyVaultName`, `storageAccountName`, and `vnetName`
 continue to override generated names in either naming mode.
 
-For the full reference (all token defaults, region abbreviations, per-resource
-length limits, idempotency, and override recipes) see
-[docs/resource-naming.md](docs/resource-naming.md).
-
 **Upgrading an existing deployment:** CAF is now the default. To keep the older
 `resourceToken`-based names and avoid renaming existing resources, pin the legacy
 mode before provisioning:
