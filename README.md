@@ -78,24 +78,43 @@ azd provision
 
 ### Resource naming
 
-By default, generated resource names use the existing landing-zone pattern based
-on `resourceToken`, so upgrades do not rename existing resources. For new
-greenfield environments, set `RESOURCE_NAMING_MODE=caf` to opt in to
-Cloud Adoption Framework-style generated names:
+By default, generated resource names follow the Cloud Adoption Framework (CAF)
+pattern `type-workload-environment-region-instance`, for example
+`kv-a1b2c3-dev-eus2-001`. You do not have to set anything: every CAF token has a
+safe default, so a plain `azd provision` produces valid, readable names.
+
+The CAF tokens and their defaults:
+
+- `CAF_WORKLOAD_NAME`: short deterministic hash derived from subscription,
+  environment, and location. Override with a meaningful name such as `contosoai`.
+- `CAF_ENVIRONMENT_NAME`: the azd environment name.
+- `CAF_REGION_NAME`: the deployment location from azd (`AZURE_LOCATION`), mapped
+  to a short region code (`eastus2` becomes `eus2`).
+- `CAF_INSTANCE`: `001`. Increment only for a second parallel copy of the same
+  workload in the same environment and region.
+
+To override a token:
 
 ```
-azd env set RESOURCE_NAMING_MODE caf
 azd env set CAF_WORKLOAD_NAME contosoai
-azd env set CAF_ENVIRONMENT_NAME dev
-azd env set CAF_REGION_NAME eus
-azd env set CAF_INSTANCE 001
 ```
+
+Names are length-bounded automatically so they stay within Azure limits
+(storage 24, Key Vault 24, Container Apps environment 32, and so on). Because the
+tokens are deterministic, redeploying the same environment produces the same
+names (idempotent).
 
 Explicit resource-name parameters such as `aiFoundryAccountName`,
 `containerRegistryName`, `keyVaultName`, `storageAccountName`, and `vnetName`
-continue to override generated names in both naming modes. Keep
-`RESOURCE_NAMING_MODE=legacy` for existing deployments unless you intentionally
-want a greenfield environment with new CAF-style names.
+continue to override generated names in either naming mode.
+
+**Upgrading an existing deployment:** CAF is now the default. To keep the older
+`resourceToken`-based names and avoid renaming existing resources, pin the legacy
+mode before provisioning:
+
+```
+azd env set RESOURCE_NAMING_MODE legacy
+```
 
 ### Zero Trust Deployment
 

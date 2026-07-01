@@ -626,23 +626,23 @@ param useZoneRedundancy bool = false // Use Zone Redundancy
 @description('Unique token used to build deterministic resource names, derived from subscription ID, environment name, and location.')
 param resourceToken string = toLower(uniqueString(subscription().id, environmentName, location))
 
-@description('Controls generated resource names. Use `legacy` to preserve existing generated names. Use `caf` for new deployments that want Cloud Adoption Framework-style generated names. Explicit name parameters still override generated names.')
+@description('Controls generated resource names. Use `caf` (default) for Cloud Adoption Framework-style generated names. Use `legacy` to preserve the older resource-token-based generated names. Explicit name parameters still override generated names in either mode.')
 @allowed([
   'legacy'
   'caf'
 ])
-param resourceNamingMode string = 'legacy'
+param resourceNamingMode string = 'caf'
 
-@description('CAF naming token for the workload or application. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
-param cafWorkloadName string = 'ai'
+@description('CAF naming token for the workload or application. Leave empty (default) to use a short deterministic hash, stable per subscription, environment, and location, so deployments get unique names without manual input. Override with a meaningful name such as `chatapp` when desired. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
+param cafWorkloadName string = ''
 
-@description('CAF naming token for the environment, such as dev, test, prod, or a short project environment name. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
-param cafEnvironmentName string = environmentName
+@description('CAF naming token for the environment, such as dev, test, or prod. Leave empty (default) to use the azd environment name. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
+param cafEnvironmentName string = ''
 
-@description('CAF naming token for the Azure region, preferably a short region code such as eus or weu. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
-param cafRegionName string = location
+@description('CAF naming token for the Azure region. Leave empty (default) to use the deployment location supplied by azd (`AZURE_LOCATION`), mapped to a short region code. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
+param cafRegionName string = ''
 
-@description('CAF naming instance token, such as 001. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
+@description('CAF naming instance token, such as 001. Increment only when deploying a second parallel copy of the same workload in the same environment and region. Used only when `resourceNamingMode` is `caf` and an explicit resource name parameter is not supplied.')
 param cafInstance string = '001'
 
 @description('Name of the Azure AI Foundry account to create or reference.')
@@ -705,7 +705,66 @@ param storageAccountName string = '${const.abbrs.storage.storageAccount}${resour
 @description('Name of the Virtual Network to isolate resources and enable private endpoints.')
 param vnetName string = '${const.abbrs.networking.virtualNetwork}${resourceToken}'
 
-var _cafNameStem = '${toLower(cafWorkloadName)}-${toLower(cafEnvironmentName)}-${toLower(cafRegionName)}-${toLower(cafInstance)}'
+// Trims a candidate name to a maximum length and drops a trailing hyphen so the
+// result is never an invalid Azure resource name (e.g. `kv-...-` after truncation).
+func cafTrim(candidate string, maxLength int) string =>
+  endsWith(take(candidate, maxLength), '-') ? take(candidate, maxLength - 1) : take(candidate, maxLength)
+
+// CAF region tokens are abbreviated to short codes so generated names stay within
+// Azure resource name limits (storage 24, Key Vault 24, Container Apps env 32, etc.).
+// Unknown regions fall back to a 5-character slug of the raw region string.
+var _cafRegionAbbrs = {
+  eastus: 'eus'
+  eastus2: 'eus2'
+  centralus: 'cus'
+  northcentralus: 'ncus'
+  southcentralus: 'scus'
+  westcentralus: 'wcus'
+  westus: 'wus'
+  westus2: 'wus2'
+  westus3: 'wus3'
+  canadacentral: 'cnc'
+  canadaeast: 'cne'
+  brazilsouth: 'brs'
+  brazilsoutheast: 'brse'
+  mexicocentral: 'mxc'
+  northeurope: 'neu'
+  westeurope: 'weu'
+  uksouth: 'uks'
+  ukwest: 'ukw'
+  francecentral: 'frc'
+  francesouth: 'frs'
+  germanywestcentral: 'gwc'
+  switzerlandnorth: 'chn'
+  switzerlandwest: 'chw'
+  norwayeast: 'noe'
+  swedencentral: 'sdc'
+  polandcentral: 'plc'
+  italynorth: 'itn'
+  spaincentral: 'spc'
+  uaenorth: 'uan'
+  qatarcentral: 'qac'
+  israelcentral: 'ilc'
+  southafricanorth: 'san'
+  australiaeast: 'aue'
+  australiasoutheast: 'ause'
+  southeastasia: 'sea'
+  eastasia: 'ea'
+  centralindia: 'inc'
+  southindia: 'ins'
+  westindia: 'inw'
+  japaneast: 'jpe'
+  japanwest: 'jpw'
+  koreacentral: 'krc'
+  koreasouth: 'krs'
+}
+var _cafRegionInput = empty(cafRegionName) ? location : cafRegionName
+var _cafRegionRaw = toLower(replace(_cafRegionInput, ' ', ''))
+var _cafRegion = contains(_cafRegionAbbrs, _cafRegionRaw) ? _cafRegionAbbrs[_cafRegionRaw] : take(_cafRegionRaw, 5)
+var _cafWorkload = toLower(empty(cafWorkloadName) ? substring(uniqueString(subscription().id, environmentName, location), 0, 6) : cafWorkloadName)
+var _cafEnv = toLower(empty(cafEnvironmentName) ? environmentName : cafEnvironmentName)
+var _cafInstance = toLower(empty(cafInstance) ? '001' : cafInstance)
+var _cafNameStem = '${_cafWorkload}-${_cafEnv}-${_cafRegion}-${_cafInstance}'
 var _cafCompactStem = replace(_cafNameStem, '-', '')
 
 var _legacyResourceNames = {
@@ -730,24 +789,24 @@ var _legacyResourceNames = {
 }
 
 var _cafResourceNames = {
-  aiFoundryAccountName: 'aif-${_cafNameStem}'
-  aiFoundryProjectName: 'aifp-${_cafNameStem}'
-  aiFoundryStorageAccountName: substring('staif${_cafCompactStem}', 0, min(length('staif${_cafCompactStem}'), 24))
-  aiFoundrySearchServiceName: 'srch-aif-${_cafNameStem}'
-  aiFoundryCosmosDbName: substring('cosmos-aif-${_cafNameStem}', 0, min(length('cosmos-aif-${_cafNameStem}'), 44))
-  bingSearchName: 'bing-${_cafNameStem}'
-  appConfigName: 'appcs-${_cafNameStem}'
-  appInsightsName: 'appi-${_cafNameStem}'
-  containerEnvName: 'cae-${_cafNameStem}'
-  containerRegistryName: substring('cr${_cafCompactStem}', 0, min(length('cr${_cafCompactStem}'), 50))
-  dbAccountName: substring('cosmos-${_cafNameStem}', 0, min(length('cosmos-${_cafNameStem}'), 44))
-  dbDatabaseName: 'cosmosdb-${_cafNameStem}'
-  keyVaultName: substring('kv-${_cafNameStem}', 0, min(length('kv-${_cafNameStem}'), 24))
-  logAnalyticsWorkspaceName: 'log-${_cafNameStem}'
-  searchServiceName: 'srch-${_cafNameStem}'
-  speechServiceName: 'spch-${_cafNameStem}'
-  storageAccountName: substring('st${_cafCompactStem}', 0, min(length('st${_cafCompactStem}'), 24))
-  vnetName: 'vnet-${_cafNameStem}'
+  aiFoundryAccountName: cafTrim('aif-${_cafNameStem}', 64)
+  aiFoundryProjectName: cafTrim('aifp-${_cafNameStem}', 64)
+  aiFoundryStorageAccountName: cafTrim('staif${_cafCompactStem}', 24)
+  aiFoundrySearchServiceName: cafTrim('srch-aif-${_cafNameStem}', 60)
+  aiFoundryCosmosDbName: cafTrim('cosmos-aif-${_cafNameStem}', 44)
+  bingSearchName: cafTrim('bing-${_cafNameStem}', 64)
+  appConfigName: cafTrim('appcs-${_cafNameStem}', 50)
+  appInsightsName: cafTrim('appi-${_cafNameStem}', 64)
+  containerEnvName: cafTrim('cae-${_cafNameStem}', 32)
+  containerRegistryName: cafTrim('cr${_cafCompactStem}', 50)
+  dbAccountName: cafTrim('cosmos-${_cafNameStem}', 44)
+  dbDatabaseName: cafTrim('cosmosdb-${_cafNameStem}', 63)
+  keyVaultName: cafTrim('kv-${_cafNameStem}', 24)
+  logAnalyticsWorkspaceName: cafTrim('log-${_cafNameStem}', 63)
+  searchServiceName: cafTrim('srch-${_cafNameStem}', 60)
+  speechServiceName: cafTrim('spch-${_cafNameStem}', 64)
+  storageAccountName: cafTrim('st${_cafCompactStem}', 24)
+  vnetName: cafTrim('vnet-${_cafNameStem}', 64)
 }
 
 var resourceNames = {
@@ -3596,7 +3655,6 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'FOUNDRY_IQ_FILTER_ADD_ON_ENABLED', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? toLower(string(foundryIqFilterAddOnEnabled)) : 'false', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_SECURITY_FIELD_NAME', value: retrievalBackend == 'foundry_iq' && foundryIqPattern == 'searchIndex' ? foundryIqSecurityFieldName : '', label: appConfigLabel, contentType: 'text/plain' }
       { name: 'FOUNDRY_IQ_MAX_OUTPUT_DOCUMENTS', value: retrievalBackend == 'foundry_iq' ? foundryIqMaxOutputDocuments : '', label: appConfigLabel, contentType: 'text/plain' }
-      { name: 'NETWORK_ISOLATION',   value: toLower(string(_networkIsolation)),     label: appConfigLabel, contentType: 'text/plain' }
       { name: 'USE_UAI',             value: string(_useUAI),                        label: appConfigLabel, contentType: 'text/plain' }
       { name: 'LOG_LEVEL',           value: 'INFO',                                 label: appConfigLabel, contentType: 'text/plain' }
       { name: 'ENABLE_CONSOLE_LOGGING', value: 'true',                              label: appConfigLabel, contentType: 'text/plain' }

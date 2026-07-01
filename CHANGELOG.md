@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [v2.2.0] - 2026-06-30
+
+### Changed
+
+- **BREAKING: CAF-aligned resource naming is now the default.** `resourceNamingMode` now defaults to `caf`, so a plain `azd provision` generates Cloud Adoption Framework-style names (`type-workload-environment-region-instance`, for example `kv-a1b2c3-dev-eus2-001`) instead of the previous `resourceToken`-based names. No manual token input is required: `CAF_WORKLOAD_NAME` defaults to a short deterministic hash (stable per subscription, environment, and location), `CAF_ENVIRONMENT_NAME` defaults to the azd environment name, `CAF_REGION_NAME` defaults to the azd location mapped to a short region code (`eastus2` becomes `eus2`), and `CAF_INSTANCE` defaults to `001`. Explicit `*Name` parameters still override generated names.
+
+  **Impact on existing deployments:** upgrading with default settings will generate new names and can create parallel resources instead of updating existing ones. To keep your current names, pin the previous behavior before provisioning with `azd env set RESOURCE_NAMING_MODE legacy`.
+
+### Added
+
+- **CAF token defaults so no manual naming input is required.** Every CAF token has a safe default, so operators can adopt CAF naming without setting any environment variables. Override any token (for example `azd env set CAF_WORKLOAD_NAME contosoai`) when a meaningful name is preferred.
+
+### Fixed
+
+- **Generated CAF names are length-safe and idempotent.** Region tokens are abbreviated to short CAF codes (with a 5-character fallback for unmapped regions), and every generated name is bounded to its Azure limit (storage 24, Key Vault 24, Container Apps environment 32, Cosmos DB 44, Container Registry 50, and so on). Truncation never leaves a trailing hyphen, so names such as `kv-...` stay valid after bounding. Because the tokens are deterministic, redeploying the same environment produces the same names.
+
 ## [v2.1.6] - 2026-06-30
 
 ### Added
