@@ -84,6 +84,9 @@ param deploymentTags object = {}
 @description('Label used for App Configuration key-value pairs.')
 param appConfigLabel string = 'ai-lz'
 
+@description('Optional. Accelerator-specific App Configuration key-values appended verbatim to the App Configuration store. This lets a consuming accelerator publish its own settings without the landing zone needing to know about them. Values are stored as plaintext in App Configuration, so never pass secrets here (use Key Vault references instead). Each entry must have a unique name+label. On a name+label collision with a workload configuration key the landing zone already emits, the passthrough entry wins. Do not redefine reserved infrastructure keys emitted by other modules (the Cosmos identifiers COSMOS_DB_ACCOUNT_RESOURCE_ID and COSMOS_DB_ENDPOINT, and the per-app <APP>_APIKEY Key Vault references); reusing those names would create a duplicate key-value and fail the deployment. Note: this is only applied on non network-isolated deployments, where the landing zone writes App Configuration at deploy time. Network-isolated deployments configure App Configuration from the accelerator post-provision step, so pass these values through that path instead.')
+param additionalAppConfigurationSettings additionalAppConfigurationSettingType[] = []
+
 @description('Enable network isolation for the deployment. This will restrict public access to resources and require private endpoints where applicable.')
 param networkIsolation bool = false
 
@@ -458,6 +461,22 @@ type publicIngressType = {
   sslPolicy: object?
 }
 
+@export()
+@description('Shape for an accelerator-supplied App Configuration key-value that the landing zone passes through verbatim. Values are stored as plaintext, never pass secrets here (use Key Vault references instead).')
+type additionalAppConfigurationSettingType = {
+  @description('Required. App Configuration key name.')
+  name: string
+
+  @description('Required. Plaintext value. Do not put secrets here.')
+  value: string
+
+  @description('Optional. App Configuration label. Defaults to the landing zone appConfigLabel.')
+  label: string?
+
+  @description('Optional. Content type. Defaults to text/plain. Use application/json for JSON values.')
+  contentType: string?
+}
+
 @description('Optional. Public Application Gateway WAF v2 ingress in front of the internal Container Apps environment. Disabled by default. WARNING: enabling this deploys WAF_v2 and a Standard Public IP, which incur hourly charges even when idle. See README "Optional Public Ingress" for the post-deploy runbook.')
 param publicIngress publicIngressType = { enabled: false }
 
@@ -484,7 +503,7 @@ param enableAgenticRetrieval bool = false
 ])
 param retrievalBackend string = 'foundry_iq'
 
-@description('Foundry IQ knowledge pattern. azureBlob uses native Foundry IQ Blob or ADLS Gen2 ingestion and is the default. searchIndex registers the existing GPT-RAG Azure AI Search index as an opt-in legacy Pattern B knowledge source. managed is accepted as a compatibility alias for azureBlob.')
+@description('Deprecated: prefer publishing this via additionalAppConfigurationSettings so the landing zone stays workload-agnostic. Retained for backward compatibility. Foundry IQ knowledge pattern. azureBlob uses native Foundry IQ Blob or ADLS Gen2 ingestion and is the default. searchIndex registers the existing GPT-RAG Azure AI Search index as an opt-in legacy Pattern B knowledge source. managed is accepted as a compatibility alias for azureBlob.')
 @allowed([
   'azureBlob'
   'managed'
@@ -508,7 +527,7 @@ param knowledgeBaseName string = '${environmentName}-knowledge-base'
 @description('Dedicated Azure AI Foundry connection name used by the knowledge base. Do not reuse SEARCH_CONNECTION_ID.')
 param knowledgeBaseConnectionName string = '${environmentName}-knowledge-base-connection'
 
-@description('Foundry IQ knowledge source name. For azureBlob this is the native Blob or ADLS Gen2 source. For searchIndex this is the registered GPT-RAG Azure AI Search index source.')
+@description('Deprecated: prefer publishing this via additionalAppConfigurationSettings so the landing zone stays workload-agnostic. Retained for backward compatibility. Foundry IQ knowledge source name. For azureBlob this is the native Blob or ADLS Gen2 source. For searchIndex this is the registered GPT-RAG Azure AI Search index source.')
 param foundryIqKnowledgeSourceName string = '${environmentName}-blob-ks'
 
 @description('Foundry IQ knowledge source kind stamped into runtime configuration. Leave empty to derive it from foundryIqPattern. Set to azureBlob for native Blob/ADLS sources or searchIndex for Pattern B.')
@@ -546,7 +565,7 @@ param foundryIqIngestionPermissionOptions array = [
 @description('JSON array override for native Foundry IQ permission metadata, intended for azd environment substitution from FOUNDRY_IQ_INGESTION_PERMISSION_OPTIONS. Leave empty to use foundryIqIngestionPermissionOptions.')
 param foundryIqIngestionPermissionOptionsJson string = ''
 
-@description('Existing GPT-RAG Azure AI Search index name to register as a Pattern B Foundry IQ searchIndex knowledge source.')
+@description('Deprecated: prefer publishing this via additionalAppConfigurationSettings so the landing zone stays workload-agnostic. Retained for backward compatibility. Existing GPT-RAG Azure AI Search index name to register as a Pattern B Foundry IQ searchIndex knowledge source.')
 param foundryIqSearchIndexName string = 'gpt-rag-index'
 
 @description('Semantic configuration name on the GPT-RAG Azure AI Search index. Required by Azure AI Search agentic retrieval.')
@@ -566,10 +585,10 @@ param foundryIqSearchFields array = [
   'content'
 ]
 
-@description('Optional persisted baseFilter for the Pattern B searchIndex knowledge source. Keep security trimming in query-time filterAddOn unless a static tenant/corpus filter is required.')
+@description('Deprecated: prefer publishing this via additionalAppConfigurationSettings so the landing zone stays workload-agnostic. Retained for backward compatibility. Optional persisted baseFilter for the Pattern B searchIndex knowledge source. Keep security trimming in query-time filterAddOn unless a static tenant/corpus filter is required.')
 param foundryIqBaseFilter string = ''
 
-@description('Enable query-time Pattern B filterAddOn in the GPT-RAG orchestrator. Requires foundryIqApiVersion 2026-05-01-preview.')
+@description('Deprecated: prefer publishing this via additionalAppConfigurationSettings so the landing zone stays workload-agnostic. Retained for backward compatibility. Enable query-time Pattern B filterAddOn in the GPT-RAG orchestrator. Requires foundryIqApiVersion 2026-05-01-preview.')
 param foundryIqFilterAddOnEnabled bool = true
 
 @description('Collection field used by GPT-RAG for Pattern B security trimming filterAddOn.')
@@ -2634,6 +2653,25 @@ var _containerRuntimeEnv = [
   { name: 'APP_RUNTIME_CONFIGURATION_MODE', value: appRuntimeConfigurationMode }
 ]
 
+// Symmetric accelerator passthrough for the containerEnv runtime mode (Issue #89).
+// When the consumer opts out of App Configuration, the same accelerator-supplied
+// settings must reach the Container Apps as env vars. Container env vars have no
+// label or contentType, so only name/value are projected. Additional settings win
+// on a name collision (the base bootstrap entry is dropped) to keep the same
+// precedence as the App Configuration passthrough. With the default empty array
+// this is a no-op and the emitted env block is byte-identical.
+var _additionalContainerEnv = [
+  for s in additionalAppConfigurationSettings: {
+    name: s.name
+    value: s.value
+  }
+]
+var _additionalContainerEnvNames = map(_additionalContainerEnv, e => e.name)
+var _containerRuntimeEnvWithAdditional = concat(
+  filter(_containerRuntimeEnv, e => !contains(_additionalContainerEnvNames, e.name)),
+  _additionalContainerEnv
+)
+
 var _containerAppNames = [
   for app in containerAppsList: empty(app.name) ? '${const.abbrs.containers.containerApp}${resourceToken}-${app.service_name}' : app.name
 ]
@@ -2719,7 +2757,7 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
             ] : [],
             // Bootstrap runtime config when the consumer opts out of App Config
             // (Issue #89, `appRuntimeConfigurationMode == 'containerEnv'`).
-            _runtimeConfigIsContainerEnv ? _containerRuntimeEnv : []
+            _runtimeConfigIsContainerEnv ? _containerRuntimeEnvWithAdditional : []
           )
         }
       ]
@@ -3610,12 +3648,27 @@ module cosmosConfigKeyVaultPopulate 'modules/app-configuration/app-configuration
   }
 }
 
+// Normalize accelerator-supplied App Configuration passthrough entries so every item carries a label and contentType. The app-configuration module reads both unconditionally, so a missing label defaults to appConfigLabel and a missing contentType defaults to text/plain.
+var _normalizedAdditionalAppConfigSettings = [
+  for s in additionalAppConfigurationSettings: {
+    name: s.name
+    value: s.value
+    label: s.?label ?? appConfigLabel
+    contentType: s.?contentType ?? 'text/plain'
+  }
+]
+
+// Collision keys for the passthrough, derived exactly how the app-configuration module names each key-value resource (name$label, or name when the label is empty). Used to drop any landing-zone key the passthrough overrides, so the passthrough always wins without emitting a duplicate resource name.
+var _additionalAppConfigKeys = map(_normalizedAdditionalAppConfigSettings, s => empty(s.label) ? s.name : '${s.name}$${s.label}')
+
 module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployAppConfig && _runtimeConfigIsAppConfig && !_networkIsolation) {
   name: 'appConfigPopulate'
   params: {
     #disable-next-line BCP318
     storeName: appConfig.name
     keyValues: concat(
+      filter(
+      concat(
       #disable-next-line BCP318
       deployContainerApps ? containerAppsSettings.outputs.containerAppsEndpoints : [],
       #disable-next-line BCP318
@@ -3745,6 +3798,10 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'MODEL_DEPLOYMENTS', value: string(_modelDeploymentSettings), label: appConfigLabel, contentType: 'application/json' }
 
     ]
+      ),
+      kv => !contains(_additionalAppConfigKeys, empty(kv.label) ? kv.name : '${kv.name}$${kv.label}')
+      ),
+      _normalizedAdditionalAppConfigSettings
     )
   }
 }

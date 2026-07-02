@@ -45,6 +45,8 @@
     "foundryIqContentExtractionMode":      { "value": "${FOUNDRY_IQ_CONTENT_EXTRACTION_MODE=standard}" },
     "foundryIqAiServicesEndpoint":         { "value": "${FOUNDRY_IQ_AI_SERVICES_ENDPOINT=}" },
 
+    "additionalAppConfigurationSettings":  { "value": [] },
+
     "aiSearchResourceId":                  { "value": null },
     "aiFoundryStorageAccountResourceId":   { "value": null },
     "aiFoundryCosmosDBAccountResourceId":  { "value": null },
