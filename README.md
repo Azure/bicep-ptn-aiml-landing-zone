@@ -22,6 +22,7 @@ A handful of other quality-of-life additions:
 - **Hub integration helpers** — `hubIntegration.hubVnetResourceId` creates the spoke→hub peering for you; `hubIntegration.egressNextHopIp` routes spoke egress through your hub firewall / NVA.
 - **Pre-flight validation** — `scripts/Invoke-PreflightChecks.ps1` runs automatically as an `azd preprovision` hook and catches the usual mistakes (CIDR overlap, undersized subnets, missing BYO resource IDs, conflicting flags, and insufficient AI Foundry OpenAI model quota) before they reach ARM. Bypass with `PREFLIGHT_SKIP=true`.
 - **AI Foundry project naming** — `aiFoundryProjectName`, `aiFoundryProjectDisplayName`, and `aiFoundryProjectDescription` let consumers customize the deployed AI Foundry project instead of using a hardcoded default.
+- **Workload App Configuration passthrough** — `additionalAppConfigurationSettings` lets a solution accelerator publish its own runtime key-values into the App Configuration store without adding template-specific parameters. See [Workload App Configuration passthrough](#workload-app-configuration-passthrough).
 - **Foundry IQ groundwork for GPT-RAG:** set `RETRIEVAL_BACKEND=foundry_iq` to stamp the orchestrator settings for a Foundry IQ knowledge base. See [Foundry IQ for GPT-RAG](#foundry-iq-for-gpt-rag) for parameters, security expectations, billing, and the post-provision script.
 
 **Pick a runbook to deploy:**
@@ -242,7 +243,58 @@ Set `extendFirewallForJumpboxBootstrap=false` to skip the jumpbox-scoped rules w
 
 Use `DEPLOY_AAF_AGENT_SVC=false` when an external app only needs hosted model inference from Foundry and does not need Agent Service capability hosts or their associated state resources.
 
+### Workload App Configuration passthrough
+
+The landing zone is workload-agnostic. When a solution accelerator needs its own
+runtime keys stamped into the App Configuration store, it should not require new
+typed parameters in this template. Use `additionalAppConfigurationSettings` to
+publish any number of extra key-values verbatim:
+
+```bicep
+module ailz 'br/public:avm/ptn/aiml/ai-landing-zone:<version>' = {
+  params: {
+    // ...
+    additionalAppConfigurationSettings: [
+      { name: 'MY_WORKLOAD_FLAG', value: 'true' }
+      { name: 'MY_WORKLOAD_MODE', value: 'hybrid', label: 'prod' }
+    ]
+  }
+}
+```
+
+Each entry accepts `name` (required), `value` (required), `label` (optional,
+defaults to `appConfigLabel`), and `contentType` (optional, defaults to
+`text/plain`). Rules and limits:
+
+- Values are stored in plaintext. Do not pass secrets, connection strings, or
+  keys through this parameter. Use Key Vault references for sensitive data.
+- Each `name` + `label` pair must be unique. If an entry collides with a
+  built-in setting the passthrough value wins (the built-in entry is dropped),
+  so an accelerator can also override a stamped default when it needs to.
+- App Configuration is only populated on non-network-isolated deployments where
+  the runtime config store is App Configuration. In isolated deployments the
+  post-provision step running on the jumpbox is responsible for stamping config,
+  so pass workload keys through that path instead.
+- When the consumer selects the `containerEnv` runtime mode (Issue #89) instead
+  of App Configuration, the same entries are injected into every Container App as
+  environment variables. Only `name` and `value` are used in that mode (`label`
+  and `contentType` are ignored, since env vars have neither), and the same
+  "passthrough wins on collision" precedence applies.
+
+This is the forward-looking way to configure workload settings such as the
+GPT-RAG Foundry IQ keys below: accelerators publish their own keys through the
+passthrough instead of the landing zone growing workload-specific parameters.
+
 ### Foundry IQ for GPT-RAG
+
+> The individual `foundryIq*` knowledge-source parameters below are retained for
+> backward compatibility but are being superseded by the generic
+> [workload App Configuration passthrough](#workload-app-configuration-passthrough).
+> New accelerators should publish these keys through
+> `additionalAppConfigurationSettings` rather than relying on template-specific
+> parameters. `retrievalBackend` stays a first-class parameter because it gates
+> real infrastructure (the AI Foundry knowledge-base connection and shared
+> private links), not just configuration.
 
 The landing zone stamps GPT-RAG runtime settings for a Foundry IQ knowledge
 base. New deployments default to Foundry IQ. Existing GPT-RAG deployments can

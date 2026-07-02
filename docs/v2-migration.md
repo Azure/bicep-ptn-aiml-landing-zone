@@ -222,6 +222,42 @@ The preset is **advisory** in v2.0.0 — it does not auto-flip any other flag. O
 
 ---
 
+### 3.8. Workload App Configuration passthrough (additive, opt-in)
+
+The `additionalAppConfigurationSettings` parameter lets a solution accelerator
+publish its own runtime key-values into the App Configuration store without new
+template parameters. It defaults to an empty array, so existing deployments are
+unaffected and produce byte-identical App Configuration output.
+
+If your accelerator currently drives runtime config through the workload-specific
+`foundryIq*` parameters, nothing breaks: those parameters still work. Going
+forward, prefer publishing accelerator keys through the passthrough so the
+landing zone stays workload-agnostic:
+
+```bicep
+additionalAppConfigurationSettings: [
+  { name: 'MY_WORKLOAD_FLAG', value: 'true' }
+  { name: 'MY_WORKLOAD_MODE', value: 'hybrid', label: 'prod' }
+]
+```
+
+Notes:
+
+- Values are plaintext. Do not pass secrets; use Key Vault references instead.
+- Each `name` + `label` pair must be unique. A passthrough entry that collides
+  with a built-in setting wins, so it can also override a stamped default.
+- App Configuration is only populated on non-isolated deployments where the
+  runtime config store is App Configuration. In isolated deployments, stamp
+  workload keys through the jumpbox post-provision step instead.
+- In the `containerEnv` runtime mode the same entries are injected as Container
+  App env vars (name/value only), so the passthrough works in both modes.
+
+`retrievalBackend` is **not** deprecated: it gates real infrastructure (the AI
+Foundry knowledge-base connection and shared private links), so it stays a
+first-class parameter.
+
+---
+
 ## 4. Things that are NOT broken
 
 These v1.x patterns continue to work unchanged:

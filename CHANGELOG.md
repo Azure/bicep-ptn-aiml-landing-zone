@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Workload App Configuration passthrough (`additionalAppConfigurationSettings`).** Solution accelerators can now publish their own runtime key-values into the App Configuration store without adding workload-specific parameters to this template. Each entry takes `name`, `value`, and optional `label` and `contentType`. The landing zone stamps the entries verbatim. Values are plaintext (do not pass secrets), each `name`+`label` must be unique, and a passthrough entry that collides with a built-in setting wins so accelerators can override a stamped default. When the consumer opts out of App Configuration and uses the `containerEnv` runtime mode (Issue #89), the same entries are injected into every Container App as env vars (name/value only, labels ignored), so the passthrough works in both runtime modes. The parameter defaults to an empty array, so existing deployments produce byte-identical App Configuration and container env output. This keeps the landing zone workload-agnostic: GPT-RAG and other accelerators publish their Foundry IQ and other runtime keys through the passthrough instead of the template growing accelerator-specific parameters. See [Workload App Configuration passthrough](README.md#workload-app-configuration-passthrough).
+
+### Deprecated
+
+- **Accelerator-specific `foundryIq*` knowledge-source parameters.** `foundryIqPattern`, `foundryIqKnowledgeSourceName`, `foundryIqSearchIndexName`, `foundryIqBaseFilter`, and `foundryIqFilterAddOnEnabled` (and the wider `foundryIq*` runtime family) still work and are unchanged, but they are superseded by the generic `additionalAppConfigurationSettings` passthrough. New accelerators should publish these keys through the passthrough. `retrievalBackend` is not deprecated: it gates real infrastructure (the AI Foundry knowledge-base connection and shared private links), not just configuration.
+
 ## [v2.2.0] - 2026-06-30
 
 ### Changed
