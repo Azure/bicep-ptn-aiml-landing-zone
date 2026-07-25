@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **GitHub Copilot engineering-agent framework.** Added a concise repository
+  operating contract, specialized architecture, implementation, validation,
+  operations, and release agents, reusable Bicep/Azure-IaC skills, path-scoped
+  instructions, and PowerShell-native YAML frontmatter/link validation in CI.
+  These assets guide repository development and operations only; they do not
+  change deployed resources, Microsoft Foundry agents, Bicep contracts,
+  parameters, scripts, or landing-zone behavior.
+
 ## [v2.3.0] - 2026-07-02
 
 ### Added
