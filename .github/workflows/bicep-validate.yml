@@ -8,6 +8,13 @@ on:
       - 'constants/**'
       - 'main.parameters.json'
       - 'scripts/Measure-MainJsonSize.ps1'
+      - 'AGENTS.md'
+      - '.github/agents/**'
+      - '.github/skills/**'
+      - '.github/instructions/**'
+      - '.github/copilot-instructions.md'
+      - '.github/scripts/Validate-CopilotAssets.ps1'
+      - 'tests/scripts/Validate-CopilotAssets.Tests.ps1'
       - '.github/workflows/bicep-validate.yml'
   push:
     branches:
@@ -18,12 +25,38 @@ on:
       - 'modules/**'
       - 'constants/**'
       - 'main.parameters.json'
+      - 'AGENTS.md'
+      - '.github/agents/**'
+      - '.github/skills/**'
+      - '.github/instructions/**'
+      - '.github/copilot-instructions.md'
+      - '.github/scripts/Validate-CopilotAssets.ps1'
+      - 'tests/scripts/Validate-CopilotAssets.Tests.ps1'
+      - '.github/workflows/bicep-validate.yml'
 
 permissions:
   contents: read
   pull-requests: write
 
 jobs:
+  validate-copilot-assets:
+    name: Copilot assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install YAML parser
+        shell: pwsh
+        run: Install-Module powershell-yaml -RequiredVersion 0.4.12 -Scope CurrentUser -Force
+
+      - name: Validate agents, skills, and scoped instructions
+        shell: pwsh
+        run: pwsh ./.github/scripts/Validate-CopilotAssets.ps1
+
+      - name: Test Copilot asset validator
+        shell: pwsh
+        run: pwsh ./tests/scripts/Validate-CopilotAssets.Tests.ps1
+
   build-and-measure:
     name: bicep build + size gate
     runs-on: ubuntu-latest
