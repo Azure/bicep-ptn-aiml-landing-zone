@@ -24,6 +24,7 @@ A handful of other quality-of-life additions:
 - **AI Foundry project naming** — `aiFoundryProjectName`, `aiFoundryProjectDisplayName`, and `aiFoundryProjectDescription` let consumers customize the deployed AI Foundry project instead of using a hardcoded default.
 - **Workload App Configuration passthrough** — `additionalAppConfigurationSettings` lets a solution accelerator publish its own runtime key-values into the App Configuration store without adding template-specific parameters. See [Workload App Configuration passthrough](#workload-app-configuration-passthrough).
 - **Foundry IQ groundwork for GPT-RAG:** set `RETRIEVAL_BACKEND=foundry_iq` to stamp the orchestrator settings for a Foundry IQ knowledge base. See [Foundry IQ for GPT-RAG](#foundry-iq-for-gpt-rag) for parameters, security expectations, billing, and the post-provision script.
+- **Hosted-agent topology** — two boolean flags (`deployHostedAgent`, `deployAdminPanel`) switch the landing zone between classic orchestrator Container Apps and the AI Foundry hosted-agent model. Both default to `false` so existing deployments are unaffected. See [Hosted-agent topology](#hosted-agent-topology).
 
 **Pick a runbook to deploy:**
 
@@ -243,7 +244,64 @@ Set `extendFirewallForJumpboxBootstrap=false` to skip the jumpbox-scoped rules w
 
 Use `DEPLOY_AAF_AGENT_SVC=false` when an external app only needs hosted model inference from Foundry and does not need Agent Service capability hosts or their associated state resources.
 
-### Workload App Configuration passthrough
+### Hosted-agent topology
+
+Two boolean flags (`deployHostedAgent`, `deployAdminPanel`) select between three Container App deployment modes. Both default to `false`, so all existing deployments are unaffected.
+
+| Mode | `deployHostedAgent` | `deployAdminPanel` | Description |
+|---|---|---|---|
+| **Classic** (default) | `false` | `false` | `containerAppsList` Container Apps are deployed (e.g., GPT-RAG orchestrator). Cosmos DB for conversation history is included per `deployCosmosDb`/`databaseContainersList`. Unchanged behavior. |
+| **Hosted / no-panel** | `true` | `false` | AI Foundry hosted agents handle orchestration. The `containerAppsList` is **not** deployed regardless of its contents. No orchestrator ACA is created. If you do not need Cosmos for conversation history, set `deployCosmosDb=false` or leave `databaseContainersList` empty. |
+| **Hosted / panel** | `true` | `true` | Same as hosted/no-panel, plus an administrative panel Container App is deployed. Configure it with the `adminPanelApp` parameter. |
+
+**Rollback to classic**: set `deployHostedAgent=false` (the default). No resource mutation is required.
+
+**Quick start — hosted/no-panel:**
+```bash
+azd env set DEPLOY_HOSTED_AGENT true
+azd provision
+```
+
+**Quick start — hosted/panel:**
+```bash
+azd env set DEPLOY_HOSTED_AGENT true
+azd env set DEPLOY_ADMIN_PANEL true
+azd provision
+```
+
+**Admin panel Container App configuration** (`adminPanelApp` parameter):
+
+The admin panel app accepts the same fields as a `containerAppsList` entry. All fields are optional — sensible defaults are applied for any omitted field.
+
+| Field | Default | Description |
+|---|---|---|
+| `name` | `ca-<token>-admin-panel` | Container App resource name override |
+| `service_name` | `admin-panel` | Service name (used for `azd-service-name` tag and identity naming) |
+| `canonical_name` | `ADMIN_PANEL_APP` | Key prefix in App Configuration (`<canonical>_ENDPOINT`, `<canonical>_NAME`) |
+| `target_port` | `8080` | Ingress target port |
+| `external` | `true` | Whether ingress is external |
+| `profile_name` | `Consumption` | Workload profile name |
+| `min_replicas` | `1` | Minimum replica count |
+| `max_replicas` | `1` | Maximum replica count |
+| `cpu` | `0.5` | CPU request |
+| `memory` | `1.0Gi` | Memory request |
+| `roles` | See below | RBAC roles assigned to the panel identity |
+
+Default roles for the admin panel identity (least-privilege for AI Foundry hosted-agent interaction):
+`AppConfigurationDataReader`, `CognitiveServicesUser`, `CognitiveServicesOpenAIUser`, `AcrPull`, `KeyVaultSecretsUser`.
+
+**Outputs added:**
+
+| Output | Type | Description |
+|---|---|---|
+| `DEPLOY_HOSTED_AGENT` | `bool` | Effective value of the flag |
+| `DEPLOY_ADMIN_PANEL` | `bool` | Effective value of the flag |
+| `ADMIN_PANEL_CONTAINER_APP_FQDN` | `string` | FQDN of the admin panel Container App; empty when not deployed |
+| `ADMIN_PANEL_CONTAINER_APP_NAME` | `string` | Name of the admin panel Container App; empty when not deployed |
+
+**Network isolation:** the admin panel Container App respects the same private-endpoint and firewall dependency chain as classic Container Apps, so Zero Trust deployments work without additional configuration.
+
+
 
 The landing zone is workload-agnostic. When a solution accelerator needs its own
 runtime keys stamped into the App Configuration store, it should not require new

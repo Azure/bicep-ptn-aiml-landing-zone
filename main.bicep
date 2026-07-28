@@ -386,6 +386,39 @@ param deployAzureFirewall bool = true
 @description('Deploy an ACR Task agent pool so image builds can run inside the VNet when the registry has public access disabled. Requires a Premium container registry (auto-selected when networkIsolation is true) and is gated on both deployContainerRegistry and networkIsolation.')
 param deployAcrTaskAgentPool bool = true
 
+// ----------------------------------------------------------------------
+// Hosted-agent topology flags (Issue [Hosted agents 05])
+// ----------------------------------------------------------------------
+// Three explicit deployment modes are supported:
+//
+//   classic          (deployHostedAgent=false, default)
+//                    The containerAppsList is deployed as a set of orchestrator
+//                    Container Apps and Cosmos DB stores conversation history.
+//                    This is the existing behavior, fully preserved by the false
+//                    default.
+//
+//   hosted/no-panel  (deployHostedAgent=true, deployAdminPanel=false)
+//                    AI Foundry hosted agents handle orchestration. The classic
+//                    containerAppsList is NOT deployed. Cosmos for conversation
+//                    history is not required; set deployCosmosDb=false or provide
+//                    an empty databaseContainersList to omit it.
+//
+//   hosted/panel     (deployHostedAgent=true, deployAdminPanel=true)
+//                    Same as hosted/no-panel, plus an administrative panel
+//                    Container App is provisioned (configured via adminPanelApp).
+//
+// Rollback: setting deployHostedAgent back to false (or leaving it at the default)
+// re-enables the classic topology exactly as before.
+
+@description('When true, AI Foundry hosted agents handle orchestration and the classic containerAppsList is not deployed. Secure default: false (classic topology preserved). Set to true to activate the hosted-agent topology.')
+param deployHostedAgent bool = false
+
+@description('When deployHostedAgent is true, also deploy an administrative panel Container App for hosted-agent management. Has no effect when deployHostedAgent is false. Secure default: false.')
+param deployAdminPanel bool = false
+
+@description('Configuration for the optional administrative panel Container App. Only deployed when both deployHostedAgent and deployAdminPanel are true. Accepts the same fields as a containerAppsList entry (name, target_port, external, profile_name, min_replicas, max_replicas, cpu, memory, canonical_name, service_name, roles). Unset fields fall back to safe defaults.')
+param adminPanelApp object = {}
+
 @description('Name for the ACR Task agent pool. Max 20 characters.')
 @maxLength(20)
 param acrTaskAgentPoolName string = 'build-pool'
@@ -1191,6 +1224,33 @@ var _useCAppAPIKey  = empty(string(useCAppAPIKey))? false : bool(useCAppAPIKey)
 var _runtimeConfigIsAppConfig    = appRuntimeConfigurationMode == 'appConfig'
 var _runtimeConfigIsContainerEnv = appRuntimeConfigurationMode == 'containerEnv'
 
+// ----------------------------------------------------------------------
+// Hosted-agent topology derivation (Issue [Hosted agents 05])
+// ----------------------------------------------------------------------
+// Classic mode  (deployHostedAgent=false): containerAppsList is deployed normally.
+// Hosted mode   (deployHostedAgent=true):  containerAppsList is NOT deployed;
+//                                           admin panel is optionally deployed instead.
+//
+// _deployClassicApps  – drives all loops/conditions that currently read deployContainerApps
+//                       so that switching deployHostedAgent=true suppresses the orchestrator
+//                       Container Apps without the consumer needing to empty containerAppsList.
+// _deployAdminPanelApp – true only when both hosted-agent flags are set and the environment exists.
+var _deployClassicApps   = deployContainerApps && !deployHostedAgent
+var _deployAdminPanelApp = deployHostedAgent && deployAdminPanel && deployContainerEnv
+
+var _adminPanelServiceName    = adminPanelApp.?service_name   ?? 'admin-panel'
+var _adminPanelCanonicalName  = adminPanelApp.?canonical_name ?? 'ADMIN_PANEL_APP'
+var _adminPanelAppNameBase    = adminPanelApp.?name ?? ''
+var _adminPanelAppName        = !empty(_adminPanelAppNameBase) ? _adminPanelAppNameBase : '${const.abbrs.containers.containerApp}${resourceToken}-${_adminPanelServiceName}'
+var _adminPanelDefaultRoles   = [
+  'AppConfigurationDataReader'
+  'CognitiveServicesUser'
+  'CognitiveServicesOpenAIUser'
+  'AcrPull'
+  'KeyVaultSecretsUser'
+]
+var _adminPanelRoles = adminPanelApp.?roles ?? _adminPanelDefaultRoles
+
 //////////////////////////////////////////////////////////////////////////
 // RESOURCES
 //////////////////////////////////////////////////////////////////////////
@@ -1240,8 +1300,9 @@ var _deployAcrTaskAgentPool = deployContainerRegistry && _networkIsolation && de
 
 // Public Ingress (#49) — only effective in network-isolated mode with Container
 // Apps deployed. The gateway fronts an internal ACA environment, so it is a
-// no-op outside that topology.
-var _publicIngressEnabled = publicIngress.enabled && _networkIsolation && deployContainerEnv && deployContainerApps && length(containerAppsList) > 0
+// no-op outside that topology. In hosted-agent mode the classic containerAppsList
+// is not deployed, so public ingress is also suppressed.
+var _publicIngressEnabled = publicIngress.enabled && _networkIsolation && deployContainerEnv && _deployClassicApps && length(containerAppsList) > 0
 var _publicIngressBackendIndex = publicIngress.?backendAppIndex ?? 0
 var _publicIngressAllowedSources = publicIngress.?allowedSourceAddressPrefixes ?? []
 
@@ -1856,7 +1917,7 @@ var _dnsZonesList = _deployPrivateDnsZones ? concat(
   _byoZoneBlob          ? [] : [ { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${resourceNames.vnetName}-blob-std-link${_dnsZonesLinkSuffix}' } ],
   _byoZoneKeyVault      ? [] : [ { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${resourceNames.vnetName}-kv-link${_dnsZonesLinkSuffix}' } ],
   _byoZoneAppConfig     ? [] : [ { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${resourceNames.vnetName}-appcfg-link${_dnsZonesLinkSuffix}' } ],
-  (deployContainerApps && !_byoZoneContainerApps) ? [
+  ((deployContainerApps || _deployAdminPanelApp) && !_byoZoneContainerApps) ? [
     { dnsName: 'privatelink.${location}.azurecontainerapps.io', virtualNetworkLinkName: '${resourceNames.vnetName}-containerapps-link${_dnsZonesLinkSuffix}' }
   ] : [],
   (deployContainerRegistry && !_byoZoneAcr) ? [
@@ -2595,7 +2656,7 @@ resource acrTaskAgentPool 'Microsoft.ContainerRegistry/registries/agentPools@201
 
 //Container Apps User Managed Identity
 resource containerAppsUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = [
-  for app in containerAppsList: if (_useUAI && deployContainerApps) {
+  for app in containerAppsList: if (_useUAI && _deployClassicApps) {
     name: '${const.abbrs.security.managedIdentity}${const.abbrs.containers.containerApp}${resourceToken}-${app.service_name}'
     location: location
   }
@@ -2707,7 +2768,7 @@ var _containerAppBaseEnvironmentVariables = [
 
 @batchSize(4)
 module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
-  for (app, index) in containerAppsList: if (deployContainerApps) {
+  for (app, index) in containerAppsList: if (_deployClassicApps) {
     name: _containerAppNames[index]
     params: {
       name: _containerAppNames[index]
@@ -2783,6 +2844,85 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
     ]
   }
 ]
+
+// Admin Panel Container App (hosted-agent topology, deployHostedAgent=true && deployAdminPanel=true)
+//////////////////////////////////////////////////////////////////////////
+
+// Admin Panel User Managed Identity (only when UAI mode is on and admin panel is deployed)
+resource adminPanelUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI && _deployAdminPanelApp) {
+  name: '${const.abbrs.security.managedIdentity}${const.abbrs.containers.containerApp}${resourceToken}-${_adminPanelServiceName}'
+  location: location
+}
+
+module adminPanelContainerApp 'br/public:avm/res/app/container-app:0.18.1' = if (_deployAdminPanelApp) {
+  name: _adminPanelAppName
+  params: {
+    name: _adminPanelAppName
+    location: location
+    #disable-next-line BCP318
+    environmentResourceId: containerEnv.id
+    workloadProfileName: adminPanelApp.?profile_name ?? 'Consumption'
+
+    ingressExternal: adminPanelApp.?external ?? true
+    ingressTargetPort: int(adminPanelApp.?target_port ?? 8080)
+    ingressTransport: 'auto'
+    ingressAllowInsecure: false
+
+    managedIdentities: {
+      systemAssigned: _useUAI ? false : true
+      #disable-next-line BCP318
+      userAssignedResourceIds: _useUAI ? [adminPanelUAI.id] : []
+    }
+
+    scaleSettings: {
+      minReplicas: adminPanelApp.?min_replicas ?? 1
+      maxReplicas: adminPanelApp.?max_replicas ?? 1
+    }
+
+    containers: [
+      {
+        name: _adminPanelServiceName
+        image: _containerDummyImageName
+        resources: {
+          cpu: adminPanelApp.?cpu ?? '0.5'
+          memory: adminPanelApp.?memory ?? '1.0Gi'
+        }
+        env: concat(
+          _runtimeConfigIsAppConfig ? [
+            {
+              name: 'APP_CONFIG_ENDPOINT'
+              value: 'https://${resourceNames.appConfigName}.azconfig.io'
+            }
+          ] : [],
+          [
+            {
+              name: 'AZURE_TENANT_ID'
+              value: subscription().tenantId
+            }
+          ],
+          _useUAI ? [
+            {
+              name: 'AZURE_CLIENT_ID'
+              #disable-next-line BCP318
+              value: adminPanelUAI.properties.clientId
+            }
+          ] : [],
+          _runtimeConfigIsContainerEnv ? _containerRuntimeEnvWithAdditional : []
+        )
+      }
+    ]
+
+    tags: union(_tags, {
+      'azd-service-name': _adminPanelServiceName
+    })
+  }
+  dependsOn: [
+    containerEnv!
+    privateDnsZones
+    privateEndpoints
+    firewall
+  ]
+}
 
 // Cosmos DB Account and Database
 //////////////////////////////////////////////////////////////////////////
@@ -3285,7 +3425,7 @@ module assignCosmosDBCosmosDbBuiltInDataContributorExecutor 'modules/security/co
 // deployment invocations does not change the deployed role assignment set.
 // Cosmos DB data-plane assignments stay in their dedicated module below.
 module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && ((deployKeyVault && contains(app.roles, const.roles.KeyVaultSecretsUser.key)) || (deployAppConfig && _runtimeConfigIsAppConfig && contains(app.roles, const.roles.AppConfigurationDataReader.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesOpenAIUser.key)) || (deploySpeechService && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployContainerRegistry && contains(app.roles, const.roles.AcrPull.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataReader.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataReader.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDelegator.key)))) {
+  for (app, i) in containerAppsList: if (_deployClassicApps && ((deployKeyVault && contains(app.roles, const.roles.KeyVaultSecretsUser.key)) || (deployAppConfig && _runtimeConfigIsAppConfig && contains(app.roles, const.roles.AppConfigurationDataReader.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesOpenAIUser.key)) || (deploySpeechService && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployContainerRegistry && contains(app.roles, const.roles.AcrPull.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataReader.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataReader.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDelegator.key)))) {
     name: 'assignContainerAppRoles-${app.service_name}'
     params: {
       name: 'assignContainerAppRoles-${app.service_name}'
@@ -3461,7 +3601,7 @@ module assignCrossServiceRoles 'modules/security/resource-role-assignment.bicep'
 
 // Cosmos DB Account - Cosmos DB Built-in Data Contributor -> ContainerApp
 module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/security/cosmos-data-plane-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployCosmosDb && contains(
+  for (app, i) in containerAppsList: if (_deployClassicApps && deployCosmosDb && contains(
     app.roles,
     const.roles.CosmosDBBuiltInDataContributor.key
   )) {
@@ -3482,6 +3622,67 @@ module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/securi
 // when aiSearchConfiguration is provided. Creating it again here causes a
 // RoleAssignmentExists conflict because both produce the same deterministic GUID.
 // Intentionally omitted.
+
+// Admin Panel role assignments (hosted-agent topology)
+// ─────────────────────────────────────────────────────────────────────
+// Least-privilege set mirrors what the classic orchestrator Container App
+// typically needs; the consumer may narrow or extend the set via adminPanelApp.roles.
+var _adminPanelPrincipalId = _deployAdminPanelApp
+  #disable-next-line BCP318
+  ? (_useUAI ? adminPanelUAI.properties.principalId : adminPanelContainerApp.outputs.systemAssignedMIPrincipalId!)
+  : ''
+
+module assignAdminPanelRoles 'modules/security/resource-role-assignment.bicep' = if (_deployAdminPanelApp) {
+  name: 'assignAdminPanelRoles'
+  params: {
+    name: 'assignAdminPanelRoles'
+    roleAssignments: concat(
+      (deployKeyVault && contains(_adminPanelRoles, const.roles.KeyVaultSecretsUser.key)) ? [
+        {
+          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultSecretsUser.guid)
+          principalId: _adminPanelPrincipalId
+          #disable-next-line BCP318
+          resourceId: keyVault.id
+          principalType: 'ServicePrincipal'
+        }
+      ] : [],
+      (deployAppConfig && _runtimeConfigIsAppConfig && contains(_adminPanelRoles, const.roles.AppConfigurationDataReader.key)) ? [
+        {
+          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AppConfigurationDataReader.guid)
+          principalId: _adminPanelPrincipalId
+          #disable-next-line BCP318
+          resourceId: appConfig.id
+          principalType: 'ServicePrincipal'
+        }
+      ] : [],
+      (deployAiFoundry && contains(_adminPanelRoles, const.roles.CognitiveServicesUser.key)) ? [
+        {
+          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
+          principalId: _adminPanelPrincipalId
+          resourceId: aiFoundryAccountResourceId
+          principalType: 'ServicePrincipal'
+        }
+      ] : [],
+      (deployAiFoundry && contains(_adminPanelRoles, const.roles.CognitiveServicesOpenAIUser.key)) ? [
+        {
+          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesOpenAIUser.guid)
+          principalId: _adminPanelPrincipalId
+          resourceId: aiFoundryAccountResourceId
+          principalType: 'ServicePrincipal'
+        }
+      ] : [],
+      (deployContainerRegistry && contains(_adminPanelRoles, const.roles.AcrPull.key)) ? [
+        {
+          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPull.guid)
+          principalId: _adminPanelPrincipalId
+          #disable-next-line BCP318
+          resourceId: containerRegistry.id
+          principalType: 'ServicePrincipal'
+        }
+      ] : []
+    )
+  }
+}
 
 //////////////////////////////////////////////////////////////////////////
 // App Configuration Settings Service
@@ -3526,7 +3727,7 @@ resource appConfigDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01'
 }
 
 // prepare the container apps settings for the app configuration store
-module containerAppsSettings 'modules/container-apps/container-apps-list.bicep' = if (deployContainerApps) {
+module containerAppsSettings 'modules/container-apps/container-apps-list.bicep' = if (_deployClassicApps) {
   name: 'containerAppsSettings'
   params: {
     appConfigLabel: appConfigLabel
@@ -3670,9 +3871,9 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       filter(
       concat(
       #disable-next-line BCP318
-      deployContainerApps ? containerAppsSettings.outputs.containerAppsEndpoints : [],
+      _deployClassicApps ? containerAppsSettings.outputs.containerAppsEndpoints : [],
       #disable-next-line BCP318
-      deployContainerApps ? containerAppsSettings.outputs.containerAppsName : [],
+      _deployClassicApps ? containerAppsSettings.outputs.containerAppsName : [],
       _modelDeploymentNamesSettings,
       _databaseContainerNamesSettings,
       _storageContainerNamesSettings,
@@ -3764,6 +3965,9 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'DEPLOY_CONTAINER_APPS', value: string(deployContainerApps), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOY_CONTAINER_REGISTRY', value: string(deployContainerRegistry), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOY_CONTAINER_ENV', value: string(deployContainerEnv), label: appConfigLabel, contentType: 'text/plain' }
+      // ── Hosted-agent topology flags ───────────────────────────────────────
+      { name: 'DEPLOY_HOSTED_AGENT', value: string(deployHostedAgent), label: appConfigLabel, contentType: 'text/plain' }
+      { name: 'DEPLOY_ADMIN_PANEL', value: string(deployAdminPanel), label: appConfigLabel, contentType: 'text/plain' }
 
       // ── Endpoints / URIs ──────────────────────────────────────────────────
       #disable-next-line BCP318
@@ -3778,6 +3982,11 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'KNOWLEDGE_BASE_ENDPOINT', value: retrievalBackend == 'foundry_iq' && deploySearchService ? searchService.outputs.endpoint : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'AZURE_SPEECH_ENDPOINT', value: deploySpeechService ? speechService.outputs.endpoint : '', label: appConfigLabel, contentType: 'text/plain' }
+      // Admin panel endpoint (hosted-agent topology only)
+      #disable-next-line BCP318
+      { name: '${_adminPanelCanonicalName}_ENDPOINT', value: _deployAdminPanelApp ? 'https://${adminPanelContainerApp.outputs.fqdn}' : '', label: appConfigLabel, contentType: 'text/plain' }
+      #disable-next-line BCP318
+      { name: '${_adminPanelCanonicalName}_NAME', value: _deployAdminPanelApp ? adminPanelContainerApp.outputs.name : '', label: appConfigLabel, contentType: 'text/plain' }
 
       // ── Connections ───────────────────────────────────────────────────────
       #disable-next-line BCP318
@@ -3794,7 +4003,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
 
       // ── Container Apps List & Model Deployments ────────────────────────────
       #disable-next-line BCP318
-      { name: 'CONTAINER_APPS', value: deployContainerApps ? string(containerAppsSettings.outputs.containerAppsList) : '[]', label: appConfigLabel, contentType: 'application/json' }
+      { name: 'CONTAINER_APPS', value: _deployClassicApps ? string(containerAppsSettings.outputs.containerAppsList) : '[]', label: appConfigLabel, contentType: 'application/json' }
       { name: 'MODEL_DEPLOYMENTS', value: string(_modelDeploymentSettings), label: appConfigLabel, contentType: 'application/json' }
 
     ]
@@ -3901,4 +4110,14 @@ output LOG_ANALYTICS_RESOURCE_ID string = _lawResourceId
 output APP_INSIGHTS_RESOURCE_ID string = _appInsightsResourceId
 output OBSERVABILITY_MIXED_WORKSPACES_ALLOWED bool = allowMixedObservabilityWorkspaces
 #disable-next-line BCP318
-output CONTAINER_APP_INTERNAL_FQDN string = (deployContainerApps && length(containerAppsList) > 0) ? containerApps[_publicIngressBackendIndex].outputs.fqdn : ''
+output CONTAINER_APP_INTERNAL_FQDN string = (_deployClassicApps && length(containerAppsList) > 0) ? containerApps[_publicIngressBackendIndex].outputs.fqdn : ''
+
+// ──────────────────────────────────────────────────────────────────────
+// Hosted-agent topology (Issue [Hosted agents 05])
+// ──────────────────────────────────────────────────────────────────────
+output DEPLOY_HOSTED_AGENT bool = deployHostedAgent
+output DEPLOY_ADMIN_PANEL bool = deployAdminPanel
+#disable-next-line BCP318
+output ADMIN_PANEL_CONTAINER_APP_FQDN string = _deployAdminPanelApp ? adminPanelContainerApp.outputs.fqdn : ''
+#disable-next-line BCP318
+output ADMIN_PANEL_CONTAINER_APP_NAME string = _deployAdminPanelApp ? adminPanelContainerApp.outputs.name : ''
