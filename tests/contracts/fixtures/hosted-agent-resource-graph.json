@@ -5,6 +5,9 @@
     "assignExecutorRoles",
     "assignCrossServiceRoles"
   ],
+  "normalizedResourceHashes": {
+    "aiFoundry": "e2f4179f1b388ad7c4e78c164c66b8221ee3907c84b11be78924e0259c4f8e69"
+  },
   "resourceHashes": {
     "acrTaskAgentPool": "e1450b916c1936c3519f8bd60a892fe62e9b0a469270ec5013384a0d46e778e9",
     "aiFoundry": "2a02c09d52269d9bb0aa1066e17ece65edce5005e51afea06f5939e15efb22f3",

@@ -30,8 +30,54 @@ function Add-Pass {
     Write-Host "  [PASS] $Message" -ForegroundColor Green
 }
 
+function ConvertTo-ContractCanonicalValue {
+    param(
+        [AllowNull()] $Value,
+        [switch]$IgnoreGeneratedMetadata
+    )
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) {
+        return $Value.Replace("`r`n", "`n").Replace("`r", "`n")
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = [ordered]@{}
+        foreach ($key in $Value.Keys) {
+            if ($IgnoreGeneratedMetadata -and $key -eq '_generator') { continue }
+            $result[$key] = ConvertTo-ContractCanonicalValue -Value $Value[$key] -IgnoreGeneratedMetadata:$IgnoreGeneratedMetadata
+        }
+        return $result
+    }
+    if ($Value -is [pscustomobject]) {
+        $result = [ordered]@{}
+        foreach ($property in $Value.PSObject.Properties) {
+            if ($IgnoreGeneratedMetadata -and $property.Name -eq '_generator') { continue }
+            $result[$property.Name] = ConvertTo-ContractCanonicalValue -Value $property.Value -IgnoreGeneratedMetadata:$IgnoreGeneratedMetadata
+        }
+        return $result
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $result = [System.Collections.Generic.List[object]]::new()
+        foreach ($item in $Value) {
+            $result.Add((ConvertTo-ContractCanonicalValue -Value $item -IgnoreGeneratedMetadata:$IgnoreGeneratedMetadata))
+        }
+        return ,$result.ToArray()
+    }
+    return $Value
+}
+
 function Get-ObjectHash {
-    param([Parameter(Mandatory)] $Value)
+    param(
+        [Parameter(Mandatory)] $Value,
+        [switch]$NormalizeGeneratedContent
+    )
+
+    if ($NormalizeGeneratedContent) {
+        # Deeply nested AVM templates contain compiler hashes derived from source
+        # line endings. Remove those non-deploying fields and normalize newlines
+        # so Windows and Linux compare the same semantic resource definition.
+        $Value = ConvertTo-ContractCanonicalValue -Value $Value -IgnoreGeneratedMetadata
+    }
     $json = $Value | ConvertTo-Json -Depth 100 -Compress
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -98,11 +144,20 @@ try {
         Add-Pass "Symbolic resource graph matches the $($expectedNames.Count)-resource merge-base fixture."
     }
 
+    $normalizedResourceHashes = @{}
+    if ($fixture.PSObject.Properties.Name -contains 'normalizedResourceHashes') {
+        foreach ($entry in $fixture.normalizedResourceHashes.PSObject.Properties) {
+            $normalizedResourceHashes[$entry.Name] = $entry.Value
+        }
+    }
+
     foreach ($entry in $fixture.resourceHashes.PSObject.Properties) {
         if ($entry.Name -notin $actualNames) { continue }
-        $actualHash = Get-ObjectHash -Value $template.resources.($entry.Name)
-        if ($actualHash -ne $entry.Value) {
-            Add-Failure "Pre-existing resource '$($entry.Name)' changed (expected $($entry.Value), got $actualHash)."
+        $useNormalizedHash = $normalizedResourceHashes.ContainsKey($entry.Name)
+        $expectedHash = $useNormalizedHash ? $normalizedResourceHashes[$entry.Name] : $entry.Value
+        $actualHash = Get-ObjectHash -Value $template.resources.($entry.Name) -NormalizeGeneratedContent:$useNormalizedHash
+        if ($actualHash -ne $expectedHash) {
+            Add-Failure "Pre-existing resource '$($entry.Name)' changed (expected $expectedHash, got $actualHash)."
         }
     }
     if (-not ($failures | Where-Object { $_ -like "Pre-existing resource '*" })) {
