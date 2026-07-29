@@ -1,11 +1,12 @@
 # AI Landing Zone — Test harness
 
-> Scope: integration tests for issue #58 (v2.0.0). Not a generic CI test suite.
+> Scope: deterministic offline contract checks plus the issue #58 (v2.0.0)
+> live integration harness.
 
-This directory contains a purpose-built hub-and-spoke test fixture for validating
-v2.0.0 deliverables end-to-end against a real Azure subscription. It is **not**
-required to use the landing zone; it is required only to reproduce / verify the
-two synthetic scenarios in the issue #58 acceptance criteria.
+This directory contains offline checks used by CI and a purpose-built
+hub-and-spoke fixture for validating v2.0.0 deliverables end-to-end against a
+real Azure subscription. The live fixture is **not** required to use the landing
+zone; it exists to reproduce the two synthetic scenarios in issue #58.
 
 ## Conventions
 
@@ -23,13 +24,36 @@ two synthetic scenarios in the issue #58 acceptance criteria.
 ```
 tests/
 ├── README.md                 (this file)
+├── contracts/
+│   ├── Test-HostedAgentContract.ps1
+│   └── fixtures/
+│       └── hosted-agent-resource-graph.json
 ├── hub/
 │   ├── main.bicep            (test hub: VNet, Firewall, Bastion, LAW)
 │   ├── main.parameters.json
 │   └── .outputs.json         (gitignored — captured outputs from last deploy)
 └── scripts/
-    └── Deploy-Hub.ps1        (idempotent hub deployer + output capture)
+    ├── Deploy-Hub.ps1        (idempotent hub deployer + output capture)
+    └── Invoke-PreflightChecks.Tests.ps1
 ```
+
+## Offline contract checks
+
+Run from the repository root:
+
+```pwsh
+pwsh tests/contracts/Test-HostedAgentContract.ps1
+pwsh tests/scripts/Invoke-PreflightChecks.Tests.ps1
+```
+
+The hosted-agent contract test compiles with the Bicep version recorded in its
+fixture and proves that the default-disabled feature preserves every symbolic
+resource from the merge base. It permits changes only in the two centralized
+RBAC deployment payloads and checks that those additions are
+`deployHostedAgent`-gated, least privilege, and accompanied by the stable
+Foundry/registry handoff. The deterministic preflight tests cover disabled,
+valid, mutable-image, and missing-prerequisite configurations without accessing
+Azure.
 
 ## End-to-end test flow
 

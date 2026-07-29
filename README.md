@@ -24,7 +24,7 @@ A handful of other quality-of-life additions:
 - **AI Foundry project naming** — `aiFoundryProjectName`, `aiFoundryProjectDisplayName`, and `aiFoundryProjectDescription` let consumers customize the deployed AI Foundry project instead of using a hardcoded default.
 - **Workload App Configuration passthrough** — `additionalAppConfigurationSettings` lets a solution accelerator publish its own runtime key-values into the App Configuration store without adding template-specific parameters. See [Workload App Configuration passthrough](#workload-app-configuration-passthrough).
 - **Foundry IQ groundwork for GPT-RAG:** set `RETRIEVAL_BACKEND=foundry_iq` to stamp the orchestrator settings for a Foundry IQ knowledge base. See [Foundry IQ for GPT-RAG](#foundry-iq-for-gpt-rag) for parameters, security expectations, billing, and the post-provision script.
-- **Hosted-agent support** — the `deployHostedAgent` flag provisions a standalone hosted-agent Container App alongside any existing `containerAppsList` apps without suppressing or altering them. Defaults to `false`. See [Hosted-agent support](#hosted-agent-support).
+- **Hosted-agent deployment prerequisites** — `deployHostedAgent` exposes a typed, disabled-by-default handoff for a downstream Microsoft Foundry `azure.ai.agent` service. It adds only generic project/registry RBAC and outputs; it never removes or changes existing Container Apps or data resources. See [Hosted-agent deployment prerequisites](#hosted-agent-deployment-prerequisites).
 
 **Pick a runbook to deploy:**
 
@@ -244,47 +244,77 @@ Set `extendFirewallForJumpboxBootstrap=false` to skip the jumpbox-scoped rules w
 
 Use `DEPLOY_AAF_AGENT_SVC=false` when an external app only needs hosted model inference from Foundry and does not need Agent Service capability hosts or their associated state resources.
 
-### Hosted-agent support
+### Hosted-agent deployment prerequisites
 
-The `deployHostedAgent` flag provisions a standalone hosted-agent Container App in the Container Apps environment. It is **purely additive**: setting it to `true` never suppresses, removes, or alters the existing `containerAppsList` Container Apps, Cosmos DB resources, or any other resource that `deployContainerApps` or `deployCosmosDb` governs. Those inputs remain fully authoritative.
+`deployHostedAgent` enables an accelerator-neutral infrastructure handoff for a
+downstream Microsoft Foundry hosted agent. It is **not** a workload topology
+switch. It does not create an agent version, application UI, or replacement
+workload, and it does not modify `containerAppsList`, Cosmos DB, Storage, Search,
+App Configuration, or any other existing workload resource. Those resources
+remain controlled exclusively by their existing parameters.
 
-**Quick start:**
+When the flag is `false` (the default), no hosted-agent RBAC is added and the
+compiled symbolic resource graph is identical to the pre-feature graph. When it
+is `true`, the landing zone adds only:
+
+- `Foundry Project Manager` for the deployment principal on the Foundry project;
+- `Container Registry Repository Reader` for the Foundry project managed
+  identity on the selected registry; and
+- a typed output handoff containing the project, registry, image, startup
+  command, runtime resources, protocols, agent subnet, and private-build context.
+
+The downstream `azure.ai.agent` service remains responsible for `azd deploy`.
+That data-plane operation creates the immutable agent version, dedicated
+per-agent identity, invocation endpoint, and the agent identity's registry pull
+assignment. See the official
+[hosted-agent `azure.yaml` reference](https://learn.microsoft.com/azure/foundry/agents/concepts/azure-yaml-reference#azureaiagent-service)
+and [pre-built image workflow](https://learn.microsoft.com/azure/foundry/agents/how-to/deploy-hosted-agent-private-azure-container-registry#deploy-a-pre-built-image).
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `deployHostedAgent` | `false` | Enables only the generic RBAC and deployment handoff. |
+| `hostedAgent.name` | empty | Stable hosted-agent name; downstream deploys create immutable versions under this name. |
+| `hostedAgent.image` | empty | Repository path inside the selected ACR, without tag or digest. |
+| `hostedAgent.version` | empty | Required immutable OCI digest in `sha256:<64 hex>` form. |
+| `hostedAgent.startupCommand` | empty | Container startup command, mapped to `startupCommand` in `azure.ai.agent`. |
+| `hostedAgent.runtime` | `1` CPU, `1Gi` | CPU and memory mapped to `container.resources`. |
+| `hostedAgent.protocols` | Responses `2.0.0` | Typed `responses`, `invocations`, `invocations_ws`, or `a2a` contracts. |
+| `hostedAgentContainerRegistryResourceId` | empty | Existing ACR resource ID when `deployContainerRegistry=false`. |
+| `hostedAgentContainerRegistryEndpoint` | empty | Existing ACR login endpoint when `deployContainerRegistry=false`. |
+
+Example infrastructure handoff for an image already built, scanned, and pushed:
+
 ```bash
 azd env set DEPLOY_HOSTED_AGENT true
+azd env set HOSTED_AGENT_NAME sample-agent
+azd env set HOSTED_AGENT_IMAGE agents/sample-agent
+azd env set HOSTED_AGENT_IMAGE_VERSION sha256:<64-hex-digest>
+azd env set HOSTED_AGENT_STARTUP_COMMAND "python main.py"
 azd provision
 ```
 
-**Hosted-agent Container App configuration** (`hostedAgentApp` parameter):
+After provisioning, map `HOSTED_AGENT_DEPLOYMENT` (or the exact Foundry and ACR
+outputs) into the accelerator's `azure.ai.agent` service and run `azd deploy`
+from that accelerator. Preflight rejects mutable image tags and missing Foundry
+or registry prerequisites.
 
-All fields are optional — sensible defaults are applied for any omitted field.
+**Private registry:** the landing-zone ACR retains its existing Zero Trust
+behavior: Premium SKU, private endpoint and DNS integration, and disabled public
+network access when `networkIsolation=true`. Building or pushing an image in
+that mode must happen from a VNet-connected runner, build agent, or jumpbox.
+For an existing ACR, its private endpoint, DNS, authentication-as-ARM policy,
+and network reachability remain the consumer's responsibility. Microsoft also
+documents a Foundry-project creation-date compatibility condition for private
+registries; verify the current limitation before a live deployment. See
+[private ACR deployment and RBAC](https://learn.microsoft.com/azure/foundry/agents/how-to/deploy-hosted-agent-private-azure-container-registry)
+and [hosted-agent permissions](https://learn.microsoft.com/azure/foundry/agents/concepts/hosted-agent-permissions#azure-resource-setup).
 
-| Field | Default | Description |
-|---|---|---|
-| `name` | `ca-<token>-hosted-agent` | Container App resource name override |
-| `image` | placeholder image | Container image to deploy (pin to a specific image:tag for production) |
-| `service_name` | `hosted-agent` | Service name (used for `azd-service-name` tag and identity naming) |
-| `canonical_name` | `HOSTED_AGENT` | Key prefix in App Configuration (`<canonical>_ENDPOINT`, `<canonical>_NAME`) |
-| `target_port` | `8080` | Ingress target port |
-| `external` | `true` | Whether ingress is external |
-| `profile_name` | `Consumption` | Workload profile name |
-| `min_replicas` | `1` | Minimum replica count |
-| `max_replicas` | `1` | Maximum replica count |
-| `cpu` | `0.5` | CPU request |
-| `memory` | `1.0Gi` | Memory request |
-| `roles` | See below | RBAC role keys assigned to the hosted-agent identity |
-
-Default roles (least-privilege for AI Foundry interaction):
-`AppConfigurationDataReader`, `CognitiveServicesUser`, `CognitiveServicesOpenAIUser`, `AcrPull`, `KeyVaultSecretsUser`.
-
-**Outputs added:**
-
-| Output | Type | Description |
-|---|---|---|
-| `DEPLOY_HOSTED_AGENT` | `bool` | Effective value of the flag |
-| `HOSTED_AGENT_CONTAINER_APP_FQDN` | `string` | FQDN of the hosted-agent Container App; empty when not deployed |
-| `HOSTED_AGENT_CONTAINER_APP_NAME` | `string` | Name of the hosted-agent Container App; empty when not deployed |
-
-**Network isolation:** the hosted-agent Container App uses the same private-endpoint and firewall dependency chain as classic Container Apps, so Zero Trust deployments work without additional configuration. The Container Apps private DNS zone is provisioned whenever `deployContainerApps` or `deployHostedAgent` is enabled.
+| Output | Description |
+|---|---|
+| `DEPLOY_HOSTED_AGENT` | Effective enablement value. |
+| `AZURE_AI_PROJECT_RESOURCE_ID` / `AZURE_AI_PROJECT_ENDPOINT` | Exact Foundry project handoff. |
+| `AZURE_CONTAINER_REGISTRY_RESOURCE_ID` / `AZURE_CONTAINER_REGISTRY_ENDPOINT` | Exact selected-registry handoff. |
+| `HOSTED_AGENT_DEPLOYMENT` | Consolidated typed agent, Foundry, registry, network, and private-build contract. |
 
 ### Workload App Configuration passthrough
 

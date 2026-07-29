@@ -401,6 +401,79 @@ function Test-Topology {
     }
 }
 
+function Test-HostedAgentConfiguration {
+    param([hashtable]$P)
+
+    if (-not (Resolve-DeployFlag -P $P -Key 'deployHostedAgent' -Default $false)) { return }
+
+    $deployAiFoundry = Resolve-DeployFlag -P $P -Key 'deployAiFoundry' -Default $true
+    if (-not $deployAiFoundry) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_FOUNDRY_REQUIRED' `
+            -Message 'deployHostedAgent=true requires deployAiFoundry=true.' `
+            -Hint 'Enable the shared Foundry account/project or disable hosted-agent prerequisites.'
+    }
+
+    $deployRegistry = Resolve-DeployFlag -P $P -Key 'deployContainerRegistry' -Default $true
+    $existingRegistryId = (Get-StringValue $P['hostedAgentContainerRegistryResourceId']).Trim()
+    $existingRegistryEndpoint = (Get-StringValue $P['hostedAgentContainerRegistryEndpoint']).Trim()
+    if (-not $deployRegistry -and ([string]::IsNullOrWhiteSpace($existingRegistryId) -or [string]::IsNullOrWhiteSpace($existingRegistryEndpoint))) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_REGISTRY_REQUIRED' `
+            -Message 'deployHostedAgent=true requires the landing-zone registry or both existing registry inputs.' `
+            -Hint 'Enable DEPLOY_CONTAINER_REGISTRY, or set HOSTED_AGENT_CONTAINER_REGISTRY_RESOURCE_ID and HOSTED_AGENT_CONTAINER_REGISTRY_ENDPOINT.'
+    }
+
+    $agent = $P['hostedAgent']
+    if ($null -eq $agent) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_CONFIG_REQUIRED' -Message 'deployHostedAgent=true requires the typed hostedAgent object.'
+        return
+    }
+
+    $envValues = Get-AzdEnvValues
+    $name = (Get-StringValue (Expand-ParamValue -Raw $agent.name -EnvValues $envValues)).Trim()
+    $image = (Get-StringValue (Expand-ParamValue -Raw $agent.image -EnvValues $envValues)).Trim()
+    $version = (Get-StringValue (Expand-ParamValue -Raw $agent.version -EnvValues $envValues)).Trim()
+    $startupCommand = (Get-StringValue (Expand-ParamValue -Raw $agent.startupCommand -EnvValues $envValues)).Trim()
+    $cpu = (Get-StringValue (Expand-ParamValue -Raw $agent.runtime.cpu -EnvValues $envValues)).Trim()
+    $memory = (Get-StringValue (Expand-ParamValue -Raw $agent.runtime.memory -EnvValues $envValues)).Trim()
+
+    foreach ($required in @(
+            @{ Name = 'name'; Value = $name },
+            @{ Name = 'image'; Value = $image },
+            @{ Name = 'startupCommand'; Value = $startupCommand },
+            @{ Name = 'runtime.cpu'; Value = $cpu },
+            @{ Name = 'runtime.memory'; Value = $memory }
+        )) {
+        if ([string]::IsNullOrWhiteSpace($required.Value)) {
+            Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_CONFIG_REQUIRED' `
+                -Message "hostedAgent.$($required.Name) is required when deployHostedAgent=true."
+        }
+    }
+
+    if ($version -notmatch '^sha256:[0-9a-fA-F]{64}$') {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE' `
+            -Message 'hostedAgent.version must be an immutable OCI digest in sha256:<64 hex characters> form.' `
+            -Hint 'Build and push the image first, then pin the digest rather than using a mutable tag.'
+    }
+
+    $protocols = @($agent.protocols)
+    if ($protocols.Count -eq 0) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_PROTOCOL_REQUIRED' `
+            -Message 'hostedAgent.protocols must contain at least one supported invocation protocol.'
+    }
+    foreach ($protocol in $protocols) {
+        $protocolName = (Get-StringValue (Expand-ParamValue -Raw $protocol.protocol -EnvValues $envValues)).Trim()
+        if ($protocolName -notin @('responses', 'invocations', 'invocations_ws', 'a2a')) {
+            Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_PROTOCOL_INVALID' `
+                -Message "Hosted-agent protocol '$protocolName' is not supported by the current Microsoft Foundry contract."
+        }
+    }
+
+    if ((ConvertTo-Bool $P['networkIsolation'])) {
+        Add-Finding -Severity INFO -Code 'HOSTED_AGENT_PRIVATE_BUILD_REQUIRED' `
+            -Message 'The hosted-agent registry is private. Build and push from a VNet-connected runner/agent or the jumpbox fallback; shared ACR Tasks do not bypass private endpoint access.'
+    }
+}
+
 function Test-AllowedIpRanges {
     param([hashtable]$P)
     $list = Get-ArrayValue $P['allowedIpRanges']
@@ -1640,6 +1713,7 @@ if ($effective.Count -eq 0) {
 }
 
 Test-Topology -P $effective
+Test-HostedAgentConfiguration -P $effective
 Test-AllowedIpRanges -P $effective
 Test-LocalCidrSanity -P $effective
 Test-FoundryIqConfiguration -P $effective

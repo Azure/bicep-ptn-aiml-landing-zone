@@ -386,24 +386,32 @@ param deployAzureFirewall bool = true
 @description('Deploy an ACR Task agent pool so image builds can run inside the VNet when the registry has public access disabled. Requires a Premium container registry (auto-selected when networkIsolation is true) and is gated on both deployContainerRegistry and networkIsolation.')
 param deployAcrTaskAgentPool bool = true
 
-// ----------------------------------------------------------------------
-// Hosted-agent support (additive, secure default: false)
-// ----------------------------------------------------------------------
-// When deployHostedAgent is true, an optional hosted-agent Container App is
-// provisioned alongside — and independently of — any existing containerAppsList
-// apps. Enabling this flag never suppresses, removes, or alters the existing
-// generic workload Container Apps, Cosmos DB resources, or any other resource
-// that containerAppsList, deployContainerApps, or deployCosmosDb governs.
-// Those inputs remain fully authoritative.
-//
-// Set deployHostedAgent=false (the default) to skip the hosted-agent Container
-// App entirely; all other resources are unaffected.
-
-@description('When true, provision a standalone hosted-agent Container App in the Container Apps environment. Purely additive: existing containerAppsList apps and all data resources are unaffected. Secure default: false.')
+@description('Enable accelerator-neutral prerequisites and deployment contracts for a Microsoft Foundry hosted agent. The landing zone does not create the data-plane agent version and never changes Container Apps or data resources. Defaults to false.')
 param deployHostedAgent bool = false
 
-@description('Configuration for the optional hosted-agent Container App. Deployed when deployHostedAgent=true and deployContainerEnv=true. Accepted fields: name, image, service_name, canonical_name, target_port, external, profile_name, min_replicas, max_replicas, cpu, memory, roles. Unset fields fall back to safe defaults.')
-param hostedAgentApp object = {}
+@description('Typed hosted-agent deployment handoff consumed by a downstream `azure.ai.agent` service. `image` is the repository path within the selected registry, `version` must be an immutable OCI digest (`sha256:...`), `startupCommand` maps to the official azure.yaml field, and `runtime` maps to `container.resources`. Values are validated only when deployHostedAgent is true.')
+param hostedAgent hostedAgentConfigurationType = {
+  name: ''
+  image: ''
+  version: ''
+  startupCommand: ''
+  runtime: {
+    cpu: '1'
+    memory: '1Gi'
+  }
+  protocols: [
+    {
+      protocol: 'responses'
+      version: '2.0.0'
+    }
+  ]
+}
+
+@description('Optional resource ID of an existing Azure Container Registry used for hosted-agent images when deployContainerRegistry is false. The deploying principal must be able to create role assignments at this scope.')
+param hostedAgentContainerRegistryResourceId string = ''
+
+@description('Optional login endpoint of an existing Azure Container Registry used for hosted-agent images when deployContainerRegistry is false, for example `contoso.azurecr.io`. Private endpoint, DNS, and VNet-internal build connectivity for an existing registry remain consumer responsibilities.')
+param hostedAgentContainerRegistryEndpoint string = ''
 
 @description('Name for the ACR Task agent pool. Max 20 characters.')
 @maxLength(20)
@@ -478,6 +486,48 @@ type publicIngressType = {
 
   @description('Optional. AGW sslPolicy block. When omitted, the gateway uses the Azure default policy.')
   sslPolicy: object?
+}
+
+@export()
+@description('Invocation protocol implemented by a hosted agent. Values match the Microsoft Foundry `azure.ai.agent` service contract.')
+type hostedAgentProtocolType = {
+  @description('Protocol implemented by the agent container.')
+  protocol: 'responses' | 'invocations' | 'invocations_ws' | 'a2a'
+
+  @description('Optional protocol version exposed by the agent.')
+  version: string?
+}
+
+@export()
+@description('Container CPU and memory settings passed to `azure.ai.agent` as `container.resources`.')
+type hostedAgentRuntimeType = {
+  @description('CPU allocation such as `1` or `500m`.')
+  cpu: string
+
+  @description('Memory allocation such as `1Gi` or `512Mi`.')
+  memory: string
+}
+
+@export()
+@description('Accelerator-neutral handoff for a downstream Microsoft Foundry hosted-agent deployment.')
+type hostedAgentConfigurationType = {
+  @description('Stable hosted-agent name. Reusing this name creates a new immutable version.')
+  name: string
+
+  @description('Container image repository path inside the selected registry, without a tag or digest.')
+  image: string
+
+  @description('Immutable OCI image digest in `sha256:<64 hex characters>` form.')
+  version: string
+
+  @description('Command that starts the agent server. Maps to `startupCommand` in the official `azure.ai.agent` service contract.')
+  startupCommand: string
+
+  @description('Hosted-agent container resource settings.')
+  runtime: hostedAgentRuntimeType
+
+  @description('Invocation protocols implemented by the hosted agent.')
+  protocols: hostedAgentProtocolType[]
 }
 
 @export()
@@ -977,6 +1027,12 @@ var _extraRepoNames = [for c in _manifestComponents: c.?name ?? replace(last(spl
 
 var _networkIsolation = empty(string(networkIsolation)) ? false : bool(networkIsolation)
 
+#disable-next-line BCP318
+var _hostedAgentContainerRegistryResourceId = deployContainerRegistry ? containerRegistry.id : hostedAgentContainerRegistryResourceId
+var _hostedAgentContainerRegistryEndpoint = deployContainerRegistry ? '${resourceNames.containerRegistryName}.${acrDnsSuffix}' : hostedAgentContainerRegistryEndpoint
+var _hostedAgentImageReference = '${_hostedAgentContainerRegistryEndpoint}/${hostedAgent.image}@${hostedAgent.version}'
+var _containerRegistryRepositoryReaderRoleId = 'b93aa761-3e63-49ed-ac28-beffa264f7ac'
+
 // -----------------------------------------------------------------------------
 // Public network access derivation (Gap 1, issue #58)
 // -----------------------------------------------------------------------------
@@ -1209,28 +1265,6 @@ var _useCAppAPIKey  = empty(string(useCAppAPIKey))? false : bool(useCAppAPIKey)
 //                       mechanism. Secrets remain on secure params / Key Vault.
 var _runtimeConfigIsAppConfig    = appRuntimeConfigurationMode == 'appConfig'
 var _runtimeConfigIsContainerEnv = appRuntimeConfigurationMode == 'containerEnv'
-
-// ----------------------------------------------------------------------
-// Hosted-agent Container App derivation (additive)
-// ----------------------------------------------------------------------
-// _deployHostedAgentApp is true only when deployHostedAgent=true AND the
-// Container Apps environment is being deployed. It never gates or replaces
-// any existing resource: containerAppsList, deployContainerApps, and all
-// data resources remain fully authoritative regardless of this flag.
-var _deployHostedAgentApp = deployHostedAgent && deployContainerEnv
-
-var _hostedAgentServiceName   = hostedAgentApp.?service_name   ?? 'hosted-agent'
-var _hostedAgentCanonicalName = hostedAgentApp.?canonical_name ?? 'HOSTED_AGENT'
-var _hostedAgentAppNameBase   = hostedAgentApp.?name ?? ''
-var _hostedAgentAppName       = !empty(_hostedAgentAppNameBase) ? _hostedAgentAppNameBase : '${const.abbrs.containers.containerApp}${resourceToken}-${_hostedAgentServiceName}'
-var _hostedAgentDefaultRoles  = [
-  'AppConfigurationDataReader'
-  'CognitiveServicesUser'
-  'CognitiveServicesOpenAIUser'
-  'AcrPull'
-  'KeyVaultSecretsUser'
-]
-var _hostedAgentRoles = hostedAgentApp.?roles ?? _hostedAgentDefaultRoles
 
 //////////////////////////////////////////////////////////////////////////
 // RESOURCES
@@ -1897,7 +1931,7 @@ var _dnsZonesList = _deployPrivateDnsZones ? concat(
   _byoZoneBlob          ? [] : [ { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${resourceNames.vnetName}-blob-std-link${_dnsZonesLinkSuffix}' } ],
   _byoZoneKeyVault      ? [] : [ { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${resourceNames.vnetName}-kv-link${_dnsZonesLinkSuffix}' } ],
   _byoZoneAppConfig     ? [] : [ { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${resourceNames.vnetName}-appcfg-link${_dnsZonesLinkSuffix}' } ],
-  ((deployContainerApps || _deployHostedAgentApp) && !_byoZoneContainerApps) ? [
+  (deployContainerApps && !_byoZoneContainerApps) ? [
     { dnsName: 'privatelink.${location}.azurecontainerapps.io', virtualNetworkLinkName: '${resourceNames.vnetName}-containerapps-link${_dnsZonesLinkSuffix}' }
   ] : [],
   (deployContainerRegistry && !_byoZoneAcr) ? [
@@ -2825,85 +2859,6 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
   }
 ]
 
-// Hosted-agent Container App (additive; gated on deployHostedAgent && deployContainerEnv)
-//////////////////////////////////////////////////////////////////////////
-
-// Hosted-agent User Managed Identity
-resource hostedAgentUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (_useUAI && _deployHostedAgentApp) {
-  name: '${const.abbrs.security.managedIdentity}${const.abbrs.containers.containerApp}${resourceToken}-${_hostedAgentServiceName}'
-  location: location
-}
-
-module hostedAgentContainerApp 'br/public:avm/res/app/container-app:0.18.1' = if (_deployHostedAgentApp) {
-  name: _hostedAgentAppName
-  params: {
-    name: _hostedAgentAppName
-    location: location
-    #disable-next-line BCP318
-    environmentResourceId: containerEnv.id
-    workloadProfileName: hostedAgentApp.?profile_name ?? 'Consumption'
-
-    ingressExternal: hostedAgentApp.?external ?? true
-    ingressTargetPort: int(hostedAgentApp.?target_port ?? 8080)
-    ingressTransport: 'auto'
-    ingressAllowInsecure: false
-
-    managedIdentities: {
-      systemAssigned: _useUAI ? false : true
-      #disable-next-line BCP318
-      userAssignedResourceIds: _useUAI ? [hostedAgentUAI.id] : []
-    }
-
-    scaleSettings: {
-      minReplicas: hostedAgentApp.?min_replicas ?? 1
-      maxReplicas: hostedAgentApp.?max_replicas ?? 1
-    }
-
-    containers: [
-      {
-        name: _hostedAgentServiceName
-        image: hostedAgentApp.?image ?? _containerDummyImageName
-        resources: {
-          cpu: hostedAgentApp.?cpu ?? '0.5'
-          memory: hostedAgentApp.?memory ?? '1.0Gi'
-        }
-        env: concat(
-          _runtimeConfigIsAppConfig ? [
-            {
-              name: 'APP_CONFIG_ENDPOINT'
-              value: 'https://${resourceNames.appConfigName}.azconfig.io'
-            }
-          ] : [],
-          [
-            {
-              name: 'AZURE_TENANT_ID'
-              value: subscription().tenantId
-            }
-          ],
-          _useUAI ? [
-            {
-              name: 'AZURE_CLIENT_ID'
-              #disable-next-line BCP318
-              value: hostedAgentUAI.properties.clientId
-            }
-          ] : [],
-          _runtimeConfigIsContainerEnv ? _containerRuntimeEnvWithAdditional : []
-        )
-      }
-    ]
-
-    tags: union(_tags, {
-      'azd-service-name': _hostedAgentServiceName
-    })
-  }
-  dependsOn: [
-    containerEnv!
-    privateDnsZones
-    privateEndpoints
-    firewall
-  ]
-}
-
 // Cosmos DB Account and Database
 //////////////////////////////////////////////////////////////////////////
 
@@ -3345,20 +3300,30 @@ var _executorRoles = concat(
       principalType: principalType
     }
   ] : [],
-  deployAiFoundry ? [
-    {
-      principalId: principalId
-      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesOpenAIUser.guid)
-      resourceId: aiFoundryAccountResourceId
-      principalType: principalType
-    }
-    {
-      principalId: principalId
-      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
-      resourceId: aiFoundryAccountResourceId
-      principalType: principalType
-    }
-  ] : [],
+  deployAiFoundry ? concat(
+    [
+      {
+        principalId: principalId
+        roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesOpenAIUser.guid)
+        resourceId: aiFoundryAccountResourceId
+        principalType: principalType
+      }
+      {
+        principalId: principalId
+        roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
+        resourceId: aiFoundryAccountResourceId
+        principalType: principalType
+      }
+    ],
+    deployHostedAgent ? [
+      {
+        principalId: principalId
+        roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AzureAIProjectManager.guid)
+        resourceId: aiFoundryProjectResourceId
+        principalType: principalType
+      }
+    ] : []
+  ) : [],
   deploySpeechService ? [
     {
       principalId: principalId
@@ -3568,10 +3533,21 @@ var _crossServiceRoleAssignments = concat(
       resourceId: storageAccount.outputs.resourceId
       principalType: 'ServicePrincipal'
     }
+  ] : [],
+  // Container Registry Repository Reader -> AI Foundry project identity.
+  // The dedicated hosted-agent identity and its runtime roles are created by
+  // `azd deploy`; the landing zone must not invent or replace that identity.
+  (deployHostedAgent && deployAiFoundry) ? [
+    {
+      principalId: aiFoundry!.outputs.aiProjectPrincipalId
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', _containerRegistryRepositoryReaderRoleId)
+      resourceId: _hostedAgentContainerRegistryResourceId
+      principalType: 'ServicePrincipal'
+    }
   ] : []
 )
 
-module assignCrossServiceRoles 'modules/security/resource-role-assignment.bicep' = if ((deployAiFoundry && deploySearchService) || (deployStorageAccount && deploySearchService) || (deployAiFoundry && deployStorageAccount)) {
+module assignCrossServiceRoles 'modules/security/resource-role-assignment.bicep' = if ((deployAiFoundry && deploySearchService) || (deployStorageAccount && deploySearchService) || (deployAiFoundry && deployStorageAccount) || (deployHostedAgent && deployAiFoundry)) {
   name: 'assignCrossServiceRoles'
   params: {
     name: 'assignCrossServiceRoles'
@@ -3602,67 +3578,6 @@ module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/securi
 // when aiSearchConfiguration is provided. Creating it again here causes a
 // RoleAssignmentExists conflict because both produce the same deterministic GUID.
 // Intentionally omitted.
-
-// Hosted-agent role assignments (additive, gated on _deployHostedAgentApp)
-// ─────────────────────────────────────────────────────────────────────────
-// Least-privilege RBAC for the hosted-agent identity. The consumer may narrow
-// or extend the set via hostedAgentApp.roles.
-var _hostedAgentPrincipalId = _deployHostedAgentApp
-  #disable-next-line BCP318
-  ? (_useUAI ? hostedAgentUAI.properties.principalId : hostedAgentContainerApp.outputs.systemAssignedMIPrincipalId!)
-  : ''
-
-module assignHostedAgentRoles 'modules/security/resource-role-assignment.bicep' = if (_deployHostedAgentApp) {
-  name: 'assignHostedAgentRoles'
-  params: {
-    name: 'assignHostedAgentRoles'
-    roleAssignments: concat(
-      (deployKeyVault && contains(_hostedAgentRoles, const.roles.KeyVaultSecretsUser.key)) ? [
-        {
-          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.KeyVaultSecretsUser.guid)
-          principalId: _hostedAgentPrincipalId
-          #disable-next-line BCP318
-          resourceId: keyVault.id
-          principalType: 'ServicePrincipal'
-        }
-      ] : [],
-      (deployAppConfig && _runtimeConfigIsAppConfig && contains(_hostedAgentRoles, const.roles.AppConfigurationDataReader.key)) ? [
-        {
-          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AppConfigurationDataReader.guid)
-          principalId: _hostedAgentPrincipalId
-          #disable-next-line BCP318
-          resourceId: appConfig.id
-          principalType: 'ServicePrincipal'
-        }
-      ] : [],
-      (deployAiFoundry && contains(_hostedAgentRoles, const.roles.CognitiveServicesUser.key)) ? [
-        {
-          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesUser.guid)
-          principalId: _hostedAgentPrincipalId
-          resourceId: aiFoundryAccountResourceId
-          principalType: 'ServicePrincipal'
-        }
-      ] : [],
-      (deployAiFoundry && contains(_hostedAgentRoles, const.roles.CognitiveServicesOpenAIUser.key)) ? [
-        {
-          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.CognitiveServicesOpenAIUser.guid)
-          principalId: _hostedAgentPrincipalId
-          resourceId: aiFoundryAccountResourceId
-          principalType: 'ServicePrincipal'
-        }
-      ] : [],
-      (deployContainerRegistry && contains(_hostedAgentRoles, const.roles.AcrPull.key)) ? [
-        {
-          roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AcrPull.guid)
-          principalId: _hostedAgentPrincipalId
-          #disable-next-line BCP318
-          resourceId: containerRegistry.id
-          principalType: 'ServicePrincipal'
-        }
-      ] : []
-    )
-  }
-}
 
 //////////////////////////////////////////////////////////////////////////
 // App Configuration Settings Service
@@ -3945,8 +3860,6 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'DEPLOY_CONTAINER_APPS', value: string(deployContainerApps), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOY_CONTAINER_REGISTRY', value: string(deployContainerRegistry), label: appConfigLabel, contentType: 'text/plain' }
       { name: 'DEPLOY_CONTAINER_ENV', value: string(deployContainerEnv), label: appConfigLabel, contentType: 'text/plain' }
-      // ── Hosted-agent flag ─────────────────────────────────────────────────
-      { name: 'DEPLOY_HOSTED_AGENT', value: string(deployHostedAgent), label: appConfigLabel, contentType: 'text/plain' }
 
       // ── Endpoints / URIs ──────────────────────────────────────────────────
       #disable-next-line BCP318
@@ -3961,11 +3874,6 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       { name: 'KNOWLEDGE_BASE_ENDPOINT', value: retrievalBackend == 'foundry_iq' && deploySearchService ? searchService.outputs.endpoint : '', label: appConfigLabel, contentType: 'text/plain' }
       #disable-next-line BCP318
       { name: 'AZURE_SPEECH_ENDPOINT', value: deploySpeechService ? speechService.outputs.endpoint : '', label: appConfigLabel, contentType: 'text/plain' }
-      // Hosted-agent Container App endpoint (empty when not deployed)
-      #disable-next-line BCP318
-      { name: '${_hostedAgentCanonicalName}_ENDPOINT', value: _deployHostedAgentApp ? 'https://${hostedAgentContainerApp.outputs.fqdn}' : '', label: appConfigLabel, contentType: 'text/plain' }
-      #disable-next-line BCP318
-      { name: '${_hostedAgentCanonicalName}_NAME', value: _deployHostedAgentApp ? hostedAgentContainerApp.outputs.name : '', label: appConfigLabel, contentType: 'text/plain' }
 
       // ── Connections ───────────────────────────────────────────────────────
       #disable-next-line BCP318
@@ -4091,11 +3999,39 @@ output OBSERVABILITY_MIXED_WORKSPACES_ALLOWED bool = allowMixedObservabilityWork
 #disable-next-line BCP318
 output CONTAINER_APP_INTERNAL_FQDN string = (deployContainerApps && length(containerAppsList) > 0) ? containerApps[_publicIngressBackendIndex].outputs.fqdn : ''
 
-// ──────────────────────────────────────────────────────────────────────
-// Hosted-agent outputs
-// ──────────────────────────────────────────────────────────────────────
+// Microsoft Foundry hosted-agent deployment handoff. The actual agent version,
+// dedicated agent identity, and invocation endpoint are data-plane resources
+// created by the downstream `azure.ai.agent` service during `azd deploy`.
 output DEPLOY_HOSTED_AGENT bool = deployHostedAgent
+output AZURE_AI_PROJECT_RESOURCE_ID string = deployHostedAgent ? aiFoundryProjectResourceId : ''
+output AZURE_AI_PROJECT_ENDPOINT string = deployHostedAgent ? aiFoundryProjectEndpoint : ''
+output AZURE_CONTAINER_REGISTRY_RESOURCE_ID string = deployHostedAgent ? _hostedAgentContainerRegistryResourceId : ''
+output AZURE_CONTAINER_REGISTRY_ENDPOINT string = deployHostedAgent ? _hostedAgentContainerRegistryEndpoint : ''
 #disable-next-line BCP318
-output HOSTED_AGENT_CONTAINER_APP_FQDN string = _deployHostedAgentApp ? hostedAgentContainerApp.outputs.fqdn : ''
-#disable-next-line BCP318
-output HOSTED_AGENT_CONTAINER_APP_NAME string = _deployHostedAgentApp ? hostedAgentContainerApp.outputs.name : ''
+output HOSTED_AGENT_DEPLOYMENT object = {
+  enabled: deployHostedAgent
+  agent: deployHostedAgent ? {
+    name: hostedAgent.name
+    image: _hostedAgentImageReference
+    imageVersion: hostedAgent.version
+    startupCommand: hostedAgent.startupCommand
+    runtime: hostedAgent.runtime
+    protocols: hostedAgent.protocols
+  } : null
+  foundry: deployHostedAgent ? {
+    projectResourceId: aiFoundryProjectResourceId
+    projectEndpoint: aiFoundryProjectEndpoint
+    projectPrincipalId: aiFoundry!.outputs.aiProjectPrincipalId
+    agentSubnetResourceId: _agentSubnetId
+  } : null
+  containerRegistry: deployHostedAgent ? {
+    resourceId: _hostedAgentContainerRegistryResourceId
+    endpoint: _hostedAgentContainerRegistryEndpoint
+  } : null
+  privateBuild: {
+    required: deployHostedAgent && _networkIsolation
+    subnetResourceId: (deployHostedAgent && _networkIsolation) ? '${virtualNetworkResourceId}/subnets/${devopsBuildAgentsSubnetName}' : ''
+    jumpboxResourceId: (deployHostedAgent && _networkIsolation) ? (_deployJumpbox ? testVm!.outputs.resourceId : (existingJumpboxResourceId ?? '')) : ''
+    acrTaskAgentPoolName: (deployHostedAgent && _deployAcrTaskAgentPool) ? acrTaskAgentPoolName : ''
+  }
+}

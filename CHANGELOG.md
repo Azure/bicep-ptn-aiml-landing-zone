@@ -7,26 +7,10 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ### Added
 
-- **Generic hosted-agent Container App (`deployHostedAgent`, `hostedAgentApp`).** When `deployHostedAgent=true`, a standalone hosted-agent Container App is provisioned in the Container Apps environment. This is purely additive: existing `containerAppsList` apps, `deployContainerApps`, Cosmos DB, and all other data resources are completely unaffected. Both parameters default to `false`/`{}` so all existing deployments are unchanged.
-
-  **New parameters:**
-  - `deployHostedAgent bool = false` — provisions the hosted-agent Container App. Purely additive.
-  - `hostedAgentApp object = {}` — configures the hosted-agent Container App (image, port, profile, replicas, roles, etc.). All fields optional; unset fields fall back to safe defaults (placeholder image, port 8080, Consumption profile, 1 replica, 0.5 CPU, 1.0 Gi, RBAC: `AppConfigurationDataReader`, `CognitiveServicesUser`, `CognitiveServicesOpenAIUser`, `AcrPull`, `KeyVaultSecretsUser`).
-
-  **New `main.parameters.json` substitution variable:** `DEPLOY_HOSTED_AGENT` (default `false`).
-
-  **New outputs:** `DEPLOY_HOSTED_AGENT bool`, `HOSTED_AGENT_CONTAINER_APP_FQDN string`, `HOSTED_AGENT_CONTAINER_APP_NAME string`.
-
-  **App Configuration:** `DEPLOY_HOSTED_AGENT` is stamped as a feature flag. When deployed, `<canonical_name>_ENDPOINT` and `<canonical_name>_NAME` are also stamped (default canonical name: `HOSTED_AGENT`).
-
-  **Network isolation:** the hosted-agent Container App uses the same private-endpoint and firewall dependency chain as classic Container Apps. The Container Apps private DNS zone is provisioned when `deployContainerApps` or `deployHostedAgent` is enabled.
-
-  **Identity:** the hosted-agent gets its own system-assigned (or user-assigned when `useUAI=true`) managed identity with the minimal RBAC set required for AI Foundry interaction.
-
-  See [README — Hosted-agent support](README.md#hosted-agent-support) for usage guidance.
-
-
-### Added
+- **Accelerator-neutral Microsoft Foundry hosted-agent prerequisites (`deployHostedAgent`).** The new opt-in flag defaults to `false` and leaves the complete pre-existing resource graph unchanged. Enabling it adds only the generic Foundry project and Container Registry RBAC needed for a downstream `azure.ai.agent` deployment, plus typed image repository, immutable digest, startup command, CPU, memory, protocol, existing-registry, Foundry, network, and private-build handoff values. Container Apps, Cosmos DB, Search, Storage, App Configuration, and all workload lists remain governed only by their existing parameters.
+- **Hosted-agent deployment outputs.** Exact Foundry project and selected-registry resource IDs/endpoints are exposed with a consolidated `HOSTED_AGENT_DEPLOYMENT` object. The landing zone intentionally does not create a placeholder ARM resource: the downstream accelerator's `azd deploy` creates the immutable agent version, dedicated agent identity, registry pull grant, and invocation endpoint.
+- **Hosted-agent contract validation.** Preflight now requires Foundry and registry prerequisites, rejects mutable image references, and explains the VNet-internal build requirement for private ACR. An offline compiled-resource fixture proves disabled graph parity and limits enabled mutations to the two centralized RBAC payloads.
+- This backward-compatible capability is a **minor** release change. The Portal experience and Terraform landing-zone implementation require follow-up parity review.
 
 - **Workload App Configuration passthrough (`additionalAppConfigurationSettings`).** Solution accelerators can now publish their own runtime key-values into the App Configuration store without adding workload-specific parameters to this template. Each entry takes `name`, `value`, and optional `label` and `contentType`. The landing zone stamps the entries verbatim. Values are plaintext (do not pass secrets), each `name`+`label` must be unique, and a passthrough entry that collides with a built-in setting wins so accelerators can override a stamped default. When the consumer opts out of App Configuration and uses the `containerEnv` runtime mode (Issue #89), the same entries are injected into every Container App as env vars (name/value only, labels ignored), so the passthrough works in both runtime modes. The parameter defaults to an empty array, so existing deployments produce byte-identical App Configuration and container env output. This keeps the landing zone workload-agnostic: GPT-RAG and other accelerators publish their Foundry IQ and other runtime keys through the passthrough instead of the template growing accelerator-specific parameters. See [Workload App Configuration passthrough](README.md#workload-app-configuration-passthrough).
 
