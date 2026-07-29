@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Compiles main.bicep and compares its symbolic ARM resource graph with the
-    merge-base fixture. All pre-existing resources must remain byte-stable.
+    merge-base fixture. All pre-existing deployment semantics must remain stable.
     Only the two centralized RBAC deployment payloads may change, and both
     changes must be gated by deployHostedAgent.
 #>
@@ -162,7 +162,7 @@ try {
     }
     if (-not ($failures | Where-Object { $_ -like "Pre-existing resource '*" })) {
         $stableResourceCount = @($fixture.resourceHashes.PSObject.Properties).Count
-        Add-Pass "All $stableResourceCount non-hosted resource definitions are byte-stable."
+        Add-Pass "All $stableResourceCount non-hosted resource definitions match the merge-base contract."
     }
 
     $executorJson = $template.resources.assignExecutorRoles | ConvertTo-Json -Depth 100 -Compress
