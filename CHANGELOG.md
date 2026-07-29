@@ -7,33 +7,23 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ### Added
 
-- **Conditional hosted-agent topology (`deployHostedAgent`, `deployAdminPanel`).** Three explicit deployment modes are now supported via two boolean flags that both default to `false` so all existing deployments are unaffected.
-
-  | Mode | `deployHostedAgent` | `deployAdminPanel` | Behavior |
-  |---|---|---|---|
-  | **Classic** (default) | `false` | `false` | Classic topology: `containerAppsList` Container Apps deployed (e.g., GPT-RAG orchestrator), Cosmos DB for conversation history. Unchanged from prior releases. |
-  | **Hosted / no-panel** | `true` | `false` | AI Foundry hosted agents handle orchestration. `containerAppsList` is **not** deployed. No orchestrator ACA. Set `deployCosmosDb=false` or provide an empty `databaseContainersList` to omit conversation-history storage (not required in this mode). |
-  | **Hosted / panel** | `true` | `true` | Same as hosted/no-panel, plus an administrative panel Container App is provisioned. Configured via the `adminPanelApp` object parameter. |
-
-  **Rollback**: setting `deployHostedAgent=false` (or leaving it at the default) re-enables the classic topology exactly as before — no state mutation required.
+- **Generic hosted-agent Container App (`deployHostedAgent`, `hostedAgentApp`).** When `deployHostedAgent=true`, a standalone hosted-agent Container App is provisioned in the Container Apps environment. This is purely additive: existing `containerAppsList` apps, `deployContainerApps`, Cosmos DB, and all other data resources are completely unaffected. Both parameters default to `false`/`{}` so all existing deployments are unchanged.
 
   **New parameters:**
-  - `deployHostedAgent bool = false` — activates the hosted-agent topology.
-  - `deployAdminPanel bool = false` — adds the optional administrative panel (only effective when `deployHostedAgent=true`).
-  - `adminPanelApp object = {}` — configures the admin panel Container App (port, profile, replicas, roles, etc.). Accepts the same fields as a `containerAppsList` entry; unset fields fall back to safe defaults (port 8080, Consumption profile, 1 replica, 0.5 CPU, 1.0 Gi, RBAC: `AppConfigurationDataReader`, `CognitiveServicesUser`, `CognitiveServicesOpenAIUser`, `AcrPull`, `KeyVaultSecretsUser`).
+  - `deployHostedAgent bool = false` — provisions the hosted-agent Container App. Purely additive.
+  - `hostedAgentApp object = {}` — configures the hosted-agent Container App (image, port, profile, replicas, roles, etc.). All fields optional; unset fields fall back to safe defaults (placeholder image, port 8080, Consumption profile, 1 replica, 0.5 CPU, 1.0 Gi, RBAC: `AppConfigurationDataReader`, `CognitiveServicesUser`, `CognitiveServicesOpenAIUser`, `AcrPull`, `KeyVaultSecretsUser`).
 
-  **New `main.parameters.json` substitution variables:** `DEPLOY_HOSTED_AGENT` (default `false`), `DEPLOY_ADMIN_PANEL` (default `false`).
+  **New `main.parameters.json` substitution variable:** `DEPLOY_HOSTED_AGENT` (default `false`).
 
-  **New outputs:** `DEPLOY_HOSTED_AGENT bool`, `DEPLOY_ADMIN_PANEL bool`, `ADMIN_PANEL_CONTAINER_APP_FQDN string`, `ADMIN_PANEL_CONTAINER_APP_NAME string`.
+  **New outputs:** `DEPLOY_HOSTED_AGENT bool`, `HOSTED_AGENT_CONTAINER_APP_FQDN string`, `HOSTED_AGENT_CONTAINER_APP_NAME string`.
 
-  **App Configuration:** `DEPLOY_HOSTED_AGENT` and `DEPLOY_ADMIN_PANEL` feature flags are now stamped in the App Configuration store. When `deployAdminPanel=true` the admin panel endpoint and name are stamped as `<canonical_name>_ENDPOINT` and `<canonical_name>_NAME` (default canonical name: `ADMIN_PANEL_APP`).
+  **App Configuration:** `DEPLOY_HOSTED_AGENT` is stamped as a feature flag. When deployed, `<canonical_name>_ENDPOINT` and `<canonical_name>_NAME` are also stamped (default canonical name: `HOSTED_AGENT`).
 
-  **Network isolation:** the admin panel Container App respects the same private-endpoint and firewall dependency chain as classic Container Apps, so Zero Trust deployments work without additional configuration.
+  **Network isolation:** the hosted-agent Container App uses the same private-endpoint and firewall dependency chain as classic Container Apps. The Container Apps private DNS zone is provisioned when `deployContainerApps` or `deployHostedAgent` is enabled.
 
-  **Least-privilege identity:** the admin panel gets its own system-assigned (or user-assigned when `useUAI=true`) managed identity with the minimal RBAC set required for AI Foundry hosted-agent interaction. No data-plane Cosmos roles are assigned (not needed in hosted mode).
+  **Identity:** the hosted-agent gets its own system-assigned (or user-assigned when `useUAI=true`) managed identity with the minimal RBAC set required for AI Foundry interaction.
 
-  See [README — Hosted-agent topology](README.md#hosted-agent-topology) for usage guidance. Closes Azure/GPT-RAG#594.
-
+  See [README — Hosted-agent support](README.md#hosted-agent-support) for usage guidance.
 
 
 ### Added

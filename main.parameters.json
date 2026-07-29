@@ -74,7 +74,6 @@
     "deployMcp":                            { "value": "${DEPLOY_MCP=true}" },
     "deployGroundingWithBing":              { "value": "${DEPLOY_GROUNDING_WITH_BING=false}" },
     "deployHostedAgent":                    { "value": "${DEPLOY_HOSTED_AGENT=false}" },
-    "deployAdminPanel":                     { "value": "${DEPLOY_ADMIN_PANEL=false}" },
     "deployKeyVault":                       { "value": "${DEPLOY_KEY_VAULT=true}" },
     "deployVmKeyVault":                     { "value": "${DEPLOY_VM_KEY_VAULT=false}" },
     "deployLogAnalytics":                   { "value": "${DEPLOY_LOG_ANALYTICS=true}" },
