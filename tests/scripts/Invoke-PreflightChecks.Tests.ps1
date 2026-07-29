@@ -225,12 +225,31 @@ Test-HostedAgentConfiguration -P @{
         name           = 'sample-agent'
         image          = 'agents/sample'
         version        = "sha256:$('a' * 64)"
-        startupCommand = 'python main.py'
+        startupCommand = ''
         runtime        = [pscustomobject]@{ cpu = '1'; memory = '1Gi' }
         protocols      = @([pscustomobject]@{ protocol = 'responses'; version = '2.0.0' })
     }
 }
 Assert-True 'Valid hosted-agent contract has no failures' (@($script:Findings | Where-Object Severity -eq 'FAIL').Count -eq 0)
+
+# --------------------------------------------------------------------------
+Write-Host 'Hosted agent: runtime resources follow the current Foundry contract' -ForegroundColor Cyan
+Reset-Findings
+Test-HostedAgentConfiguration -P @{
+    deployHostedAgent       = $true
+    deployAiFoundry         = $true
+    deployContainerRegistry = $true
+    hostedAgent             = [pscustomobject]@{
+        name           = 'sample-agent'
+        image          = 'agents/sample'
+        version        = "sha256:$('c' * 64)"
+        startupCommand = ''
+        runtime        = [pscustomobject]@{ cpu = '500m'; memory = '512Mi' }
+        protocols      = @([pscustomobject]@{ protocol = 'responses'; version = '2.0.0' })
+    }
+}
+Assert-True 'FAIL HOSTED_AGENT_CPU_INVALID raised' (Test-FindingPresent 'HOSTED_AGENT_CPU_INVALID')
+Assert-True 'FAIL HOSTED_AGENT_MEMORY_INVALID raised' (Test-FindingPresent 'HOSTED_AGENT_MEMORY_INVALID')
 
 # --------------------------------------------------------------------------
 Write-Host 'Hosted agent: immutable image digest is required' -ForegroundColor Cyan

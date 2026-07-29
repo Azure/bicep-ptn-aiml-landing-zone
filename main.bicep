@@ -389,7 +389,7 @@ param deployAcrTaskAgentPool bool = true
 @description('Enable accelerator-neutral prerequisites and deployment contracts for a Microsoft Foundry hosted agent. The landing zone does not create the data-plane agent version and never changes Container Apps or data resources. Defaults to false.')
 param deployHostedAgent bool = false
 
-@description('Typed hosted-agent deployment handoff consumed by a downstream `azure.ai.agent` service. `image` is the repository path within the selected registry, `version` must be an immutable OCI digest (`sha256:...`), `startupCommand` maps to the official azure.yaml field, and `runtime` maps to `container.resources`. Values are validated only when deployHostedAgent is true.')
+@description('Typed hosted-agent deployment handoff consumed by a downstream `azure.ai.agent` service. `image` is the repository path within the selected registry, `version` must be an immutable OCI digest (`sha256:...`), optional `startupCommand` maps to the official azure.yaml field, and `runtime` maps to `container.resources`. Values are validated only when deployHostedAgent is true.')
 param hostedAgent hostedAgentConfigurationType = {
   name: ''
   image: ''
@@ -501,10 +501,10 @@ type hostedAgentProtocolType = {
 @export()
 @description('Container CPU and memory settings passed to `azure.ai.agent` as `container.resources`.')
 type hostedAgentRuntimeType = {
-  @description('CPU allocation such as `1` or `500m`.')
+  @description('CPU allocation from `0.25` through `4.0`, for example `0.5` or `1`.')
   cpu: string
 
-  @description('Memory allocation such as `1Gi` or `512Mi`.')
+  @description('Memory allocation from `0.5Gi` through `8Gi`.')
   memory: string
 }
 
@@ -520,7 +520,7 @@ type hostedAgentConfigurationType = {
   @description('Immutable OCI image digest in `sha256:<64 hex characters>` form.')
   version: string
 
-  @description('Command that starts the agent server. Maps to `startupCommand` in the official `azure.ai.agent` service contract.')
+  @description('Optional command that starts the agent server. Maps to `startupCommand` in the official `azure.ai.agent` service contract.')
   startupCommand: string
 
   @description('Hosted-agent container resource settings.')

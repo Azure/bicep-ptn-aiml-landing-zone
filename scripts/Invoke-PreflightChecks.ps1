@@ -439,7 +439,6 @@ function Test-HostedAgentConfiguration {
     foreach ($required in @(
             @{ Name = 'name'; Value = $name },
             @{ Name = 'image'; Value = $image },
-            @{ Name = 'startupCommand'; Value = $startupCommand },
             @{ Name = 'runtime.cpu'; Value = $cpu },
             @{ Name = 'runtime.memory'; Value = $memory }
         )) {
@@ -453,6 +452,33 @@ function Test-HostedAgentConfiguration {
         Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE' `
             -Message 'hostedAgent.version must be an immutable OCI digest in sha256:<64 hex characters> form.' `
             -Hint 'Build and push the image first, then pin the digest rather than using a mutable tag.'
+    }
+
+    [double]$cpuValue = 0
+    $cpuIsValid = [double]::TryParse(
+        $cpu,
+        [System.Globalization.NumberStyles]::Float,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [ref]$cpuValue
+    ) -and $cpuValue -ge 0.25 -and $cpuValue -le 4.0
+    if (-not $cpuIsValid) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_CPU_INVALID' `
+            -Message 'hostedAgent.runtime.cpu must be a number from 0.25 through 4.0.' `
+            -Hint 'Use a value supported by the current azure.ai.agent container.resources contract, for example 0.5 or 1.'
+    }
+
+    $memoryMatch = [regex]::Match($memory, '^(?<value>\d+(?:\.\d+)?)Gi$')
+    [double]$memoryValue = 0
+    $memoryIsValid = $memoryMatch.Success -and [double]::TryParse(
+        $memoryMatch.Groups['value'].Value,
+        [System.Globalization.NumberStyles]::Float,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [ref]$memoryValue
+    ) -and $memoryValue -ge 0.5 -and $memoryValue -le 8.0
+    if (-not $memoryIsValid) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_MEMORY_INVALID' `
+            -Message 'hostedAgent.runtime.memory must use Gi units with a value from 0.5Gi through 8Gi.' `
+            -Hint 'Use a value supported by the current azure.ai.agent container.resources contract, for example 0.5Gi or 1Gi.'
     }
 
     $protocols = @($agent.protocols)

@@ -276,8 +276,8 @@ and [pre-built image workflow](https://learn.microsoft.com/azure/foundry/agents/
 | `hostedAgent.name` | empty | Stable hosted-agent name; downstream deploys create immutable versions under this name. |
 | `hostedAgent.image` | empty | Repository path inside the selected ACR, without tag or digest. |
 | `hostedAgent.version` | empty | Required immutable OCI digest in `sha256:<64 hex>` form. |
-| `hostedAgent.startupCommand` | empty | Container startup command, mapped to `startupCommand` in `azure.ai.agent`. |
-| `hostedAgent.runtime` | `1` CPU, `1Gi` | CPU and memory mapped to `container.resources`. |
+| `hostedAgent.startupCommand` | empty | Optional container startup command, mapped to `startupCommand` in `azure.ai.agent`. |
+| `hostedAgent.runtime` | `1` CPU, `1Gi` | CPU (`0.25`–`4.0`) and memory (`0.5Gi`–`8Gi`) mapped to `container.resources`. |
 | `hostedAgent.protocols` | Responses `2.0.0` | Typed `responses`, `invocations`, `invocations_ws`, or `a2a` contracts. |
 | `hostedAgentContainerRegistryResourceId` | empty | Existing ACR resource ID when `deployContainerRegistry=false`. |
 | `hostedAgentContainerRegistryEndpoint` | empty | Existing ACR login endpoint when `deployContainerRegistry=false`. |
