@@ -401,6 +401,111 @@ function Test-Topology {
     }
 }
 
+function Test-HostedAgentConfiguration {
+    param([hashtable]$P)
+
+    if (-not (Resolve-DeployFlag -P $P -Key 'deployHostedAgent' -Default $false)) { return }
+
+    $deployAiFoundry = Resolve-DeployFlag -P $P -Key 'deployAiFoundry' -Default $true
+    if (-not $deployAiFoundry) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_FOUNDRY_REQUIRED' `
+            -Message 'deployHostedAgent=true requires deployAiFoundry=true.' `
+            -Hint 'Enable the shared Foundry account/project or disable hosted-agent prerequisites.'
+    }
+
+    $deployRegistry = Resolve-DeployFlag -P $P -Key 'deployContainerRegistry' -Default $true
+    $existingRegistryId = (Get-StringValue $P['hostedAgentContainerRegistryResourceId']).Trim()
+    $existingRegistryEndpoint = (Get-StringValue $P['hostedAgentContainerRegistryEndpoint']).Trim()
+    if (-not $deployRegistry -and ([string]::IsNullOrWhiteSpace($existingRegistryId) -or [string]::IsNullOrWhiteSpace($existingRegistryEndpoint))) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_REGISTRY_REQUIRED' `
+            -Message 'deployHostedAgent=true requires the landing-zone registry or both existing registry inputs.' `
+            -Hint 'Enable DEPLOY_CONTAINER_REGISTRY, or set HOSTED_AGENT_CONTAINER_REGISTRY_RESOURCE_ID and HOSTED_AGENT_CONTAINER_REGISTRY_ENDPOINT.'
+    }
+
+    $agent = $P['hostedAgent']
+    if ($null -eq $agent) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_CONFIG_REQUIRED' -Message 'deployHostedAgent=true requires the typed hostedAgent object.'
+        return
+    }
+
+    if (@($agent.PSObject.Properties.Name) -contains 'roles') {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_ROLES_UNSUPPORTED' `
+            -Message 'hostedAgent.roles is not supported because the hosted-agent identity is created by downstream azd deploy.' `
+            -Hint 'After deployment, use the emitted agent identity and explicit Azure role definition IDs to assign least-privilege access to external resources.'
+    }
+
+    $envValues = Get-AzdEnvValues
+    $name = (Get-StringValue (Expand-ParamValue -Raw $agent.name -EnvValues $envValues)).Trim()
+    $image = (Get-StringValue (Expand-ParamValue -Raw $agent.image -EnvValues $envValues)).Trim()
+    $version = (Get-StringValue (Expand-ParamValue -Raw $agent.version -EnvValues $envValues)).Trim()
+    $startupCommand = (Get-StringValue (Expand-ParamValue -Raw $agent.startupCommand -EnvValues $envValues)).Trim()
+    $cpu = (Get-StringValue (Expand-ParamValue -Raw $agent.runtime.cpu -EnvValues $envValues)).Trim()
+    $memory = (Get-StringValue (Expand-ParamValue -Raw $agent.runtime.memory -EnvValues $envValues)).Trim()
+
+    foreach ($required in @(
+            @{ Name = 'name'; Value = $name },
+            @{ Name = 'image'; Value = $image },
+            @{ Name = 'runtime.cpu'; Value = $cpu },
+            @{ Name = 'runtime.memory'; Value = $memory }
+        )) {
+        if ([string]::IsNullOrWhiteSpace($required.Value)) {
+            Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_CONFIG_REQUIRED' `
+                -Message "hostedAgent.$($required.Name) is required when deployHostedAgent=true."
+        }
+    }
+
+    if ($version -notmatch '^sha256:[0-9a-fA-F]{64}$') {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE' `
+            -Message 'hostedAgent.version must be an immutable OCI digest in sha256:<64 hex characters> form.' `
+            -Hint 'Build and push the image first, then pin the digest rather than using a mutable tag.'
+    }
+
+    [double]$cpuValue = 0
+    $cpuIsValid = [double]::TryParse(
+        $cpu,
+        [System.Globalization.NumberStyles]::Float,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [ref]$cpuValue
+    ) -and $cpuValue -ge 0.25 -and $cpuValue -le 4.0
+    if (-not $cpuIsValid) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_CPU_INVALID' `
+            -Message 'hostedAgent.runtime.cpu must be a number from 0.25 through 4.0.' `
+            -Hint 'Use a value supported by the current azure.ai.agent container.resources contract, for example 0.5 or 1.'
+    }
+
+    $memoryMatch = [regex]::Match($memory, '^(?<value>\d+(?:\.\d+)?)Gi$')
+    [double]$memoryValue = 0
+    $memoryIsValid = $memoryMatch.Success -and [double]::TryParse(
+        $memoryMatch.Groups['value'].Value,
+        [System.Globalization.NumberStyles]::Float,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [ref]$memoryValue
+    ) -and $memoryValue -ge 0.5 -and $memoryValue -le 8.0
+    if (-not $memoryIsValid) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_MEMORY_INVALID' `
+            -Message 'hostedAgent.runtime.memory must use Gi units with a value from 0.5Gi through 8Gi.' `
+            -Hint 'Use a value supported by the current azure.ai.agent container.resources contract, for example 0.5Gi or 1Gi.'
+    }
+
+    $protocols = @($agent.protocols)
+    if ($protocols.Count -eq 0) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_PROTOCOL_REQUIRED' `
+            -Message 'hostedAgent.protocols must contain at least one supported invocation protocol.'
+    }
+    foreach ($protocol in $protocols) {
+        $protocolName = (Get-StringValue (Expand-ParamValue -Raw $protocol.protocol -EnvValues $envValues)).Trim()
+        if ($protocolName -notin @('responses', 'invocations', 'invocations_ws', 'a2a')) {
+            Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_PROTOCOL_INVALID' `
+                -Message "Hosted-agent protocol '$protocolName' is not supported by the current Microsoft Foundry contract."
+        }
+    }
+
+    if ((ConvertTo-Bool $P['networkIsolation'])) {
+        Add-Finding -Severity INFO -Code 'HOSTED_AGENT_PRIVATE_BUILD_REQUIRED' `
+            -Message 'The hosted-agent registry is private. Build and push from a VNet-connected runner/agent or the jumpbox fallback; shared ACR Tasks do not bypass private endpoint access.'
+    }
+}
+
 function Test-AllowedIpRanges {
     param([hashtable]$P)
     $list = Get-ArrayValue $P['allowedIpRanges']
@@ -1640,6 +1745,7 @@ if ($effective.Count -eq 0) {
 }
 
 Test-Topology -P $effective
+Test-HostedAgentConfiguration -P $effective
 Test-AllowedIpRanges -P $effective
 Test-LocalCidrSanity -P $effective
 Test-FoundryIqConfiguration -P $effective

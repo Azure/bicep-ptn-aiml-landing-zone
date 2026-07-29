@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.  
 This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Accelerator-neutral Microsoft Foundry hosted-agent prerequisites (`deployHostedAgent`).** The new opt-in flag defaults to `false` and leaves the complete pre-existing resource graph unchanged. Enabling it adds only the generic Foundry project and Container Registry RBAC needed for a downstream `azure.ai.agent` deployment, plus typed image repository, immutable digest, startup command, CPU, memory, protocol, existing-registry, Foundry, network, and private-build handoff values. Container Apps, Cosmos DB, Search, Storage, App Configuration, and all workload lists remain governed only by their existing parameters.
+- **Hosted-agent deployment outputs.** Exact Foundry project and selected-registry resource IDs/endpoints are exposed with a consolidated `HOSTED_AGENT_DEPLOYMENT` object. The landing zone intentionally does not create a placeholder ARM resource: the downstream accelerator's `azd deploy` creates the immutable agent version, dedicated agent identity, registry pull grant, and invocation endpoint.
+- **Hosted-agent contract validation.** Preflight now requires Foundry and registry prerequisites, rejects mutable image references and unsupported role-name lists, and explains the VNet-internal build requirement for private ACR. An offline compiled-resource fixture proves disabled graph parity and limits enabled mutations to the two centralized RBAC payloads.
+- This backward-compatible capability is a **minor** release change. The Portal experience and Terraform landing-zone implementation require follow-up parity review.
+
 ## [v2.3.0] - 2026-07-02
 
 ### Added
