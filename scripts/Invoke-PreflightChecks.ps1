@@ -428,6 +428,12 @@ function Test-HostedAgentConfiguration {
         return
     }
 
+    if (@($agent.PSObject.Properties.Name) -contains 'roles') {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_ROLES_UNSUPPORTED' `
+            -Message 'hostedAgent.roles is not supported because the hosted-agent identity is created by downstream azd deploy.' `
+            -Hint 'After deployment, use the emitted agent identity and explicit Azure role definition IDs to assign least-privilege access to external resources.'
+    }
+
     $envValues = Get-AzdEnvValues
     $name = (Get-StringValue (Expand-ParamValue -Raw $agent.name -EnvValues $envValues)).Trim()
     $image = (Get-StringValue (Expand-ParamValue -Raw $agent.image -EnvValues $envValues)).Trim()

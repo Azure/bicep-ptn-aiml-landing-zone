@@ -233,6 +233,25 @@ Test-HostedAgentConfiguration -P @{
 Assert-True 'Valid hosted-agent contract has no failures' (@($script:Findings | Where-Object Severity -eq 'FAIL').Count -eq 0)
 
 # --------------------------------------------------------------------------
+Write-Host 'Hosted agent: arbitrary runtime role names are rejected' -ForegroundColor Cyan
+Reset-Findings
+Test-HostedAgentConfiguration -P @{
+    deployHostedAgent       = $true
+    deployAiFoundry         = $true
+    deployContainerRegistry = $true
+    hostedAgent             = [pscustomobject]@{
+        name           = 'sample-agent'
+        image          = 'agents/sample'
+        version        = "sha256:$('b' * 64)"
+        startupCommand = ''
+        runtime        = [pscustomobject]@{ cpu = '1'; memory = '1Gi' }
+        protocols      = @([pscustomobject]@{ protocol = 'responses'; version = '2.0.0' })
+        roles          = @('Reader', 'UnsupportedRoleName')
+    }
+}
+Assert-True 'FAIL HOSTED_AGENT_ROLES_UNSUPPORTED raised' (Test-FindingPresent 'HOSTED_AGENT_ROLES_UNSUPPORTED')
+
+# --------------------------------------------------------------------------
 Write-Host 'Hosted agent: runtime resources follow the current Foundry contract' -ForegroundColor Cyan
 Reset-Findings
 Test-HostedAgentConfiguration -P @{

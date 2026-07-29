@@ -266,9 +266,17 @@ is `true`, the landing zone adds only:
 The downstream `azure.ai.agent` service remains responsible for `azd deploy`.
 That data-plane operation creates the immutable agent version, dedicated
 per-agent identity, invocation endpoint, and the agent identity's registry pull
-assignment. See the official
+assignment. `azure.ai.agent` is an azd deployment contract rather than an ARM
+resource type, so this Bicep template intentionally does not fabricate an agent
+resource or deployment script. See the official
 [hosted-agent `azure.yaml` reference](https://learn.microsoft.com/azure/foundry/agents/concepts/azure-yaml-reference#azureaiagent-service)
 and [pre-built image workflow](https://learn.microsoft.com/azure/foundry/agents/how-to/deploy-hosted-agent-private-azure-container-registry#deploy-a-pre-built-image).
+
+The typed `hostedAgent` object is sealed and deliberately has no `roles` field.
+Arbitrary role names are rejected by preflight rather than silently ignored.
+After `azd deploy` creates the dedicated agent identity, the accelerator must
+assign explicit least-privilege role definition IDs for any external resources
+that identity needs.
 
 | Parameter | Default | Purpose |
 |---|---|---|

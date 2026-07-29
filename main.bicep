@@ -489,6 +489,7 @@ type publicIngressType = {
 }
 
 @export()
+@sealed()
 @description('Invocation protocol implemented by a hosted agent. Values match the Microsoft Foundry `azure.ai.agent` service contract.')
 type hostedAgentProtocolType = {
   @description('Protocol implemented by the agent container.')
@@ -499,6 +500,7 @@ type hostedAgentProtocolType = {
 }
 
 @export()
+@sealed()
 @description('Container CPU and memory settings passed to `azure.ai.agent` as `container.resources`.')
 type hostedAgentRuntimeType = {
   @description('CPU allocation from `0.25` through `4.0`, for example `0.5` or `1`.')
@@ -509,6 +511,7 @@ type hostedAgentRuntimeType = {
 }
 
 @export()
+@sealed()
 @description('Accelerator-neutral handoff for a downstream Microsoft Foundry hosted-agent deployment.')
 type hostedAgentConfigurationType = {
   @description('Stable hosted-agent name. Reusing this name creates a new immutable version.')
