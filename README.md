@@ -303,9 +303,11 @@ behavior: Premium SKU, private endpoint and DNS integration, and disabled public
 network access when `networkIsolation=true`. Building or pushing an image in
 that mode must happen from a VNet-connected runner, build agent, or jumpbox.
 For an existing ACR, its private endpoint, DNS, authentication-as-ARM policy,
-and network reachability remain the consumer's responsibility. Microsoft also
-documents a Foundry-project creation-date compatibility condition for private
-registries; verify the current limitation before a live deployment. See
+and network reachability remain the consumer's responsibility. Microsoft
+currently documents private ACR support for Foundry projects created after
+June 25, 2026; projects created earlier require the registry to remain reachable
+over its public endpoint. Verify this platform limitation before a live
+deployment. See
 [private ACR deployment and RBAC](https://learn.microsoft.com/azure/foundry/agents/how-to/deploy-hosted-agent-private-azure-container-registry)
 and [hosted-agent permissions](https://learn.microsoft.com/azure/foundry/agents/concepts/hosted-agent-permissions#azure-resource-setup).
 
