@@ -5,6 +5,8 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.4.0] - 2026-07-30
+
 ### Added
 
 - **Accelerator-neutral Microsoft Foundry hosted-agent prerequisites (`deployHostedAgent`).** The new opt-in flag defaults to `false` and leaves the complete pre-existing resource graph unchanged. Enabling it adds only the generic Foundry project and Container Registry RBAC needed for a downstream `azure.ai.agent` deployment, plus typed image repository, immutable digest, startup command, CPU, memory, protocol, existing-registry, Foundry, network, and private-build handoff values. Container Apps, Cosmos DB, Search, Storage, App Configuration, and all workload lists remain governed only by their existing parameters.
