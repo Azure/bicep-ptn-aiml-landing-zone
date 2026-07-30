@@ -11,6 +11,13 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 - **Hosted-agent deployment outputs.** Exact Foundry project and selected-registry resource IDs/endpoints are exposed with a consolidated `HOSTED_AGENT_DEPLOYMENT` object. The landing zone intentionally does not create a placeholder ARM resource: the downstream accelerator's `azd deploy` creates the immutable agent version, dedicated agent identity, registry pull grant, and invocation endpoint.
 - **Hosted-agent contract validation.** Preflight now requires Foundry and registry prerequisites, rejects mutable image references and unsupported role-name lists, and explains the VNet-internal build requirement for private ACR. An offline compiled-resource fixture proves disabled graph parity and limits enabled mutations to the two centralized RBAC payloads.
 - This backward-compatible capability is a **minor** release change. The Portal experience and Terraform landing-zone implementation require follow-up parity review.
+- **GitHub Copilot engineering-agent framework.** Added a concise repository
+  operating contract, specialized architecture, implementation, validation,
+  operations, and release agents, reusable Bicep/Azure-IaC skills, path-scoped
+  instructions, and PowerShell-native YAML frontmatter/link validation in CI.
+  These assets guide repository development and operations only; they do not
+  change deployed resources, Microsoft Foundry agents, Bicep contracts,
+  parameters, scripts, or landing-zone behavior.
 
 ## [v2.3.0] - 2026-07-02
 
