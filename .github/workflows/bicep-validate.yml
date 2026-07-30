@@ -8,6 +8,9 @@ on:
       - 'constants/**'
       - 'main.parameters.json'
       - 'scripts/Measure-MainJsonSize.ps1'
+      - 'scripts/Invoke-PreflightChecks.ps1'
+      - 'tests/contracts/**'
+      - 'tests/scripts/Invoke-PreflightChecks.Tests.ps1'
       - 'AGENTS.md'
       - '.github/agents/**'
       - '.github/skills/**'
@@ -25,6 +28,9 @@ on:
       - 'modules/**'
       - 'constants/**'
       - 'main.parameters.json'
+      - 'scripts/Invoke-PreflightChecks.ps1'
+      - 'tests/contracts/**'
+      - 'tests/scripts/Invoke-PreflightChecks.Tests.ps1'
       - 'AGENTS.md'
       - '.github/agents/**'
       - '.github/skills/**'
@@ -86,6 +92,17 @@ jobs:
             -WorkingBudgetMB 3.5 `
             -FailThresholdMB 4.7 `
             -ArmHardCeilingMB 5.0
+
+      - name: Validate hosted-agent resource contract
+        shell: pwsh
+        run: |
+          az bicep uninstall
+          az bicep install --version v0.42.1
+          pwsh ./tests/contracts/Test-HostedAgentContract.ps1
+
+      - name: Run deterministic preflight tests
+        shell: pwsh
+        run: pwsh ./tests/scripts/Invoke-PreflightChecks.Tests.ps1
 
       - name: Upload main.json artifact
         if: always()

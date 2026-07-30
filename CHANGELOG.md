@@ -5,8 +5,14 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.4.0] - 2026-07-30
+
 ### Added
 
+- **Accelerator-neutral Microsoft Foundry hosted-agent prerequisites (`deployHostedAgent`).** The new opt-in flag defaults to `false` and leaves the complete pre-existing resource graph unchanged. Enabling it adds only the generic Foundry project and Container Registry RBAC needed for a downstream `azure.ai.agent` deployment, plus typed image repository, immutable digest, startup command, CPU, memory, protocol, existing-registry, Foundry, network, and private-build handoff values. Container Apps, Cosmos DB, Search, Storage, App Configuration, and all workload lists remain governed only by their existing parameters.
+- **Hosted-agent deployment outputs.** Exact Foundry project and selected-registry resource IDs/endpoints are exposed with a consolidated `HOSTED_AGENT_DEPLOYMENT` object. The landing zone intentionally does not create a placeholder ARM resource: the downstream accelerator's `azd deploy` creates the immutable agent version, dedicated agent identity, registry pull grant, and invocation endpoint.
+- **Hosted-agent contract validation.** Preflight now requires Foundry and registry prerequisites, rejects mutable image references and unsupported role-name lists, and explains the VNet-internal build requirement for private ACR. An offline compiled-resource fixture proves disabled graph parity and limits enabled mutations to the two centralized RBAC payloads.
+- This backward-compatible capability is a **minor** release change. The Portal experience and Terraform landing-zone implementation require follow-up parity review.
 - **GitHub Copilot engineering-agent framework.** Added a concise repository
   operating contract, specialized architecture, implementation, validation,
   operations, and release agents, reusable Bicep/Azure-IaC skills, path-scoped
@@ -14,6 +20,10 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
   These assets guide repository development and operations only; they do not
   change deployed resources, Microsoft Foundry agents, Bicep contracts,
   parameters, scripts, or landing-zone behavior.
+
+### Fixed
+
+- **Hosted-agent registry pull RBAC now matches the selected ACR permissions mode.** The landing-zone registry uses its existing RBAC-only mode and grants `AcrPull`. Existing registries default to the same mode and can set `hostedAgentContainerRegistryRoleAssignmentMode=rbac-abac` to grant `Container Registry Repository Reader` instead. This prevents hosted-agent image pulls from failing because an ABAC-only role was assigned to an RBAC-only registry.
 
 ## [v2.3.0] - 2026-07-02
 
