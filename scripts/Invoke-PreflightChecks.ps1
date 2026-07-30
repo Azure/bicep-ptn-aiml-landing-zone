@@ -416,6 +416,15 @@ function Test-HostedAgentConfiguration {
     $deployRegistry = Resolve-DeployFlag -P $P -Key 'deployContainerRegistry' -Default $true
     $existingRegistryId = (Get-StringValue $P['hostedAgentContainerRegistryResourceId']).Trim()
     $existingRegistryEndpoint = (Get-StringValue $P['hostedAgentContainerRegistryEndpoint']).Trim()
+    $registryRoleAssignmentMode = (Get-StringValue $P['hostedAgentContainerRegistryRoleAssignmentMode']).Trim()
+    if ([string]::IsNullOrWhiteSpace($registryRoleAssignmentMode)) {
+        $registryRoleAssignmentMode = 'rbac'
+    }
+    if ($registryRoleAssignmentMode -notin @('rbac', 'rbac-abac')) {
+        Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_REGISTRY_ROLE_MODE_INVALID' `
+            -Message 'hostedAgentContainerRegistryRoleAssignmentMode must be rbac or rbac-abac.' `
+            -Hint 'Use rbac for RBAC Registry Permissions or rbac-abac for RBAC Registry + ABAC Repository Permissions.'
+    }
     if (-not $deployRegistry -and ([string]::IsNullOrWhiteSpace($existingRegistryId) -or [string]::IsNullOrWhiteSpace($existingRegistryEndpoint))) {
         Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_REGISTRY_REQUIRED' `
             -Message 'deployHostedAgent=true requires the landing-zone registry or both existing registry inputs.' `

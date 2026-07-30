@@ -258,8 +258,9 @@ compiled symbolic resource graph is identical to the pre-feature graph. When it
 is `true`, the landing zone adds only:
 
 - `Foundry Project Manager` for the deployment principal on the Foundry project;
-- `Container Registry Repository Reader` for the Foundry project managed
-  identity on the selected registry; and
+- the registry-mode-compatible pull role for the Foundry project managed
+  identity on the selected registry (`AcrPull` for RBAC-only registries or
+  `Container Registry Repository Reader` for ABAC-enabled registries); and
 - a typed output handoff containing the project, registry, image, startup
   command, runtime resources, protocols, agent subnet, and private-build context.
 
@@ -289,6 +290,7 @@ that identity needs.
 | `hostedAgent.protocols` | Responses `2.0.0` | Typed `responses`, `invocations`, `invocations_ws`, or `a2a` contracts. |
 | `hostedAgentContainerRegistryResourceId` | empty | Existing ACR resource ID when `deployContainerRegistry=false`. |
 | `hostedAgentContainerRegistryEndpoint` | empty | Existing ACR login endpoint when `deployContainerRegistry=false`. |
+| `hostedAgentContainerRegistryRoleAssignmentMode` | `rbac` | Existing ACR permissions mode: `rbac` uses `AcrPull`; `rbac-abac` uses `Container Registry Repository Reader`. Ignored for the landing-zone registry, which is RBAC-only. |
 
 Example infrastructure handoff for an image already built, scanned, and pushed:
 
@@ -310,8 +312,12 @@ or registry prerequisites.
 behavior: Premium SKU, private endpoint and DNS integration, and disabled public
 network access when `networkIsolation=true`. Building or pushing an image in
 that mode must happen from a VNet-connected runner, build agent, or jumpbox.
-For an existing ACR, its private endpoint, DNS, authentication-as-ARM policy,
-and network reachability remain the consumer's responsibility. Microsoft
+For an existing ACR, set
+`HOSTED_AGENT_CONTAINER_REGISTRY_ROLE_ASSIGNMENT_MODE=rbac-abac` when its role
+assignment permissions mode is **RBAC Registry + ABAC Repository Permissions**;
+the default `rbac` mode is correct for **RBAC Registry Permissions**. Its private
+endpoint, DNS, authentication-as-ARM policy, and network reachability remain the
+consumer's responsibility. Microsoft
 currently documents private ACR support for Foundry projects created after
 June 25, 2026; projects created earlier require the registry to remain reachable
 over its public endpoint. Verify this platform limitation before a live

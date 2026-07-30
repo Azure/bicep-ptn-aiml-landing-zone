@@ -92,6 +92,7 @@
     } },
     "hostedAgentContainerRegistryResourceId": { "value": "${HOSTED_AGENT_CONTAINER_REGISTRY_RESOURCE_ID=}" },
     "hostedAgentContainerRegistryEndpoint":   { "value": "${HOSTED_AGENT_CONTAINER_REGISTRY_ENDPOINT=}" },
+    "hostedAgentContainerRegistryRoleAssignmentMode": { "value": "${HOSTED_AGENT_CONTAINER_REGISTRY_ROLE_ASSIGNMENT_MODE=rbac}" },
     "deployKeyVault":                       { "value": "${DEPLOY_KEY_VAULT=true}" },
     "deployVmKeyVault":                     { "value": "${DEPLOY_VM_KEY_VAULT=false}" },
     "deployLogAnalytics":                   { "value": "${DEPLOY_LOG_ANALYTICS=true}" },

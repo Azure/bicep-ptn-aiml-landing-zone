@@ -21,6 +21,10 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
   change deployed resources, Microsoft Foundry agents, Bicep contracts,
   parameters, scripts, or landing-zone behavior.
 
+### Fixed
+
+- **Hosted-agent registry pull RBAC now matches the selected ACR permissions mode.** The landing-zone registry uses its existing RBAC-only mode and grants `AcrPull`. Existing registries default to the same mode and can set `hostedAgentContainerRegistryRoleAssignmentMode=rbac-abac` to grant `Container Registry Repository Reader` instead. This prevents hosted-agent image pulls from failing because an ABAC-only role was assigned to an RBAC-only registry.
+
 ## [v2.3.0] - 2026-07-02
 
 ### Added

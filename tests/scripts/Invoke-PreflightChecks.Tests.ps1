@@ -233,6 +233,27 @@ Test-HostedAgentConfiguration -P @{
 Assert-True 'Valid hosted-agent contract has no failures' (@($script:Findings | Where-Object Severity -eq 'FAIL').Count -eq 0)
 
 # --------------------------------------------------------------------------
+Write-Host 'Hosted agent: registry role assignment mode is validated' -ForegroundColor Cyan
+Reset-Findings
+Test-HostedAgentConfiguration -P @{
+    deployHostedAgent                               = $true
+    deployAiFoundry                                 = $true
+    deployContainerRegistry                         = $false
+    hostedAgentContainerRegistryResourceId         = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/Microsoft.ContainerRegistry/registries/acr'
+    hostedAgentContainerRegistryEndpoint           = 'acr.azurecr.io'
+    hostedAgentContainerRegistryRoleAssignmentMode = 'unsupported'
+    hostedAgent                                     = [pscustomobject]@{
+        name           = 'sample-agent'
+        image          = 'agents/sample'
+        version        = "sha256:$('a' * 64)"
+        startupCommand = ''
+        runtime        = [pscustomobject]@{ cpu = '1'; memory = '1Gi' }
+        protocols      = @([pscustomobject]@{ protocol = 'responses'; version = '2.0.0' })
+    }
+}
+Assert-True 'FAIL HOSTED_AGENT_REGISTRY_ROLE_MODE_INVALID raised' (Test-FindingPresent 'HOSTED_AGENT_REGISTRY_ROLE_MODE_INVALID')
+
+# --------------------------------------------------------------------------
 Write-Host 'Hosted agent: arbitrary runtime role names are rejected' -ForegroundColor Cyan
 Reset-Findings
 Test-HostedAgentConfiguration -P @{

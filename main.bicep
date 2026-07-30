@@ -413,6 +413,10 @@ param hostedAgentContainerRegistryResourceId string = ''
 @description('Optional login endpoint of an existing Azure Container Registry used for hosted-agent images when deployContainerRegistry is false, for example `contoso.azurecr.io`. Private endpoint, DNS, and VNet-internal build connectivity for an existing registry remain consumer responsibilities.')
 param hostedAgentContainerRegistryEndpoint string = ''
 
+@description('Role assignment permissions mode of the existing hosted-agent registry when deployContainerRegistry is false. Use `rbac` for RBAC Registry Permissions or `rbac-abac` for RBAC Registry + ABAC Repository Permissions. The landing-zone registry always uses `rbac`.')
+@allowed([ 'rbac', 'rbac-abac' ])
+param hostedAgentContainerRegistryRoleAssignmentMode string = 'rbac'
+
 @description('Name for the ACR Task agent pool. Max 20 characters.')
 @maxLength(20)
 param acrTaskAgentPoolName string = 'build-pool'
@@ -1035,6 +1039,9 @@ var _hostedAgentContainerRegistryResourceId = deployContainerRegistry ? containe
 var _hostedAgentContainerRegistryEndpoint = deployContainerRegistry ? '${resourceNames.containerRegistryName}.${acrDnsSuffix}' : hostedAgentContainerRegistryEndpoint
 var _hostedAgentImageReference = '${_hostedAgentContainerRegistryEndpoint}/${hostedAgent.image}@${hostedAgent.version}'
 var _containerRegistryRepositoryReaderRoleId = 'b93aa761-3e63-49ed-ac28-beffa264f7ac'
+var _hostedAgentContainerRegistryPullRoleId = deployContainerRegistry || hostedAgentContainerRegistryRoleAssignmentMode == 'rbac'
+  ? const.roles.AcrPull.guid
+  : _containerRegistryRepositoryReaderRoleId
 
 // -----------------------------------------------------------------------------
 // Public network access derivation (Gap 1, issue #58)
@@ -3537,13 +3544,13 @@ var _crossServiceRoleAssignments = concat(
       principalType: 'ServicePrincipal'
     }
   ] : [],
-  // Container Registry Repository Reader -> AI Foundry project identity.
+  // Registry-mode-compatible pull role -> AI Foundry project identity.
   // The dedicated hosted-agent identity and its runtime roles are created by
   // `azd deploy`; the landing zone must not invent or replace that identity.
   (deployHostedAgent && deployAiFoundry) ? [
     {
       principalId: aiFoundry!.outputs.aiProjectPrincipalId
-      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', _containerRegistryRepositoryReaderRoleId)
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', _hostedAgentContainerRegistryPullRoleId)
       resourceId: _hostedAgentContainerRegistryResourceId
       principalType: 'ServicePrincipal'
     }

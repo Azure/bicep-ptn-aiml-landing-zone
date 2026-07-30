@@ -174,9 +174,9 @@ try {
                 Required = @("parameters('deployHostedAgent')", 'AzureAIProjectManager')
             },
             @{
-                Name = 'Foundry project identity receives registry repository reader only when hosted enablement is selected.'
+                Name = 'Foundry project identity receives a registry-mode-compatible pull role only when hosted enablement is selected.'
                 Json = $crossServiceJson
-                Required = @("parameters('deployHostedAgent')", "variables('_containerRegistryRepositoryReaderRoleId')")
+                Required = @("parameters('deployHostedAgent')", "variables('_hostedAgentContainerRegistryPullRoleId')")
             }
         )) {
         $missing = @($check.Required | Where-Object { -not $check.Json.Contains($_) })
@@ -189,11 +189,17 @@ try {
     }
 
     $source = Get-Content -LiteralPath $MainFile -Raw
-    if (-not $source.Contains("var _containerRegistryRepositoryReaderRoleId = 'b93aa761-3e63-49ed-ac28-beffa264f7ac'")) {
-        Add-Failure 'The hosted-agent registry pull role is not pinned to Container Registry Repository Reader.'
+    $registryRoleTokens = @(
+        "hostedAgentContainerRegistryRoleAssignmentMode == 'rbac'",
+        'const.roles.AcrPull.guid',
+        "var _containerRegistryRepositoryReaderRoleId = 'b93aa761-3e63-49ed-ac28-beffa264f7ac'"
+    )
+    $missingRegistryRoleTokens = @($registryRoleTokens | Where-Object { -not $source.Contains($_) })
+    if ($missingRegistryRoleTokens.Count -gt 0) {
+        Add-Failure "The hosted-agent registry pull role does not select the least-privilege role for RBAC and ABAC registries. Missing: $($missingRegistryRoleTokens -join ', ')."
     }
     else {
-        Add-Pass 'The hosted-agent registry pull role uses the least-privilege repository reader definition.'
+        Add-Pass 'The hosted-agent registry pull role matches RBAC and ABAC registry modes.'
     }
 
     foreach ($forbidden in @('deployAdminPanel', 'adminPanelApp', '_deployClassicApps', '_deployAdminPanelApp')) {
