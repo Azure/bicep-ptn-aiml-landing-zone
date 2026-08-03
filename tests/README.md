@@ -26,6 +26,7 @@ tests/
 ├── README.md                 (this file)
 ├── contracts/
 │   ├── Test-HostedAgentContract.ps1
+│   ├── Test-AcrTaskAgentPoolFirewallContract.ps1
 │   └── fixtures/
 │       └── hosted-agent-resource-graph.json
 ├── hub/
@@ -43,6 +44,7 @@ Run from the repository root:
 
 ```pwsh
 pwsh tests/contracts/Test-HostedAgentContract.ps1
+pwsh tests/contracts/Test-AcrTaskAgentPoolFirewallContract.ps1
 pwsh tests/scripts/Invoke-PreflightChecks.Tests.ps1
 ```
 
@@ -51,7 +53,12 @@ fixture and proves that the default-disabled feature preserves every symbolic
 resource from the merge base. It permits changes only in the two centralized
 RBAC deployment payloads and checks that those additions are
 `deployHostedAgent`-gated, least privilege, and accompanied by the stable
-Foundry/registry handoff. The deterministic preflight tests cover disabled,
+Foundry/registry handoff. The ACR Task agent pool firewall contract test
+(Azure/GPT-RAG#597) asserts that the VNet-injected ACR Tasks dedicated agent
+pool's required outbound platform-bootstrap Network Rules (AzureKeyVault,
+Storage, EventHub, AzureActiveDirectory, AzureMonitor) are present, correctly
+gated, ordered, and scoped to the devops build agents subnet — independent of
+the opaque hash check above. The deterministic preflight tests cover disabled,
 valid, mutable-image, and missing-prerequisite configurations without accessing
 Azure.
 

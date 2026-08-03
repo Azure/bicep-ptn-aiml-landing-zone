@@ -100,6 +100,10 @@ jobs:
           az bicep install --version v0.42.1
           pwsh ./tests/contracts/Test-HostedAgentContract.ps1
 
+      - name: Validate ACR Task agent pool firewall contract
+        shell: pwsh
+        run: pwsh ./tests/contracts/Test-AcrTaskAgentPoolFirewallContract.ps1
+
       - name: Run deterministic preflight tests
         shell: pwsh
         run: pwsh ./tests/scripts/Invoke-PreflightChecks.Tests.ps1
