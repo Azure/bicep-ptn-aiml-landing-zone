@@ -401,6 +401,81 @@ var _firewallAcsMediaRuleCollections = [
   }
 ]
 
+// ACR Task agent pool platform-bootstrap network rules (fixes Azure/GPT-RAG#597
+// Defect C). These are required for the agent pool itself to provision and
+// scale inside the VNet — independent of what a queued build later needs
+// (see the AllowAcrTasks / AllowAcrTaskDevRuntimes / AllowAcrTaskOsPackages
+// ApplicationRules above, which only cover build-time egress). Per Microsoft
+// Learn "Run an Azure Container Registry task on a dedicated agent pool >
+// Create pool in a virtual network > Add firewall rules", the pool's own
+// platform bootstrap requires outbound TCP 443 (plus 12000 for Azure Monitor
+// diagnostics) to five service tags: AzureKeyVault, Storage, EventHub,
+// AzureActiveDirectory, AzureMonitor.
+// https://learn.microsoft.com/azure/container-registry/tasks-agent-pools#add-firewall-rules
+//
+// These are IP/service-tag-based control-plane calls, not FQDN-addressable
+// HTTP(S) application traffic, so Azure Firewall ApplicationRules (which only
+// inspect HTTP(S) FQDNs) cannot express them — they require NetworkRules
+// with `destinationAddresses` set to service tags. Without this collection,
+// the agent pool's platform bootstrap traffic is silently dropped by the
+// firewall's default-deny and the VNet-injected pool never reaches
+// Succeeded, while the same pool without VNet injection (no route through
+// this firewall) provisions immediately.
+var _firewallAcrTaskAgentPoolNetworkRules = [
+  {
+    ruleType: 'NetworkRule'
+    name: 'AllowAcrTaskAgentPoolKeyVault'
+    ipProtocols: ['TCP']
+    sourceAddresses: [devopsBuildAgentsSubnetPrefix]
+    destinationAddresses: ['AzureKeyVault']
+    destinationPorts: ['443']
+  }
+  {
+    ruleType: 'NetworkRule'
+    name: 'AllowAcrTaskAgentPoolStorage'
+    ipProtocols: ['TCP']
+    sourceAddresses: [devopsBuildAgentsSubnetPrefix]
+    destinationAddresses: ['Storage']
+    destinationPorts: ['443']
+  }
+  {
+    ruleType: 'NetworkRule'
+    name: 'AllowAcrTaskAgentPoolEventHub'
+    ipProtocols: ['TCP']
+    sourceAddresses: [devopsBuildAgentsSubnetPrefix]
+    destinationAddresses: ['EventHub']
+    destinationPorts: ['443']
+  }
+  {
+    ruleType: 'NetworkRule'
+    name: 'AllowAcrTaskAgentPoolAzureAD'
+    ipProtocols: ['TCP']
+    sourceAddresses: [devopsBuildAgentsSubnetPrefix]
+    destinationAddresses: ['AzureActiveDirectory']
+    destinationPorts: ['443']
+  }
+  {
+    ruleType: 'NetworkRule'
+    name: 'AllowAcrTaskAgentPoolMonitor'
+    ipProtocols: ['TCP']
+    sourceAddresses: [devopsBuildAgentsSubnetPrefix]
+    destinationAddresses: ['AzureMonitor']
+    destinationPorts: ['443', '12000']
+  }
+]
+
+var _firewallAcrTaskAgentPoolRuleCollections = [
+  {
+    ruleCollectionType: 'FirewallPolicyFilterRuleCollection'
+    name: 'AllowAcrTaskAgentPoolPlatform'
+    priority: 100
+    action: {
+      type: 'Allow'
+    }
+    rules: _firewallAcrTaskAgentPoolNetworkRules
+  }
+]
+
 // Azure Firewall for egress traffic control
 ///////////////////////////////////////////////////////////////////////////
 
@@ -461,6 +536,45 @@ resource firewallPolicyAcsMediaRuleCollectionGroup 'Microsoft.Network/firewallPo
   }
   dependsOn: [
     firewallPolicyDefaultRuleCollectionGroup
+  ]
+}
+
+// ACR Task agent pool platform-bootstrap network rules — separate rule
+// collection group (mirrors the AcsMedia pattern) so it toggles independently
+// via `deployAcrTaskAgentPool` without shifting the default group's priority.
+// Chained after both prior groups: concurrent PUTs against sibling
+// ruleCollectionGroups under the same firewallPolicy can 409
+// (AnotherOperationInProgress), so every group in this module is serialized.
+// The AcsMedia dependency is unconditional here by design — Azure Resource
+// Manager automatically drops an explicit dependsOn entry at deployment time
+// when the referenced resource's own `if` condition evaluates to false (see
+// https://learn.microsoft.com/azure/azure-resource-manager/bicep/conditional-resource-deployment#new-or-existing-resource),
+// so no ternary/null-guard is needed even when `enableAcsMediaEgress` is false.
+//
+// Explicit `azureFirewall` dependency: on a fresh/cold deployment, without
+// this, ARM has no ordering constraint between the ruleCollectionGroup chain
+// and the azureFirewall resource itself (both only depend on firewallPolicy),
+// so the chain can race the firewall's own ~10-25 minute provisioning. Live
+// validation of this fix (disposable eastus2 deployment, Azure/GPT-RAG#597)
+// observed exactly this: this group's PUT was rejected with
+// `FirewallPolicyUpdateFailed` / "1 faulted referenced firewalls" because the
+// azureFirewall resource hadn't finished associating yet, even though the
+// chained DefaultRuleCollectionGroup PUT ahead of it happened to complete in
+// time. Depending directly on azureFirewall guarantees this group's rules are
+// only applied once the firewall itself is fully provisioned, so the pool's
+// platform-bootstrap traffic is reliably unblocked on the very first
+// deployment attempt.
+resource firewallPolicyAcrTaskAgentPoolRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleCollectionGroups@2024-07-01' = if (deployAzureFirewall && networkIsolation && deployAcrTaskAgentPool) {
+  parent: firewallPolicy
+  name: 'AcrTaskAgentPoolRuleCollectionGroup'
+  properties: {
+    priority: 250
+    ruleCollections: _firewallAcrTaskAgentPoolRuleCollections
+  }
+  dependsOn: [
+    firewallPolicyDefaultRuleCollectionGroup
+    firewallPolicyAcsMediaRuleCollectionGroup
+    azureFirewall
   ]
 }
 
