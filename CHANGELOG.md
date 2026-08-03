@@ -5,6 +5,8 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.4.1] - 2026-08-03
+
 ### Fixed
 
 - **ACR Task agent pool now provisions successfully with VNet injection under `NETWORK_ISOLATION=true`.** The Azure Firewall Policy on the devops build agents subnet only allowed Application/FQDN rules, but ACR Tasks dedicated agent pools require unconditional outbound Network Rules for their own platform bootstrap traffic (not just the task's own build-time egress). Added a `deployAcrTaskAgentPool`-gated Network Rule Collection Group granting the pool's subnet outbound access to `AzureKeyVault`, `Storage`, `EventHub`, `AzureActiveDirectory` (443), and `AzureMonitor` (443, 12000), matching Microsoft's documented ACR Tasks agent pool network requirements. Previously the pool failed to provision every time when VNet-injected (6/6 in the reporter's environment); confirmed live in a disposable network-isolated deployment that the pool now reaches `Succeeded` on first attempt, with the private endpoint reachable (DNS + TCP 443) from its subnet and all FQDN rules required for a private build (base image pulls, ACR data plane, task dispatch) already present and correctly scoped. See [Azure/GPT-RAG#597](https://github.com/Azure/GPT-RAG/issues/597).
