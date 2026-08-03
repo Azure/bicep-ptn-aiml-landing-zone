@@ -5,6 +5,11 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Fixed
+
+- **ACR Task agent pool now provisions successfully with VNet injection under `NETWORK_ISOLATION=true`.** The Azure Firewall Policy on the devops build agents subnet only allowed Application/FQDN rules, but ACR Tasks dedicated agent pools require unconditional outbound Network Rules for their own platform bootstrap traffic (not just the task's own build-time egress). Added a `deployAcrTaskAgentPool`-gated Network Rule Collection Group granting the pool's subnet outbound access to `AzureKeyVault`, `Storage`, `EventHub`, `AzureActiveDirectory` (443), and `AzureMonitor` (443, 12000), matching Microsoft's documented ACR Tasks agent pool network requirements. Previously the pool failed to provision every time when VNet-injected (6/6 in the reporter's environment); confirmed live in a disposable network-isolated deployment that the pool now reaches `Succeeded` on first attempt, with the private endpoint reachable (DNS + TCP 443) from its subnet and all FQDN rules required for a private build (base image pulls, ACR data plane, task dispatch) already present and correctly scoped. See [Azure/GPT-RAG#597](https://github.com/Azure/GPT-RAG/issues/597).
+- **Firewall policy rule collection groups no longer race the Azure Firewall resource's own provisioning.** The chained `ruleCollectionGroups` (Default → ACS media → ACR Task agent pool) only depended on each other and on the firewall policy, not on the `azureFirewall` resource itself, which can take 10–25 minutes to finish associating on a fresh deployment. On cold deployments the last group in the chain could reach Azure Resource Manager before the firewall finished provisioning and be rejected with `FirewallPolicyUpdateFailed` ("faulted referenced firewalls"), leaving the policy — and the newly added ACR Task agent pool rules — in a `Failed` state even though the pool itself could still show `Succeeded`. The ACR Task agent pool rule collection group now also depends on `azureFirewall`, guaranteeing deterministic, first-attempt success. Confirmed live in a disposable network-isolated deployment: the policy and rule collection group both reached `Succeeded` after the fix, versus `Failed` before it.
+
 ## [v2.4.0] - 2026-07-30
 
 ### Added

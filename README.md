@@ -231,6 +231,22 @@ If your application build needs additional HTTPS endpoints, add them to the `add
 
 Set `extendFirewallForJumpboxBootstrap=false` to skip the jumpbox-scoped rules when egress is managed centrally by another policy.
 
+##### ACR Task agent pool platform Network Rules
+
+The table above lists Application (FQDN) rules. The dedicated ACR Tasks agent
+pool additionally requires unconditional outbound **Network Rules** (service
+tags, not FQDNs) for its own platform bootstrap traffic — this is a
+requirement of the agent pool control plane itself, independent of what a
+build script does. When `networkIsolation`, `deployAzureFirewall`, and
+`deployAcrTaskAgentPool` are all enabled, the landing zone adds a
+`AllowAcrTaskAgentPoolPlatform` Network Rule Collection scoped to
+`devopsBuildAgentsSubnetPrefix`, allowing outbound TCP 443 to `AzureKeyVault`,
+`Storage`, `EventHub`, and `AzureActiveDirectory`, and TCP 443/12000 to
+`AzureMonitor`, matching the [documented ACR Tasks agent pool network
+requirements](https://learn.microsoft.com/en-us/azure/container-registry/tasks-agent-pools).
+Without these Network Rules the agent pool fails to provision when
+VNet-injected (see [Azure/GPT-RAG#597](https://github.com/Azure/GPT-RAG/issues/597)).
+
 ### AI Foundry deployment modes
 
 `deployAiFoundry` controls the base AI Foundry account, project, and model deployments. `deployAAfAgentSvc` controls the Agent Service Standard Setup and its associated AI Search, Storage, Cosmos DB, and Key Vault resources. `deploySearchService` controls only the workload/RAG Azure AI Search service used by applications.
