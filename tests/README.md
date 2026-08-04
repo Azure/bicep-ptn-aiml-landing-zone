@@ -27,6 +27,7 @@ tests/
 ├── contracts/
 │   ├── Test-HostedAgentContract.ps1
 │   ├── Test-AcrTaskAgentPoolFirewallContract.ps1
+│   ├── Test-FoundrySharedPrivateLinkNameContract.ps1
 │   └── fixtures/
 │       └── hosted-agent-resource-graph.json
 ├── hub/
@@ -45,6 +46,7 @@ Run from the repository root:
 ```pwsh
 pwsh tests/contracts/Test-HostedAgentContract.ps1
 pwsh tests/contracts/Test-AcrTaskAgentPoolFirewallContract.ps1
+pwsh tests/contracts/Test-FoundrySharedPrivateLinkNameContract.ps1
 pwsh tests/scripts/Invoke-PreflightChecks.Tests.ps1
 ```
 

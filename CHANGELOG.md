@@ -5,6 +5,16 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Foundry IQ shared private-link names now stay within Azure AI Search's
+  60-character resource-name limit.** Network-isolated deployments with long
+  explicit or CAF-generated Search service names previously produced
+  `foundry_account` and `cognitiveservices_account` child names longer than the
+  service accepts, failing late in provisioning after the long-running Foundry
+  resources completed. The names now use a bounded Search token with a
+  deterministic hash while preserving the semantic group suffix.
+
 ## [v2.4.1] - 2026-08-03
 
 ### Fixed

@@ -3064,20 +3064,25 @@ resource searchServiceResource 'Microsoft.Search/searchServices@2025-05-01' exis
   name: resourceNames.searchServiceName
 }
 
+// Search shared private-link names are limited to 60 characters. Keep the
+// semantic group suffix intact and retain collision resistance when an
+// explicit or CAF-generated Search service name is long.
+var searchFoundrySharedPrivateLinkNameToken = '${take(resourceNames.searchServiceName, 21)}-${take(uniqueString(resourceNames.searchServiceName), 6)}'
+
 var searchFoundrySharedPrivateLinkResources = (_networkIsolation && deploySearchService && deployAiFoundry && retrievalBackend == 'foundry_iq')
   ? [
       {
-        name: 'spl-${resourceNames.searchServiceName}-openai_account-1'
+        name: 'spl-${searchFoundrySharedPrivateLinkNameToken}-openai_account-1'
         groupId: 'openai_account'
         requestMessage: 'Allow AI Search private access to Azure OpenAI embeddings for Foundry IQ.'
       }
       {
-        name: 'spl-${resourceNames.searchServiceName}-foundry_account-1'
+        name: 'spl-${searchFoundrySharedPrivateLinkNameToken}-foundry_account-1'
         groupId: 'foundry_account'
         requestMessage: 'Allow AI Search private access to Microsoft Foundry for Foundry IQ.'
       }
       {
-        name: 'spl-${resourceNames.searchServiceName}-cognitiveservices_account-1'
+        name: 'spl-${searchFoundrySharedPrivateLinkNameToken}-cognitiveservices_account-1'
         groupId: 'cognitiveservices_account'
         requestMessage: 'Allow AI Search private access to Cognitive Services for Foundry IQ standard extraction.'
       }
