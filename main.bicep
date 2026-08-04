@@ -568,6 +568,9 @@ param deployAfProject bool = true
 @description('Deploy AI Foundry Service.')
 param deployAAfAgentSvc bool = true
 
+@description('Whether to disable local (API-key) authentication on the AI Foundry account, forcing Azure AD-only auth. Disabled by default for security.')
+param aiFoundryDisableLocalAuth bool = true
+
 
 @description('Deprecated. Kept for one release for compatibility with existing GPT-RAG deployments. Use retrievalBackend and the Foundry IQ parameters instead.')
 param enableAgenticRetrieval bool = false
@@ -2276,6 +2279,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
       accountName: resourceNames.aiFoundryAccountName
       allowProjectManagement: deployAfProject
       createCapabilityHosts: _deployAiFoundryAgentService
+      disableLocalAuth: aiFoundryDisableLocalAuth
       location: location
 
       networking: varAfNetworkingOverride

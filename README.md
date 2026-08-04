@@ -247,6 +247,22 @@ requirements](https://learn.microsoft.com/en-us/azure/container-registry/tasks-a
 Without these Network Rules the agent pool fails to provision when
 VNet-injected (see [Azure/GPT-RAG#597](https://github.com/Azure/GPT-RAG/issues/597)).
 
+### Toggling individual platform components
+
+The following flags now support `azd env set` / `${VAR=default}` overrides, in addition to editing `main.parameters.json` directly. All default to `true` (unchanged prior behavior):
+
+| Parameter | Env var | Purpose |
+| --- | --- | --- |
+| `deployCosmosDb` | `DEPLOY_COSMOS_DB` | Azure Cosmos DB account for globally distributed NoSQL data storage. |
+| `deployContainerApps` | `DEPLOY_CONTAINER_APPS` | Azure Container Apps for running your microservices. |
+| `deployContainerRegistry` | `DEPLOY_CONTAINER_REGISTRY` | Azure Container Registry for Docker container images. |
+| `deployContainerEnv` | `DEPLOY_CONTAINER_ENV` | The Container Apps environment (log ingestion, VNet integration, etc.). |
+| `deployNsgs` | `DEPLOY_NSGS` | Network security groups. |
+
+```bash
+azd env set DEPLOY_CONTAINER_APPS false
+```
+
 ### AI Foundry deployment modes
 
 `deployAiFoundry` controls the base AI Foundry account, project, and model deployments. `deployAAfAgentSvc` controls the Agent Service Standard Setup and its associated AI Search, Storage, Cosmos DB, and Key Vault resources. `deploySearchService` controls only the workload/RAG Azure AI Search service used by applications.
@@ -259,6 +275,8 @@ VNet-injected (see [Azure/GPT-RAG#597](https://github.com/Azure/GPT-RAG/issues/5
 | No Foundry resources | `deployAiFoundry=false` |
 
 Use `DEPLOY_AAF_AGENT_SVC=false` when an external app only needs hosted model inference from Foundry and does not need Agent Service capability hosts or their associated state resources.
+
+`aiFoundryDisableLocalAuth` / `AI_FOUNDRY_DISABLE_LOCAL_AUTH` controls whether the AI Foundry account accepts API-key authentication. It defaults to `true` (local auth disabled, Azure AD-only), matching the account's prior inert default. Set `AI_FOUNDRY_DISABLE_LOCAL_AUTH=false` only if API-key auth is explicitly required.
 
 ### Hosted-agent deployment prerequisites
 
