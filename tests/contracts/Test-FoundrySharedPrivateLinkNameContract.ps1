@@ -11,13 +11,21 @@
     after the other long-running resources had provisioned.
 
     This compiles main.bicep (the "compiled-template" contract) and:
+      - Proves the 60-character threshold is derived from the worst-case
+        bounded name for the longest generated child name (cognitiveservices_
+        account), not an arbitrary magic number.
       - Simulates a maximum-length (60-character) Search service name and
         proves all three shared private-link names stay <=60 characters,
         are pairwise distinct, and are deterministic.
       - Replays the exact live-failure Search service name length and proves
         the previously overflowing `foundry_account`/`cognitiveservices_account`
         names are now bounded, while an ordinary/short Search service name
-        keeps its plain, pre-existing name unchanged (backward compatibility).
+        keeps its exact, pre-existing legacy name unchanged (backward
+        compatibility).
+      - Per group, asserts the exact Search-service-name-length boundary at
+        which the plain name reaches exactly 60 characters stays unchanged,
+        and that one character past that boundary correctly falls back to
+        the bounded token (no unnecessary renames of working deployments).
       - Asserts the shared private-link resource's `type`, `apiVersion`,
         `dependsOn`, and `copy` targets are unchanged from the pre-fix
         contract.
@@ -82,6 +90,26 @@ $groups = @(
 $maxResourceNameLength = 60
 
 try {
+    # --- 0. The 60-character threshold is derived, not a magic number --------
+    # `searchFoundrySharedPrivateLinkMaxNameLength` (60) must equal the exact
+    # worst-case length produced by the bounded fallback formula for the
+    # *longest* complete generated child name -- i.e. the group with the
+    # longest groupId (cognitiveservices_account, 25 chars) at the maximum
+    # possible Search service name length (60 chars, which saturates the
+    # 21-char token prefix). This proves 60 is the platform limit *and* the
+    # exact bound the fallback formula is built to hit, not an arbitrary
+    # literal that happens to match Azure's ARM constraint.
+    $longestGroupId = ($groups | Sort-Object { $_.Length } -Descending | Select-Object -First 1)
+    $maxSearchNameLength = 60
+    $worstCaseTokenLength = Get-BoundedTokenLength -SearchServiceNameLength $maxSearchNameLength
+    $derivedMaxLength = 'spl-'.Length + $worstCaseTokenLength + 1 + $longestGroupId.Length + '-1'.Length
+    if ($derivedMaxLength -ne $maxResourceNameLength) {
+        Add-Failure "The 60-character threshold does not match the worst-case bounded name length for the longest groupId ('$longestGroupId'): derived $derivedMaxLength, expected $maxResourceNameLength."
+    }
+    else {
+        Add-Pass "The 60-character threshold is derived from the longest generated child name ('$longestGroupId') at the bounded fallback's worst case, not a magic number."
+    }
+
     if (Get-Command az -ErrorAction SilentlyContinue) {
         $env:PYTHONIOENCODING = 'utf-8'
         & az bicep build --file $MainFile --outfile $compiledFile
@@ -250,16 +278,52 @@ try {
     $allDirect = $true
     foreach ($group in $groups) {
         $result = Get-SharedPrivateLinkNameLength -SearchServiceNameLength $ordinaryCafName.Length -GroupId $group
-        if (-not $result.UsedDirectName) { $allDirect = $false }
+        $expectedLegacyName = "spl-$ordinaryCafName-$group-1"
+        if (-not $result.UsedDirectName) {
+            $allDirect = $false
+        }
+        elseif ($result.Length -ne $expectedLegacyName.Length) {
+            $allDirect = $false
+            Add-Failure "An ordinary/short Search service name ('$ordinaryCafName') produces a '$group' name of unexpected length $($result.Length) (expected $($expectedLegacyName.Length) for '$expectedLegacyName')."
+        }
     }
     if ($allDirect) {
-        Add-Pass "An ordinary/short Search service name ('$ordinaryCafName', $($ordinaryCafName.Length) chars) keeps the plain, pre-existing shared private-link name for all three groups."
+        Add-Pass "An ordinary/short Search service name ('$ordinaryCafName', $($ordinaryCafName.Length) chars) keeps the exact, pre-existing legacy shared private-link name (e.g. 'spl-$ordinaryCafName-$($groups[0])-1') for all three groups."
     }
     else {
         Add-Failure "An ordinary/short Search service name ('$ordinaryCafName') unexpectedly falls back to the bounded token for at least one group, changing existing deployments' resource names unnecessarily."
     }
 
-    # --- 5. Regression guard: every direct-name usage is length-guarded -----
+    # --- 5. Exact-boundary behavior per group ---------------------------------
+    # Each group has its own boundary Search-service-name length at which the
+    # plain name reaches *exactly* 60 characters (must stay unchanged, an
+    # upgrade-safety requirement since even one unnecessary rename forces
+    # delete/recreate of a working shared private link). One character longer
+    # (boundary+1) must switch to the bounded fallback token.
+    foreach ($group in $groups) {
+        # boundary length solves: 'spl-'.Length + N + 1 + groupId.Length + '-1'.Length == 60
+        $boundaryLength = $maxResourceNameLength - 'spl-'.Length - 1 - $group.Length - '-1'.Length
+        $boundaryName = 'a' * $boundaryLength
+        $atBoundary = Get-SharedPrivateLinkNameLength -SearchServiceNameLength $boundaryName.Length -GroupId $group
+        $expectedBoundaryName = "spl-$boundaryName-$group-1"
+        if (-not $atBoundary.UsedDirectName -or $atBoundary.Length -ne $maxResourceNameLength -or $atBoundary.Length -ne $expectedBoundaryName.Length) {
+            Add-Failure "Exact boundary: '$group' with a $boundaryLength-char Search service name should keep its plain, unchanged name at exactly $maxResourceNameLength chars; got length $($atBoundary.Length), direct=$($atBoundary.UsedDirectName)."
+        }
+        else {
+            Add-Pass "Exact boundary: '$group' with a $boundaryLength-char Search service name keeps its plain name unchanged at exactly $maxResourceNameLength chars."
+        }
+
+        $overBoundaryName = 'a' * ($boundaryLength + 1)
+        $overBoundary = Get-SharedPrivateLinkNameLength -SearchServiceNameLength $overBoundaryName.Length -GroupId $group
+        if ($overBoundary.UsedDirectName -or $overBoundary.Length -gt $maxResourceNameLength) {
+            Add-Failure "Boundary+1: '$group' with a $($boundaryLength + 1)-char Search service name (one char past the plain-name limit) should fall back to the bounded token and stay <= $maxResourceNameLength chars; got length $($overBoundary.Length), direct=$($overBoundary.UsedDirectName)."
+        }
+        else {
+            Add-Pass "Boundary+1: '$group' with a $($boundaryLength + 1)-char Search service name correctly falls back to the bounded token, staying at $($overBoundary.Length) chars."
+        }
+    }
+
+    # --- 6. Regression guard: every direct-name usage is length-guarded -----
     # The plain, unbounded name literal ('spl-${resourceNames.searchServiceName}-
     # <group>-1') is expected to still appear in source as the "fits" branch of
     # the ternary, guarded by a `length(...) <= searchFoundrySharedPrivateLinkMaxNameLength`

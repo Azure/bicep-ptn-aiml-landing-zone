@@ -24,7 +24,13 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
   plus a deterministic hash) when the plain name would exceed 60 characters.
   The three names remain pairwise distinct via their semantic group suffix and
   are bounded to exactly 60 characters in the worst case (a maximum-length
-  60-character Search service name). See
+  60-character Search service name). **Upgrade compatibility:** each of the
+  three shared private-link names is evaluated independently, so an existing
+  deployment is renamed only for the specific name(s) that actually exceed 60
+  characters — a deployment where all three names already fit is completely
+  unaffected on the next `azd provision`/redeploy, with no manual action
+  required. Only names that were already failing to provision (or would
+  newly exceed the limit) move to the bounded fallback form. See
   [Azure/GPT-RAG#592](https://github.com/Azure/GPT-RAG/issues/592) and
   [Azure/GPT-RAG#597](https://github.com/Azure/GPT-RAG/issues/597).
 
