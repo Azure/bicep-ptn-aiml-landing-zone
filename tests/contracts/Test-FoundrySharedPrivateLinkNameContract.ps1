@@ -323,7 +323,60 @@ try {
         }
     }
 
-    # --- 6. Regression guard: every direct-name usage is length-guarded -----
+    # --- 6. Explicit longest-suffix boundary pin: Search name length 28/29 --
+    # 'cognitiveservices_account' has the longest groupId (25 chars) of the
+    # three groups, so it is the *first* to require the bounded fallback as
+    # the Search service name grows -- it defines the tightest, longest-
+    # suffix boundary. These literal lengths (28 and 29) are hardcoded here,
+    # not derived from $group.Length in a loop, so this check stands on its
+    # own and is not an inference from the generic per-group boundary matrix
+    # in section 5 above.
+    #   - At Search name length 28: 'spl-' (4) + 28 + '-' (1) + 25 + '-1' (2)
+    #     = 60 exactly -> the direct/legacy name for 'cognitiveservices_account'
+    #     must be used, unchanged, and exactly 60 characters.
+    #   - At Search name length 29: the same computation = 61 -> exceeds the
+    #     limit, so 'cognitiveservices_account' MUST switch to the bounded
+    #     fallback token and stay <= 60. At this same 29-char Search name
+    #     length, the two shorter-suffix groups ('openai_account' at 14 chars,
+    #     'foundry_account' at 15 chars) do NOT yet need the fallback (their
+    #     direct names are 50 and 51 chars respectively, both <= 60), proving
+    #     the longest suffix switches first while shorter suffixes correctly
+    #     retain their direct/legacy names where they still fit.
+    $pinnedSearchNameLength28 = 28
+    $pinnedSearchNameLength29 = 29
+    $pinnedSearchName28 = 'a' * $pinnedSearchNameLength28
+
+    $cogsAt28 = Get-SharedPrivateLinkNameLength -SearchServiceNameLength $pinnedSearchNameLength28 -GroupId 'cognitiveservices_account'
+    $expectedCogsAt28Name = "spl-$pinnedSearchName28-cognitiveservices_account-1"
+    if (-not $cogsAt28.UsedDirectName -or $cogsAt28.Length -ne 60 -or $cogsAt28.Length -ne $expectedCogsAt28Name.Length) {
+        Add-Failure "Explicit pin: 'cognitiveservices_account' with a Search service name of exactly 28 characters must keep its direct/legacy name unchanged at exactly 60 characters (e.g. '$expectedCogsAt28Name'); got length $($cogsAt28.Length), direct=$($cogsAt28.UsedDirectName)."
+    }
+    else {
+        Add-Pass "Explicit pin: 'cognitiveservices_account' with a Search service name of exactly 28 characters keeps its direct/legacy name unchanged at exactly 60 characters ('$expectedCogsAt28Name')."
+    }
+
+    $cogsAt29 = Get-SharedPrivateLinkNameLength -SearchServiceNameLength $pinnedSearchNameLength29 -GroupId 'cognitiveservices_account'
+    if ($cogsAt29.UsedDirectName -or $cogsAt29.Length -gt $maxResourceNameLength) {
+        Add-Failure "Explicit pin: 'cognitiveservices_account' with a Search service name of exactly 29 characters (the longest-suffix group) must switch to the bounded fallback and stay <= $maxResourceNameLength characters; got length $($cogsAt29.Length), direct=$($cogsAt29.UsedDirectName)."
+    }
+    else {
+        Add-Pass "Explicit pin: 'cognitiveservices_account' with a Search service name of exactly 29 characters (the longest suffix) switches to the bounded fallback token, staying at $($cogsAt29.Length) chars."
+    }
+
+    $shorterSuffixGroups = @('openai_account', 'foundry_account')
+    $shorterSuffixesStillDirect = $true
+    foreach ($shorterGroup in $shorterSuffixGroups) {
+        $shorterResult = Get-SharedPrivateLinkNameLength -SearchServiceNameLength $pinnedSearchNameLength29 -GroupId $shorterGroup
+        if (-not $shorterResult.UsedDirectName -or $shorterResult.Length -gt $maxResourceNameLength) {
+            $shorterSuffixesStillDirect = $false
+            Add-Failure "Explicit pin: at Search service name length 29, the shorter-suffix group '$shorterGroup' should still fit and keep its direct/legacy name (<= $maxResourceNameLength chars); got length $($shorterResult.Length), direct=$($shorterResult.UsedDirectName)."
+        }
+    }
+    if ($shorterSuffixesStillDirect) {
+        Add-Pass "Explicit pin: at Search service name length 29, the shorter-suffix groups ('openai_account', 'foundry_account') correctly retain their direct/legacy names where they still fit, while only the longest suffix ('cognitiveservices_account') switches to the bounded fallback."
+    }
+
+    # --- 7. Regression guard: every direct-name usage is length-guarded -----
     # The plain, unbounded name literal ('spl-${resourceNames.searchServiceName}-
     # <group>-1') is expected to still appear in source as the "fits" branch of
     # the ternary, guarded by a `length(...) <= searchFoundrySharedPrivateLinkMaxNameLength`
