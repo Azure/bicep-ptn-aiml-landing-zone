@@ -16,7 +16,8 @@
         account), not an arbitrary magic number.
       - Simulates a maximum-length (60-character) Search service name and
         proves all three shared private-link names stay <=60 characters,
-        are pairwise distinct, and are deterministic.
+        are pairwise distinct, and are deterministic. Distinct long Search
+        names that share the truncated prefix are also collision-probed.
       - Replays the exact live-failure Search service name length and proves
         the previously overflowing `foundry_account`/`cognitiveservices_account`
         names are now bounded, while an ordinary/short Search service name
@@ -78,6 +79,23 @@ function Get-SharedPrivateLinkNameLength {
     $tokenLength = Get-BoundedTokenLength -SearchServiceNameLength $SearchServiceNameLength
     $boundedLength = 'spl-'.Length + $tokenLength + 1 + $GroupId.Length + '-1'.Length
     return @{ Length = $boundedLength; UsedDirectName = $false }
+}
+
+function Get-TestBoundedSharedPrivateLinkName {
+    param(
+        [Parameter(Mandatory)] [string]$SearchServiceName,
+        [Parameter(Mandatory)] [string]$GroupId
+    )
+
+    # The compiled-template checks below prove production hashes the complete
+    # Search name before taking six characters. SHA-256 is the offline
+    # deterministic surrogate used to exercise distinct concrete inputs.
+    $hashBytes = [System.Security.Cryptography.SHA256]::HashData(
+        [System.Text.Encoding]::UTF8.GetBytes($SearchServiceName)
+    )
+    $hashToken = ([System.Convert]::ToHexString($hashBytes)).ToLowerInvariant().Substring(0, 6)
+    $prefix = $SearchServiceName.Substring(0, [Math]::Min(21, $SearchServiceName.Length))
+    return "spl-$prefix-$hashToken-$GroupId-1"
 }
 
 Write-Host 'Foundry IQ shared private-link naming contract' -ForegroundColor Cyan
@@ -243,6 +261,23 @@ try {
     }
     else {
         Add-Failure 'Two or more bounded shared private-link names collide for a maximum-length Search service name.'
+    }
+
+    # Distinct long Search names with the same first 21 characters must remain
+    # distinguishable through the deterministic hash of the complete input.
+    $collisionProbeA = "$('a' * 59)x"
+    $collisionProbeB = "$('a' * 59)y"
+    $probeNameA = Get-TestBoundedSharedPrivateLinkName -SearchServiceName $collisionProbeA -GroupId 'cognitiveservices_account'
+    $probeNameARepeat = Get-TestBoundedSharedPrivateLinkName -SearchServiceName $collisionProbeA -GroupId 'cognitiveservices_account'
+    $probeNameB = Get-TestBoundedSharedPrivateLinkName -SearchServiceName $collisionProbeB -GroupId 'cognitiveservices_account'
+    if ($probeNameA -ne $probeNameARepeat) {
+        Add-Failure 'The concrete long-name collision probe is not deterministic for identical input.'
+    }
+    elseif ($probeNameA -eq $probeNameB) {
+        Add-Failure 'Distinct tested long Search names collide after bounded truncation and hashing.'
+    }
+    else {
+        Add-Pass 'Concrete long-name outputs are deterministic, and distinct tested inputs sharing the truncated prefix do not collide.'
     }
 
     # --- 3. Live-failure evidence replay (Azure/GPT-RAG#592, #597) -----------

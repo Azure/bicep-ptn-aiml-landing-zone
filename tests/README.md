@@ -60,9 +60,11 @@ Foundry/registry handoff. The ACR Task agent pool firewall contract test
 pool's required outbound platform-bootstrap Network Rules (AzureKeyVault,
 Storage, EventHub, AzureActiveDirectory, AzureMonitor) are present, correctly
 gated, ordered, and scoped to the devops build agents subnet — independent of
-the opaque hash check above. The deterministic preflight tests cover disabled,
-valid, mutable-image, and missing-prerequisite configurations without accessing
-Azure.
+the opaque hash check above. The Foundry shared private-link naming contract
+proves valid legacy child IDs remain unchanged, both long suffix variants stay
+within 60 characters, output is deterministic, and distinct tested long inputs
+do not collide. The deterministic preflight tests cover disabled, valid,
+mutable-image, and missing-prerequisite configurations without accessing Azure.
 
 ## End-to-end test flow
 
