@@ -8,12 +8,31 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 ### Fixed
 
 - **Foundry IQ shared private-link names now stay within Azure AI Search's
-  60-character resource-name limit.** Network-isolated deployments with long
-  explicit or CAF-generated Search service names previously produced
-  `foundry_account` and `cognitiveservices_account` child names longer than the
-  service accepts, failing late in provisioning after the long-running Foundry
-  resources completed. The names now use a bounded Search token with a
-  deterministic hash while preserving the semantic group suffix.
+  60-character resource-name limit for every Search service name, without
+  requiring short (<=7 character) environment names.** Network-isolated
+  deployments with long explicit or CAF-generated Search service names
+  previously produced `foundry_account` (61 chars) and `cognitiveservices_account`
+  (71 chars) child names longer than the service accepts, failing late in
+  provisioning after the long-running Foundry resources completed — reproduced
+  live against Azure/GPT-RAG. `openai_account` names were unaffected in that
+  scenario but remain in scope for the fix. Each of the three shared
+  private-link names now keeps its existing plain `spl-<searchServiceName>-
+  <groupId>-1` form whenever that name already fits (preserving names —
+  and avoiding orphaned/renamed child resources — for the vast majority of
+  existing deployments and ordinary CAF/azd Search service names), and only
+  falls back to a bounded, collision-resistant token (a truncated Search name
+  plus a deterministic hash) when the plain name would exceed 60 characters.
+  The three names remain pairwise distinct via their semantic group suffix and
+  are bounded to exactly 60 characters in the worst case (a maximum-length
+  60-character Search service name). **Upgrade compatibility:** each of the
+  three shared private-link names is evaluated independently, so an existing
+  deployment is renamed only for the specific name(s) that actually exceed 60
+  characters — a deployment where all three names already fit is completely
+  unaffected on the next `azd provision`/redeploy, with no manual action
+  required. Only names that were already failing to provision (or would
+  newly exceed the limit) move to the bounded fallback form. See
+  [Azure/GPT-RAG#592](https://github.com/Azure/GPT-RAG/issues/592) and
+  [Azure/GPT-RAG#597](https://github.com/Azure/GPT-RAG/issues/597).
 
 ## [v2.4.1] - 2026-08-03
 

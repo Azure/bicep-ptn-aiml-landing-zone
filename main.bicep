@@ -3064,25 +3064,40 @@ resource searchServiceResource 'Microsoft.Search/searchServices@2025-05-01' exis
   name: resourceNames.searchServiceName
 }
 
-// Search shared private-link names are limited to 60 characters. Keep the
-// semantic group suffix intact and retain collision resistance when an
-// explicit or CAF-generated Search service name is long.
+// Search shared private-link names are limited to 60 characters. The plain,
+// human-readable name (`spl-<searchServiceName>-<groupId>-1`) is kept as-is
+// whenever it already fits, preserving names for existing deployments and
+// ordinary CAF/azd-generated Search service names. Only when the plain name
+// would exceed the limit — long explicit or CAF-generated Search service
+// names — do we fall back to a bounded token that truncates the Search name
+// and appends a deterministic hash, keeping the semantic group suffix intact
+// and retaining collision resistance. This keeps the worst case (a
+// maximum-length 60-character Search service name) at exactly 60 characters
+// for every group, so it never depends on operators choosing short (<=7
+// character) environment names.
 var searchFoundrySharedPrivateLinkNameToken = '${take(resourceNames.searchServiceName, 21)}-${take(uniqueString(resourceNames.searchServiceName), 6)}'
+var searchFoundrySharedPrivateLinkMaxNameLength = 60
 
 var searchFoundrySharedPrivateLinkResources = (_networkIsolation && deploySearchService && deployAiFoundry && retrievalBackend == 'foundry_iq')
   ? [
       {
-        name: 'spl-${searchFoundrySharedPrivateLinkNameToken}-openai_account-1'
+        name: length('spl-${resourceNames.searchServiceName}-openai_account-1') <= searchFoundrySharedPrivateLinkMaxNameLength
+          ? 'spl-${resourceNames.searchServiceName}-openai_account-1'
+          : 'spl-${searchFoundrySharedPrivateLinkNameToken}-openai_account-1'
         groupId: 'openai_account'
         requestMessage: 'Allow AI Search private access to Azure OpenAI embeddings for Foundry IQ.'
       }
       {
-        name: 'spl-${searchFoundrySharedPrivateLinkNameToken}-foundry_account-1'
+        name: length('spl-${resourceNames.searchServiceName}-foundry_account-1') <= searchFoundrySharedPrivateLinkMaxNameLength
+          ? 'spl-${resourceNames.searchServiceName}-foundry_account-1'
+          : 'spl-${searchFoundrySharedPrivateLinkNameToken}-foundry_account-1'
         groupId: 'foundry_account'
         requestMessage: 'Allow AI Search private access to Microsoft Foundry for Foundry IQ.'
       }
       {
-        name: 'spl-${searchFoundrySharedPrivateLinkNameToken}-cognitiveservices_account-1'
+        name: length('spl-${resourceNames.searchServiceName}-cognitiveservices_account-1') <= searchFoundrySharedPrivateLinkMaxNameLength
+          ? 'spl-${resourceNames.searchServiceName}-cognitiveservices_account-1'
+          : 'spl-${searchFoundrySharedPrivateLinkNameToken}-cognitiveservices_account-1'
         groupId: 'cognitiveservices_account'
         requestMessage: 'Allow AI Search private access to Cognitive Services for Foundry IQ standard extraction.'
       }
