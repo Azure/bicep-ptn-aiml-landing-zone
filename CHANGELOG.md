@@ -26,6 +26,12 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ### Fixed
 
+- **Compiled-template size validation now uses one release gate locally and in
+  CI.** The bare `pwsh ./scripts/Measure-MainJsonSize.ps1` command now preserves
+  the 3.5 MB working warning while failing at the repository-authoritative
+  4.7 MB ratchet and 5.0 MB ARM ceiling. GitHub Actions calls the bare command
+  instead of overriding stale script defaults, and deterministic regression
+  coverage prevents the local and CI contracts from diverging again.
 - **Foundry IQ shared private-link names now stay within Azure AI Search's
   60-character resource-name limit for every Search service name, without
   requiring short (<=7 character) environment names.** Network-isolated

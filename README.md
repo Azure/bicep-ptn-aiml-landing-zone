@@ -52,6 +52,19 @@ Choose your preferred deployment method based on project requirements and enviro
 
 > Azure CLI is included as a prerequisite for future pre/post provisioning hooks that may depend on it.
 
+### Validate Bicep changes
+
+Before submitting a Bicep change, compile `main.bicep` and apply the same
+compiled-template size gate used by CI:
+
+```pwsh
+pwsh ./scripts/Measure-MainJsonSize.ps1
+```
+
+The script defaults are authoritative for both local and CI validation. The
+gate warns above the 3.5 MB working budget, fails at 4.7 MB, and treats the
+5.0 MB ARM ceiling as an unconditional failure.
+
 ### Basic Deployment
 
 Quick setup for demos without network isolation.
