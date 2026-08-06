@@ -10,6 +10,7 @@ on:
       - 'scripts/Measure-MainJsonSize.ps1'
       - 'scripts/Invoke-PreflightChecks.ps1'
       - 'tests/contracts/**'
+      - 'tests/scripts/Measure-MainJsonSize.Tests.ps1'
       - 'tests/scripts/Invoke-PreflightChecks.Tests.ps1'
       - 'AGENTS.md'
       - '.github/agents/**'
@@ -28,8 +29,10 @@ on:
       - 'modules/**'
       - 'constants/**'
       - 'main.parameters.json'
+      - 'scripts/Measure-MainJsonSize.ps1'
       - 'scripts/Invoke-PreflightChecks.ps1'
       - 'tests/contracts/**'
+      - 'tests/scripts/Measure-MainJsonSize.Tests.ps1'
       - 'tests/scripts/Invoke-PreflightChecks.Tests.ps1'
       - 'AGENTS.md'
       - '.github/agents/**'
@@ -81,17 +84,12 @@ jobs:
       - name: Compile main.bicep and check size
         shell: pwsh
         run: |
-          # v2.0.0 baseline at branch creation: 4.589 MB.
-          # The "ratchet" approach: prevent regressions from the baseline now,
-          # tighten to the issue #58 acceptance target (3.5 MB working / 3.8 MB
-          # fail) once the compression phase lands. ArmHardCeilingMB is 5.0
-          # because the current 4.589 MB template DOES deploy successfully
-          # (modules get nested-deployed at runtime), so the docs' 4 MB limit
-          # applies per nested deployment, not the root JSON.
-          pwsh ./scripts/Measure-MainJsonSize.ps1 `
-            -WorkingBudgetMB 3.5 `
-            -FailThresholdMB 4.7 `
-            -ArmHardCeilingMB 5.0
+          # The script defaults are the single source of truth for local and CI gates.
+          pwsh ./scripts/Measure-MainJsonSize.ps1
+
+      - name: Test compiled-template size gate
+        shell: pwsh
+        run: pwsh ./tests/scripts/Measure-MainJsonSize.Tests.ps1
 
       - name: Validate hosted-agent resource contract
         shell: pwsh

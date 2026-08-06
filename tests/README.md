@@ -36,6 +36,7 @@ tests/
 │   └── .outputs.json         (gitignored — captured outputs from last deploy)
 └── scripts/
     ├── Deploy-Hub.ps1        (idempotent hub deployer + output capture)
+    ├── Measure-MainJsonSize.Tests.ps1
     └── Invoke-PreflightChecks.Tests.ps1
 ```
 
@@ -47,6 +48,7 @@ Run from the repository root:
 pwsh tests/contracts/Test-HostedAgentContract.ps1
 pwsh tests/contracts/Test-AcrTaskAgentPoolFirewallContract.ps1
 pwsh tests/contracts/Test-FoundrySharedPrivateLinkNameContract.ps1
+pwsh tests/scripts/Measure-MainJsonSize.Tests.ps1
 pwsh tests/scripts/Invoke-PreflightChecks.Tests.ps1
 ```
 
@@ -69,6 +71,9 @@ within 60 characters, output is deterministic, and distinct tested long inputs
 do not collide. The deterministic preflight tests cover disabled, prepare-only,
 valid immutable deployment, mutable/missing image digest, private build, and
 missing-prerequisite configurations without accessing Azure.
+The compiled-template size tests prove that the script's default 3.5 MB warning,
+4.7 MB failure, and 5.0 MB hard ceiling remain aligned with the workflow's bare
+command and exercise each exit path without compiling or accessing Azure.
 
 ## End-to-end test flow
 

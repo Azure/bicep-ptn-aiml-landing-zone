@@ -1,23 +1,23 @@
 <#
 .SYNOPSIS
-  Measure the compiled main.json size and apply v2.0.0 size budget thresholds.
+  Measure the compiled main.json size and apply the release size gate.
 
 .DESCRIPTION
   Compiles main.bicep (unless -SkipBuild is set), then reports the resulting
   main.json size in bytes, KB and MB. Emits a warning when the size exceeds the
   working budget (3.5 MB by default) and exits non-zero when it exceeds the CI
-  fail threshold (3.8 MB by default). The ARM hard ceiling is 4 MB and is
+  fail threshold (4.7 MB by default). The ARM hard ceiling is 5.0 MB and is
   treated as an unconditional failure.
 
 .PARAMETER WorkingBudgetMB
   Soft warning threshold. Defaults to 3.5 MB per issue #58 acceptance criteria.
 
 .PARAMETER FailThresholdMB
-  CI fail threshold. Defaults to 3.8 MB per issue #58 acceptance criteria.
+  CI fail threshold. Defaults to the 4.7 MB release ratchet.
 
 .PARAMETER ArmHardCeilingMB
   ARM request payload hard ceiling. Should never be crossed; deployments will
-  fail with RequestContentTooLarge. Defaults to 4.0 MB.
+  fail with RequestContentTooLarge. Defaults to 5.0 MB.
 
 .PARAMETER SkipBuild
   Skip `bicep build` and measure the existing main.json. Useful in CI when an
@@ -29,8 +29,8 @@
 [CmdletBinding()]
 param(
   [double]$WorkingBudgetMB = 3.5,
-  [double]$FailThresholdMB = 3.8,
-  [double]$ArmHardCeilingMB = 4.0,
+  [double]$FailThresholdMB = 4.7,
+  [double]$ArmHardCeilingMB = 5.0,
   [switch]$SkipBuild
 )
 
