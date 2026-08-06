@@ -104,6 +104,10 @@ jobs:
         shell: pwsh
         run: pwsh ./tests/contracts/Test-AcrTaskAgentPoolFirewallContract.ps1
 
+      - name: Validate Foundry shared private-link names
+        shell: pwsh
+        run: pwsh ./tests/contracts/Test-FoundrySharedPrivateLinkNameContract.ps1
+
       - name: Run deterministic preflight tests
         shell: pwsh
         run: pwsh ./tests/scripts/Invoke-PreflightChecks.Tests.ps1

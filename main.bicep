@@ -386,10 +386,13 @@ param deployAzureFirewall bool = true
 @description('Deploy an ACR Task agent pool so image builds can run inside the VNet when the registry has public access disabled. Requires a Premium container registry (auto-selected when networkIsolation is true) and is gated on both deployContainerRegistry and networkIsolation.')
 param deployAcrTaskAgentPool bool = true
 
-@description('Enable accelerator-neutral prerequisites and deployment contracts for a Microsoft Foundry hosted agent. The landing zone does not create the data-plane agent version and never changes Container Apps or data resources. Defaults to false.')
+@description('Prepare accelerator-neutral Microsoft Foundry hosted-agent prerequisites without requesting downstream agent deployment. Provisions the required project and registry RBAC and exposes project, registry, network, and private-build handoff values. deployHostedAgent implies this behavior. Defaults to false.')
+param prepareHostedAgent bool = false
+
+@description('Request the downstream Microsoft Foundry hosted-agent deployment handoff. Implies prepareHostedAgent behavior and requires hostedAgent.version to be an immutable OCI digest. The landing zone does not create the data-plane agent version and never changes Container Apps or data resources. Defaults to false.')
 param deployHostedAgent bool = false
 
-@description('Typed hosted-agent deployment handoff consumed by a downstream `azure.ai.agent` service. `image` is the repository path within the selected registry, `version` must be an immutable OCI digest (`sha256:...`), optional `startupCommand` maps to the official azure.yaml field, and `runtime` maps to `container.resources`. Values are validated only when deployHostedAgent is true.')
+@description('Typed hosted-agent deployment handoff consumed by a downstream `azure.ai.agent` service. `image` is the repository path within the selected registry, `version` must be an immutable OCI digest (`sha256:` plus 64 lowercase hex characters), optional `startupCommand` maps to the official azure.yaml field, and `runtime` maps to `container.resources`. Values are validated only when deployHostedAgent is true.')
 param hostedAgent hostedAgentConfigurationType = {
   name: ''
   image: ''
@@ -524,7 +527,7 @@ type hostedAgentConfigurationType = {
   @description('Container image repository path inside the selected registry, without a tag or digest.')
   image: string
 
-  @description('Immutable OCI image digest in `sha256:<64 hex characters>` form.')
+  @description('Immutable OCI image digest in `sha256:<64 lowercase hex characters>` form.')
   version: string
 
   @description('Optional command that starts the agent server. Maps to `startupCommand` in the official `azure.ai.agent` service contract.')
@@ -1033,11 +1036,12 @@ var _extraRepoTags  = [for c in _manifestComponents: c.?tag ?? 'main']
 var _extraRepoNames = [for c in _manifestComponents: c.?name ?? replace(last(split(c.repo, '/')), '.git', '')]
 
 var _networkIsolation = empty(string(networkIsolation)) ? false : bool(networkIsolation)
+var _hostedAgentPrerequisitesEnabled = prepareHostedAgent || deployHostedAgent
 
 #disable-next-line BCP318
 var _hostedAgentContainerRegistryResourceId = deployContainerRegistry ? containerRegistry.id : hostedAgentContainerRegistryResourceId
 var _hostedAgentContainerRegistryEndpoint = deployContainerRegistry ? '${resourceNames.containerRegistryName}.${acrDnsSuffix}' : hostedAgentContainerRegistryEndpoint
-var _hostedAgentImageReference = '${_hostedAgentContainerRegistryEndpoint}/${hostedAgent.image}@${hostedAgent.version}'
+var _hostedAgentImageReference = deployHostedAgent ? '${_hostedAgentContainerRegistryEndpoint}/${hostedAgent.image}@${hostedAgent.version}' : ''
 var _containerRegistryRepositoryReaderRoleId = 'b93aa761-3e63-49ed-ac28-beffa264f7ac'
 var _hostedAgentContainerRegistryPullRoleId = deployContainerRegistry || hostedAgentContainerRegistryRoleAssignmentMode == 'rbac'
   ? const.roles.AcrPull.guid
@@ -3064,20 +3068,40 @@ resource searchServiceResource 'Microsoft.Search/searchServices@2025-05-01' exis
   name: resourceNames.searchServiceName
 }
 
+// Search shared private-link names are limited to 60 characters. The plain,
+// human-readable name (`spl-<searchServiceName>-<groupId>-1`) is kept as-is
+// whenever it already fits, preserving names for existing deployments and
+// ordinary CAF/azd-generated Search service names. Only when the plain name
+// would exceed the limit — long explicit or CAF-generated Search service
+// names — do we fall back to a bounded token that truncates the Search name
+// and appends a deterministic hash, keeping the semantic group suffix intact
+// and retaining collision resistance. This keeps the worst case (a
+// maximum-length 60-character Search service name) at exactly 60 characters
+// for every group, so it never depends on operators choosing short (<=7
+// character) environment names.
+var searchFoundrySharedPrivateLinkNameToken = '${take(resourceNames.searchServiceName, 21)}-${take(uniqueString(resourceNames.searchServiceName), 6)}'
+var searchFoundrySharedPrivateLinkMaxNameLength = 60
+
 var searchFoundrySharedPrivateLinkResources = (_networkIsolation && deploySearchService && deployAiFoundry && retrievalBackend == 'foundry_iq')
   ? [
       {
-        name: 'spl-${resourceNames.searchServiceName}-openai_account-1'
+        name: length('spl-${resourceNames.searchServiceName}-openai_account-1') <= searchFoundrySharedPrivateLinkMaxNameLength
+          ? 'spl-${resourceNames.searchServiceName}-openai_account-1'
+          : 'spl-${searchFoundrySharedPrivateLinkNameToken}-openai_account-1'
         groupId: 'openai_account'
         requestMessage: 'Allow AI Search private access to Azure OpenAI embeddings for Foundry IQ.'
       }
       {
-        name: 'spl-${resourceNames.searchServiceName}-foundry_account-1'
+        name: length('spl-${resourceNames.searchServiceName}-foundry_account-1') <= searchFoundrySharedPrivateLinkMaxNameLength
+          ? 'spl-${resourceNames.searchServiceName}-foundry_account-1'
+          : 'spl-${searchFoundrySharedPrivateLinkNameToken}-foundry_account-1'
         groupId: 'foundry_account'
         requestMessage: 'Allow AI Search private access to Microsoft Foundry for Foundry IQ.'
       }
       {
-        name: 'spl-${resourceNames.searchServiceName}-cognitiveservices_account-1'
+        name: length('spl-${resourceNames.searchServiceName}-cognitiveservices_account-1') <= searchFoundrySharedPrivateLinkMaxNameLength
+          ? 'spl-${resourceNames.searchServiceName}-cognitiveservices_account-1'
+          : 'spl-${searchFoundrySharedPrivateLinkNameToken}-cognitiveservices_account-1'
         groupId: 'cognitiveservices_account'
         requestMessage: 'Allow AI Search private access to Cognitive Services for Foundry IQ standard extraction.'
       }
@@ -3325,7 +3349,7 @@ var _executorRoles = concat(
         principalType: principalType
       }
     ],
-    deployHostedAgent ? [
+    _hostedAgentPrerequisitesEnabled ? [
       {
         principalId: principalId
         roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', const.roles.AzureAIProjectManager.guid)
@@ -3547,7 +3571,7 @@ var _crossServiceRoleAssignments = concat(
   // Registry-mode-compatible pull role -> AI Foundry project identity.
   // The dedicated hosted-agent identity and its runtime roles are created by
   // `azd deploy`; the landing zone must not invent or replace that identity.
-  (deployHostedAgent && deployAiFoundry) ? [
+  (_hostedAgentPrerequisitesEnabled && deployAiFoundry) ? [
     {
       principalId: aiFoundry!.outputs.aiProjectPrincipalId
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', _hostedAgentContainerRegistryPullRoleId)
@@ -3557,7 +3581,7 @@ var _crossServiceRoleAssignments = concat(
   ] : []
 )
 
-module assignCrossServiceRoles 'modules/security/resource-role-assignment.bicep' = if ((deployAiFoundry && deploySearchService) || (deployStorageAccount && deploySearchService) || (deployAiFoundry && deployStorageAccount) || (deployHostedAgent && deployAiFoundry)) {
+module assignCrossServiceRoles 'modules/security/resource-role-assignment.bicep' = if ((deployAiFoundry && deploySearchService) || (deployStorageAccount && deploySearchService) || (deployAiFoundry && deployStorageAccount) || (_hostedAgentPrerequisitesEnabled && deployAiFoundry)) {
   name: 'assignCrossServiceRoles'
   params: {
     name: 'assignCrossServiceRoles'
@@ -4013,10 +4037,12 @@ output CONTAINER_APP_INTERNAL_FQDN string = (deployContainerApps && length(conta
 // dedicated agent identity, and invocation endpoint are data-plane resources
 // created by the downstream `azure.ai.agent` service during `azd deploy`.
 output DEPLOY_HOSTED_AGENT bool = deployHostedAgent
-output AZURE_AI_PROJECT_RESOURCE_ID string = deployHostedAgent ? aiFoundryProjectResourceId : ''
-output AZURE_AI_PROJECT_ENDPOINT string = deployHostedAgent ? aiFoundryProjectEndpoint : ''
-output AZURE_CONTAINER_REGISTRY_RESOURCE_ID string = deployHostedAgent ? _hostedAgentContainerRegistryResourceId : ''
-output AZURE_CONTAINER_REGISTRY_ENDPOINT string = deployHostedAgent ? _hostedAgentContainerRegistryEndpoint : ''
+@description('True when hosted-agent prerequisites were selected through prepareHostedAgent or deployHostedAgent. This does not indicate that a hosted agent version exists.')
+output HOSTED_AGENT_PREPARED bool = _hostedAgentPrerequisitesEnabled
+output AZURE_AI_PROJECT_RESOURCE_ID string = _hostedAgentPrerequisitesEnabled ? aiFoundryProjectResourceId : ''
+output AZURE_AI_PROJECT_ENDPOINT string = _hostedAgentPrerequisitesEnabled ? aiFoundryProjectEndpoint : ''
+output AZURE_CONTAINER_REGISTRY_RESOURCE_ID string = _hostedAgentPrerequisitesEnabled ? _hostedAgentContainerRegistryResourceId : ''
+output AZURE_CONTAINER_REGISTRY_ENDPOINT string = _hostedAgentPrerequisitesEnabled ? _hostedAgentContainerRegistryEndpoint : ''
 #disable-next-line BCP318
 output HOSTED_AGENT_DEPLOYMENT object = {
   enabled: deployHostedAgent
@@ -4028,20 +4054,20 @@ output HOSTED_AGENT_DEPLOYMENT object = {
     runtime: hostedAgent.runtime
     protocols: hostedAgent.protocols
   } : null
-  foundry: deployHostedAgent ? {
+  foundry: _hostedAgentPrerequisitesEnabled ? {
     projectResourceId: aiFoundryProjectResourceId
     projectEndpoint: aiFoundryProjectEndpoint
     projectPrincipalId: aiFoundry!.outputs.aiProjectPrincipalId
     agentSubnetResourceId: _agentSubnetId
   } : null
-  containerRegistry: deployHostedAgent ? {
+  containerRegistry: _hostedAgentPrerequisitesEnabled ? {
     resourceId: _hostedAgentContainerRegistryResourceId
     endpoint: _hostedAgentContainerRegistryEndpoint
   } : null
   privateBuild: {
-    required: deployHostedAgent && _networkIsolation
-    subnetResourceId: (deployHostedAgent && _networkIsolation) ? '${virtualNetworkResourceId}/subnets/${devopsBuildAgentsSubnetName}' : ''
-    jumpboxResourceId: (deployHostedAgent && _networkIsolation) ? (_deployJumpbox ? testVm!.outputs.resourceId : (existingJumpboxResourceId ?? '')) : ''
-    acrTaskAgentPoolName: (deployHostedAgent && _deployAcrTaskAgentPool) ? acrTaskAgentPoolName : ''
+    required: _hostedAgentPrerequisitesEnabled && _networkIsolation
+    subnetResourceId: (_hostedAgentPrerequisitesEnabled && _networkIsolation) ? '${virtualNetworkResourceId}/subnets/${devopsBuildAgentsSubnetName}' : ''
+    jumpboxResourceId: (_hostedAgentPrerequisitesEnabled && _networkIsolation) ? (_deployJumpbox ? testVm!.outputs.resourceId : (existingJumpboxResourceId ?? '')) : ''
+    acrTaskAgentPoolName: (_hostedAgentPrerequisitesEnabled && _deployAcrTaskAgentPool) ? acrTaskAgentPoolName : ''
   }
 }

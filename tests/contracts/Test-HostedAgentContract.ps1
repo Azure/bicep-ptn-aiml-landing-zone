@@ -6,7 +6,7 @@
     Compiles main.bicep and compares its symbolic ARM resource graph with the
     merge-base fixture. All pre-existing deployment semantics must remain stable.
     Only the two centralized RBAC deployment payloads may change, and both
-    changes must be gated by deployHostedAgent.
+    changes must be gated by prepareHostedAgent or deployHostedAgent.
 #>
 
 [CmdletBinding()]
@@ -126,11 +126,25 @@ try {
 
     Write-Host "Hosted-agent resource contract (baseline $($fixture.mergeBase))" -ForegroundColor Cyan
 
-    if ($template.parameters.deployHostedAgent.defaultValue -ne $false) {
-        Add-Failure 'deployHostedAgent must default to false.'
+    foreach ($parameterName in 'prepareHostedAgent', 'deployHostedAgent') {
+        if ($template.parameters.$parameterName.defaultValue -ne $false) {
+            Add-Failure "$parameterName must default to false."
+        }
+        else {
+            Add-Pass "$parameterName defaults to false."
+        }
+    }
+
+    $prerequisiteExpression = [string]$template.variables._hostedAgentPrerequisitesEnabled
+    $missingPrerequisiteTokens = @(
+        "parameters('prepareHostedAgent')",
+        "parameters('deployHostedAgent')"
+    ) | Where-Object { -not $prerequisiteExpression.Contains($_) }
+    if ($missingPrerequisiteTokens.Count -gt 0 -or -not $prerequisiteExpression.Contains('or(')) {
+        Add-Failure "Hosted-agent prerequisites must be enabled by prepareHostedAgent OR deployHostedAgent. Expression: $prerequisiteExpression"
     }
     else {
-        Add-Pass 'deployHostedAgent defaults to false.'
+        Add-Pass 'deployHostedAgent is a superset of prepareHostedAgent prerequisites.'
     }
 
     $expectedNames = @($fixture.resourceHashes.PSObject.Properties.Name) + @($fixture.allowedHostedMutations)
@@ -169,14 +183,14 @@ try {
     $crossServiceJson = $template.resources.assignCrossServiceRoles | ConvertTo-Json -Depth 100 -Compress
     foreach ($check in @(
             @{
-                Name = 'Executor receives Foundry Project Manager only when hosted enablement is selected.'
+                Name = 'Executor receives Foundry Project Manager when preparation or deployment is selected.'
                 Json = $executorJson
-                Required = @("parameters('deployHostedAgent')", 'AzureAIProjectManager')
+                Required = @("variables('_hostedAgentPrerequisitesEnabled')", 'AzureAIProjectManager')
             },
             @{
-                Name = 'Foundry project identity receives a registry-mode-compatible pull role only when hosted enablement is selected.'
+                Name = 'Foundry project identity receives a registry-mode-compatible pull role when preparation or deployment is selected.'
                 Json = $crossServiceJson
-                Required = @("parameters('deployHostedAgent')", "variables('_hostedAgentContainerRegistryPullRoleId')")
+                Required = @("variables('_hostedAgentPrerequisitesEnabled')", "variables('_hostedAgentContainerRegistryPullRoleId')")
             }
         )) {
         $missing = @($check.Required | Where-Object { -not $check.Json.Contains($_) })
@@ -216,6 +230,7 @@ try {
             'AZURE_AI_PROJECT_ENDPOINT',
             'AZURE_CONTAINER_REGISTRY_RESOURCE_ID',
             'AZURE_CONTAINER_REGISTRY_ENDPOINT',
+            'HOSTED_AGENT_PREPARED',
             'HOSTED_AGENT_DEPLOYMENT'
         )) {
         if ($outputName -notin $template.outputs.PSObject.Properties.Name) {
@@ -224,6 +239,81 @@ try {
     }
     if (-not ($failures | Where-Object { $_ -like "Required hosted-agent handoff output*" })) {
         Add-Pass 'Stable Foundry, registry, image/runtime, network, and private-build outputs are present.'
+    }
+
+    foreach ($outputName in @(
+            'AZURE_AI_PROJECT_RESOURCE_ID',
+            'AZURE_AI_PROJECT_ENDPOINT',
+            'AZURE_CONTAINER_REGISTRY_RESOURCE_ID',
+            'AZURE_CONTAINER_REGISTRY_ENDPOINT'
+        )) {
+        $outputJson = $template.outputs.$outputName | ConvertTo-Json -Depth 20 -Compress
+        if (-not $outputJson.Contains("variables('_hostedAgentPrerequisitesEnabled')")) {
+            Add-Failure "$outputName must be available in prepare and deploy modes."
+        }
+    }
+    if (-not ($failures | Where-Object { $_ -like '*must be available in prepare and deploy modes*' })) {
+        Add-Pass 'Foundry and registry handoff outputs are available in both preparation and deployment modes.'
+    }
+
+    $preparedOutputJson = $template.outputs.HOSTED_AGENT_PREPARED | ConvertTo-Json -Depth 20 -Compress
+    if (-not $preparedOutputJson.Contains("variables('_hostedAgentPrerequisitesEnabled')")) {
+        Add-Failure 'HOSTED_AGENT_PREPARED must expose effective prerequisite enablement.'
+    }
+    else {
+        Add-Pass 'HOSTED_AGENT_PREPARED distinguishes prepared infrastructure from deployment intent.'
+    }
+
+    $deploymentOutput = $template.outputs.HOSTED_AGENT_DEPLOYMENT.value
+    $deploymentOnlyJson = @(
+        $deploymentOutput.enabled,
+        $deploymentOutput.agent
+    ) | ConvertTo-Json -Depth 30 -Compress
+    if (-not $deploymentOnlyJson.Contains("parameters('deployHostedAgent')") -or
+        $deploymentOnlyJson.Contains("parameters('prepareHostedAgent')") -or
+        $deploymentOnlyJson.Contains("variables('_hostedAgentPrerequisitesEnabled')")) {
+        Add-Failure 'HOSTED_AGENT_DEPLOYMENT.enabled and agent must remain gated only by deployHostedAgent.'
+    }
+    else {
+        Add-Pass 'Preparation does not enable or populate the hosted-agent deployment payload.'
+    }
+
+    $prerequisiteOutputJson = @(
+        $deploymentOutput.foundry,
+        $deploymentOutput.containerRegistry,
+        $deploymentOutput.privateBuild
+    ) | ConvertTo-Json -Depth 30 -Compress
+    if (-not $prerequisiteOutputJson.Contains("variables('_hostedAgentPrerequisitesEnabled')")) {
+        Add-Failure 'HOSTED_AGENT_DEPLOYMENT prerequisite handoff must be available in prepare and deploy modes.'
+    }
+    else {
+        Add-Pass 'The consolidated handoff exposes Foundry, registry, and private-build prerequisites in prepare mode.'
+    }
+
+    $resourceJson = $template.resources | ConvertTo-Json -Depth 100 -Compress
+    $hostedResourceTokens = @('azure.ai.agent', 'Microsoft.CognitiveServices/accounts/projects/agents')
+    $unexpectedHostedResourceTokens = @($hostedResourceTokens | Where-Object { $resourceJson.Contains($_) })
+    if ($unexpectedHostedResourceTokens.Count -gt 0) {
+        Add-Failure "Preparation must not create a hosted-agent resource. Found: $($unexpectedHostedResourceTokens -join ', ')."
+    }
+    else {
+        Add-Pass 'No hosted-agent resource exists in the compiled preparation template.'
+    }
+
+    $agentPoolExpression = [string]$template.variables._deployAcrTaskAgentPool
+    $requiredAgentPoolTokens = @(
+        "parameters('deployContainerRegistry')",
+        "variables('_networkIsolation')",
+        "parameters('deployAcrTaskAgentPool')"
+    )
+    $missingAgentPoolTokens = @($requiredAgentPoolTokens | Where-Object { -not $agentPoolExpression.Contains($_) })
+    if ($missingAgentPoolTokens.Count -gt 0 -or
+        $agentPoolExpression.Contains("parameters('prepareHostedAgent')") -or
+        $agentPoolExpression.Contains("parameters('deployHostedAgent')")) {
+        Add-Failure "Private ACR agent-pool topology changed unexpectedly. Expression: $agentPoolExpression"
+    }
+    else {
+        Add-Pass 'Private ACR agent-pool topology remains independently gated by registry, isolation, and pool selection.'
     }
 
     $registryJson = $template.resources.containerRegistry | ConvertTo-Json -Depth 100 -Compress

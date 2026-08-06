@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     Synthetic-input tests that exercise the deterministic checks (Test-Topology,
-    Test-AllowedIpRanges, Test-LocalCidrSanity) without touching Azure.
+    Test-HostedAgentConfiguration, Test-AllowedIpRanges, Test-LocalCidrSanity)
+    without touching Azure.
 
     Usage:
         pwsh ./tests/scripts/Invoke-PreflightChecks.Tests.ps1
@@ -209,14 +210,29 @@ Assert-True 'WARN ISO_NO_INGRESS raised' (Test-FindingPresent 'ISO_NO_INGRESS')
 Write-Host 'Hosted agent: disabled contract is inert' -ForegroundColor Cyan
 Reset-Findings
 Test-HostedAgentConfiguration -P @{
+    prepareHostedAgent = $false
     deployHostedAgent = $false
 }
 Assert-True 'Disabled hosted-agent contract emits no findings' (@($script:Findings).Count -eq 0)
 
 # --------------------------------------------------------------------------
-Write-Host 'Hosted agent: valid additive contract passes' -ForegroundColor Cyan
+Write-Host 'Hosted agent: prepare-only contract does not require an image digest' -ForegroundColor Cyan
 Reset-Findings
 Test-HostedAgentConfiguration -P @{
+    prepareHostedAgent    = $true
+    deployHostedAgent     = $false
+    deployAiFoundry       = $true
+    deployContainerRegistry = $true
+    networkIsolation      = $false
+}
+Assert-True 'Prepare-only hosted-agent contract has no failures without hostedAgent.version' (@($script:Findings | Where-Object Severity -eq 'FAIL').Count -eq 0)
+Assert-True 'Prepare-only hosted-agent contract skips immutable image validation' (Test-FindingAbsent 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE')
+
+# --------------------------------------------------------------------------
+Write-Host 'Hosted agent: deploy is a superset and accepts an immutable digest' -ForegroundColor Cyan
+Reset-Findings
+Test-HostedAgentConfiguration -P @{
+    prepareHostedAgent      = $false
     deployHostedAgent       = $true
     deployAiFoundry         = $true
     deployContainerRegistry = $true
@@ -231,25 +247,32 @@ Test-HostedAgentConfiguration -P @{
     }
 }
 Assert-True 'Valid hosted-agent contract has no failures' (@($script:Findings | Where-Object Severity -eq 'FAIL').Count -eq 0)
+Assert-True 'Immutable hosted-agent image digest is accepted' (Test-FindingAbsent 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE')
+
+# --------------------------------------------------------------------------
+Write-Host 'Hosted agent: private preparation reports the VNet build requirement' -ForegroundColor Cyan
+Reset-Findings
+Test-HostedAgentConfiguration -P @{
+    prepareHostedAgent      = $true
+    deployHostedAgent       = $false
+    deployAiFoundry         = $true
+    deployContainerRegistry = $true
+    networkIsolation        = $true
+}
+Assert-True 'Prepare-only private registry requires an in-VNet build path' (Test-FindingPresent 'HOSTED_AGENT_PRIVATE_BUILD_REQUIRED')
+Assert-True 'Prepare-only private registry has no failures' (@($script:Findings | Where-Object Severity -eq 'FAIL').Count -eq 0)
 
 # --------------------------------------------------------------------------
 Write-Host 'Hosted agent: registry role assignment mode is validated' -ForegroundColor Cyan
 Reset-Findings
 Test-HostedAgentConfiguration -P @{
-    deployHostedAgent                               = $true
+    prepareHostedAgent                              = $true
+    deployHostedAgent                               = $false
     deployAiFoundry                                 = $true
     deployContainerRegistry                         = $false
     hostedAgentContainerRegistryResourceId         = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/Microsoft.ContainerRegistry/registries/acr'
     hostedAgentContainerRegistryEndpoint           = 'acr.azurecr.io'
     hostedAgentContainerRegistryRoleAssignmentMode = 'unsupported'
-    hostedAgent                                     = [pscustomobject]@{
-        name           = 'sample-agent'
-        image          = 'agents/sample'
-        version        = "sha256:$('a' * 64)"
-        startupCommand = ''
-        runtime        = [pscustomobject]@{ cpu = '1'; memory = '1Gi' }
-        protocols      = @([pscustomobject]@{ protocol = 'responses'; version = '2.0.0' })
-    }
 }
 Assert-True 'FAIL HOSTED_AGENT_REGISTRY_ROLE_MODE_INVALID raised' (Test-FindingPresent 'HOSTED_AGENT_REGISTRY_ROLE_MODE_INVALID')
 
@@ -310,22 +333,60 @@ Test-HostedAgentConfiguration -P @{
 Assert-True 'FAIL HOSTED_AGENT_IMAGE_NOT_IMMUTABLE raised' (Test-FindingPresent 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE')
 
 # --------------------------------------------------------------------------
-Write-Host 'Hosted agent: Foundry and registry prerequisites are enforced' -ForegroundColor Cyan
+Write-Host 'Hosted agent: missing image digest is rejected during deployment' -ForegroundColor Cyan
 Reset-Findings
 Test-HostedAgentConfiguration -P @{
-    deployHostedAgent                       = $true
-    deployAiFoundry                         = $false
-    deployContainerRegistry                 = $false
-    hostedAgentContainerRegistryResourceId = ''
-    hostedAgentContainerRegistryEndpoint   = ''
-    hostedAgent                             = [pscustomobject]@{
+    prepareHostedAgent      = $true
+    deployHostedAgent       = $true
+    deployAiFoundry         = $true
+    deployContainerRegistry = $true
+    hostedAgent             = [pscustomobject]@{
         name           = 'sample-agent'
         image          = 'agents/sample'
-        version        = "sha256:$('b' * 64)"
+        version        = ''
         startupCommand = 'python main.py'
         runtime        = [pscustomobject]@{ cpu = '1'; memory = '1Gi' }
         protocols      = @([pscustomobject]@{ protocol = 'responses'; version = '2.0.0' })
     }
+}
+Assert-True 'FAIL HOSTED_AGENT_IMAGE_NOT_IMMUTABLE raised for missing digest' (Test-FindingPresent 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE')
+
+# --------------------------------------------------------------------------
+Write-Host 'Hosted agent: noncanonical and placeholder digests are rejected' -ForegroundColor Cyan
+foreach ($invalidDigest in @(
+        " SHA256:$('d' * 64) ",
+        "sha256:$('A' * 64)",
+        "sha256:$('e' * 64)`n",
+        'sha256:<64-hex-digest>'
+    )) {
+    Reset-Findings
+    Test-HostedAgentConfiguration -P @{
+        prepareHostedAgent      = $false
+        deployHostedAgent       = $true
+        deployAiFoundry         = $true
+        deployContainerRegistry = $true
+        hostedAgent             = [pscustomobject]@{
+            name           = 'sample-agent'
+            image          = 'agents/sample'
+            version        = $invalidDigest
+            startupCommand = 'python main.py'
+            runtime        = [pscustomobject]@{ cpu = '1'; memory = '1Gi' }
+            protocols      = @([pscustomobject]@{ protocol = 'responses'; version = '2.0.0' })
+        }
+    }
+    Assert-True "FAIL HOSTED_AGENT_IMAGE_NOT_IMMUTABLE raised for '$invalidDigest'" (Test-FindingPresent 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE')
+}
+
+# --------------------------------------------------------------------------
+Write-Host 'Hosted agent: Foundry and registry prerequisites are enforced during preparation' -ForegroundColor Cyan
+Reset-Findings
+Test-HostedAgentConfiguration -P @{
+    prepareHostedAgent                      = $true
+    deployHostedAgent                       = $false
+    deployAiFoundry                         = $false
+    deployContainerRegistry                 = $false
+    hostedAgentContainerRegistryResourceId = ''
+    hostedAgentContainerRegistryEndpoint   = ''
 }
 Assert-True 'FAIL HOSTED_AGENT_FOUNDRY_REQUIRED raised' (Test-FindingPresent 'HOSTED_AGENT_FOUNDRY_REQUIRED')
 Assert-True 'FAIL HOSTED_AGENT_REGISTRY_REQUIRED raised' (Test-FindingPresent 'HOSTED_AGENT_REGISTRY_REQUIRED')
