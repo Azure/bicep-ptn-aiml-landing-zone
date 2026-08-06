@@ -5,6 +5,8 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.5.0] - 2026-08-06
+
 ### Added
 
 - **Two-phase Microsoft Foundry hosted-agent preparation and deployment.**
