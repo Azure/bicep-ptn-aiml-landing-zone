@@ -5,6 +5,23 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Added
+
+- **Two-phase Microsoft Foundry hosted-agent preparation and deployment.**
+  Added the backward-compatible `prepareHostedAgent` flag (azd environment
+  variable `PREPARE_HOSTED_AGENT`), defaulting to `false`. Preparation now
+  provisions the existing generic Foundry project and selected-registry RBAC and
+  exposes the Foundry, ACR, network, and private-build handoff before an image
+  exists, without requiring `hostedAgent.version` or enabling an agent payload.
+  `deployHostedAgent=true` remains a superset, still fails closed unless
+  `hostedAgent.version` is an immutable `sha256:<64 lowercase hex>` digest, and
+  continues to represent downstream `azure.ai.agent` deployment intent. Existing
+  deployments with both flags omitted or `false` retain the previous resource
+  graph and empty hosted-agent outputs. Private ACR, VNet-injected ACR Task agent
+  pool, firewall, private endpoint, and DNS topology remain controlled by their
+  existing flags. This additive public contract is a **minor** release change;
+  Portal and Terraform landing-zone parity require follow-up review.
+
 ### Fixed
 
 - **Foundry IQ shared private-link names now stay within Azure AI Search's
