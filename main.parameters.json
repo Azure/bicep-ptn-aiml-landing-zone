@@ -73,6 +73,7 @@
     "publicIngress":                        { "value": { "enabled": false } },
     "deployMcp":                            { "value": "${DEPLOY_MCP=true}" },
     "deployGroundingWithBing":              { "value": "${DEPLOY_GROUNDING_WITH_BING=false}" },
+    "prepareHostedAgent":                   { "value": "${PREPARE_HOSTED_AGENT=false}" },
     "deployHostedAgent":                    { "value": "${DEPLOY_HOSTED_AGENT=false}" },
     "hostedAgent":                          { "value": {
       "name": "${HOSTED_AGENT_NAME=}",
