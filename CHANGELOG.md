@@ -5,6 +5,8 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.5.1] - 2026-08-11
+
 ### Fixed
 
 - **Azure Firewall now allows the Microsoft Foundry Agent Service's
