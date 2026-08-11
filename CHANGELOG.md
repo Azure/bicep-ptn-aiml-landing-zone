@@ -5,6 +5,27 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.5.1] - 2026-08-11
+
+### Fixed
+
+- **Azure Firewall now allows the Microsoft Foundry Agent Service's
+  `agent365.svc.cloud.microsoft` observability endpoint for hosted agents
+  under network isolation.** Live Azure validation of a network-isolated
+  deployment proved that Azure Firewall's default-deny blocked this exact
+  FQDN: the capability host and hosted-agent runtime started successfully,
+  but every hosted-agent request failed immediately after startup because
+  the runtime's own post-startup observability/telemetry call had no allow
+  rule. The FQDN is added to the existing `AllowContainerAppsPlatform`
+  Application Rule (source `*`, already covering the AI Foundry Agents
+  subnet) alongside the other always-on platform diagnostics endpoints — no
+  new firewall rule, resource, or feature flag is introduced, and no other
+  rule, output, or default changes. Upgrade compatibility: this is a
+  strictly additive allow-list change; existing deployments with
+  `networkIsolation=true` and `deployAzureFirewall=true` pick it up on the
+  next `azd provision`/redeploy with no parameter or manual action required,
+  and deployments without network isolation or the firewall are unaffected.
+
 ## [v2.5.0] - 2026-08-06
 
 ### Added
