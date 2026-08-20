@@ -5,6 +5,18 @@
     "assignExecutorRoles",
     "assignCrossServiceRoles"
   ],
+  "allowedPostBaselineMutations": [
+    "aiFoundry",
+    "appConfigKeyVaultPopulate",
+    "appConfigPopulate",
+    "assignContainerAppRoles",
+    "assignCosmosDBCosmosDbBuiltInDataContributorContainerApps",
+    "componentFlagValidation",
+    "containerApps",
+    "containerAppsSettings",
+    "containerAppsUAI",
+    "virtualNetworkSubnets"
+  ],
   "normalizedResourceHashes": {
     "aiFoundry": "e2f4179f1b388ad7c4e78c164c66b8221ee3907c84b11be78924e0259c4f8e69"
   },

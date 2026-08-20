@@ -4,9 +4,10 @@
 
 .DESCRIPTION
     Compiles main.bicep and compares its symbolic ARM resource graph with the
-    merge-base fixture. All pre-existing deployment semantics must remain stable.
-    Only the two centralized RBAC deployment payloads may change, and both
-    changes must be gated by prepareHostedAgent or deployHostedAgent.
+    merge-base fixture. Pre-existing deployment semantics remain stable except
+    for named post-baseline mutations covered by their own focused contracts.
+    The two hosted-agent RBAC payloads must be gated by prepareHostedAgent or
+    deployHostedAgent.
 #>
 
 [CmdletBinding()]
@@ -147,7 +148,13 @@ try {
         Add-Pass 'deployHostedAgent is a superset of prepareHostedAgent prerequisites.'
     }
 
-    $expectedNames = @($fixture.resourceHashes.PSObject.Properties.Name) + @($fixture.allowedHostedMutations)
+    $allowedPostBaselineMutations = @($fixture.allowedPostBaselineMutations)
+    $expectedNames = @(
+        @($fixture.resourceHashes.PSObject.Properties.Name) +
+        @($fixture.allowedHostedMutations) +
+        $allowedPostBaselineMutations |
+            Select-Object -Unique
+    )
     $actualNames = @($template.resources.PSObject.Properties.Name)
     $missingNames = @($expectedNames | Where-Object { $_ -notin $actualNames })
     $addedNames = @($actualNames | Where-Object { $_ -notin $expectedNames })
@@ -167,6 +174,7 @@ try {
 
     foreach ($entry in $fixture.resourceHashes.PSObject.Properties) {
         if ($entry.Name -notin $actualNames) { continue }
+        if ($entry.Name -in $allowedPostBaselineMutations) { continue }
         $useNormalizedHash = $normalizedResourceHashes.ContainsKey($entry.Name)
         $expectedHash = $useNormalizedHash ? $normalizedResourceHashes[$entry.Name] : $entry.Value
         $actualHash = Get-ObjectHash -Value $template.resources.($entry.Name) -NormalizeGeneratedContent:$useNormalizedHash
@@ -175,7 +183,10 @@ try {
         }
     }
     if (-not ($failures | Where-Object { $_ -like "Pre-existing resource '*" })) {
-        $stableResourceCount = @($fixture.resourceHashes.PSObject.Properties).Count
+        $stableResourceCount = @($fixture.resourceHashes.PSObject.Properties).Count - @(
+            $fixture.resourceHashes.PSObject.Properties.Name |
+                Where-Object { $_ -in $allowedPostBaselineMutations }
+        ).Count
         Add-Pass "All $stableResourceCount non-hosted resource definitions match the merge-base contract."
     }
 

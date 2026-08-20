@@ -129,6 +129,105 @@ finally {
 }
 
 # --------------------------------------------------------------------------
+Write-Host 'Boolean parameter values accept only true and false' -ForegroundColor Cyan
+foreach ($validValue in @($true, $false, 'true', ' FALSE ')) {
+    Reset-Findings
+    Test-BooleanParameterValues -P @{ deployContainerApps = $validValue }
+    Assert-True "Boolean value '$validValue' is accepted" (Test-FindingAbsent 'BOOL_VALUE_INVALID')
+}
+foreach ($invalidValue in @('yes', 'no', '1', '0', 'banana', '')) {
+    Reset-Findings
+    Test-BooleanParameterValues -P @{ deployContainerApps = $invalidValue }
+    Assert-True "Boolean value '$invalidValue' is rejected" (Test-FindingPresent 'BOOL_VALUE_INVALID')
+}
+
+# --------------------------------------------------------------------------
+Write-Host 'Boolean parameter validation preserves explicit empty azd values' -ForegroundColor Cyan
+function Get-AzdEnvValues {
+    return @{
+        DEPLOY_COSMOS_DB              = ''
+        DEPLOY_CONTAINER_APPS         = ''
+        DEPLOY_CONTAINER_REGISTRY     = ''
+        DEPLOY_CONTAINER_ENV          = ''
+        DEPLOY_NSGS                   = ''
+        AI_FOUNDRY_DISABLE_LOCAL_AUTH = ''
+    }
+}
+$mainParametersPath = Join-Path -Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -ChildPath 'main.parameters.json'
+Reset-Findings
+$effectiveEmptyBooleanParams = Get-EffectiveParameters -Path $mainParametersPath
+Test-BooleanParameterValues -P $effectiveEmptyBooleanParams
+$invalidEmptyBooleanFindings = @($script:Findings | Where-Object Code -eq 'BOOL_VALUE_INVALID')
+Assert-True 'All six explicit empty azd Boolean values remain empty after expansion' (
+    $effectiveEmptyBooleanParams['deployCosmosDb'] -eq '' -and
+    $effectiveEmptyBooleanParams['deployContainerApps'] -eq '' -and
+    $effectiveEmptyBooleanParams['deployContainerRegistry'] -eq '' -and
+    $effectiveEmptyBooleanParams['deployContainerEnv'] -eq '' -and
+    $effectiveEmptyBooleanParams['deployNsgs'] -eq '' -and
+    $effectiveEmptyBooleanParams['aiFoundryDisableLocalAuth'] -eq ''
+)
+Assert-True 'All six explicit empty azd Boolean values are rejected' ($invalidEmptyBooleanFindings.Count -eq 6)
+
+# --------------------------------------------------------------------------
+Write-Host 'Topology: Container Apps require an environment' -ForegroundColor Cyan
+Reset-Findings
+Test-Topology -P @{
+    deployContainerApps = $true
+    deployContainerEnv  = $false
+}
+Assert-True 'FAIL ACA_APPS_REQUIRE_ENV raised' (Test-FindingPresent 'ACA_APPS_REQUIRE_ENV')
+
+# --------------------------------------------------------------------------
+Write-Host 'Topology: Container Apps environment-only deployment is valid' -ForegroundColor Cyan
+Reset-Findings
+Test-Topology -P @{
+    deployContainerApps = $false
+    deployContainerEnv  = $true
+}
+Assert-True 'INFO ACA_ENVIRONMENT_ONLY raised' (Test-FindingPresent 'ACA_ENVIRONMENT_ONLY')
+Assert-True 'Environment-only deployment has no failures' (@($script:Findings | Where-Object Severity -eq 'FAIL').Count -eq 0)
+
+# --------------------------------------------------------------------------
+Write-Host 'Topology: Container App API keys require apps, Key Vault, App Configuration, and appConfig mode' -ForegroundColor Cyan
+Reset-Findings
+Test-Topology -P @{
+    deployContainerApps         = $true
+    deployContainerEnv          = $true
+    deployKeyVault              = $false
+    deployAppConfig             = $true
+    appRuntimeConfigurationMode = 'appConfig'
+    useCAppAPIKey               = $true
+}
+Assert-True 'FAIL CAPP_API_KEY_PREREQUISITES raised' (Test-FindingPresent 'CAPP_API_KEY_PREREQUISITES')
+
+# --------------------------------------------------------------------------
+Write-Host 'Topology: BYO subnet NSG associations are protected' -ForegroundColor Cyan
+Reset-Findings
+Test-Topology -P @{
+    networkIsolation = $true
+    useExistingVNet  = $true
+    deploySubnets    = $true
+    deployNsgs       = $false
+}
+Assert-True 'FAIL BYO_SUBNET_NSG_DETACH raised' (Test-FindingPresent 'BYO_SUBNET_NSG_DETACH')
+
+Reset-Findings
+Test-Topology -P @{
+    networkIsolation = $true
+    useExistingVNet  = $true
+    deploySubnets    = $false
+    deployNsgs       = $false
+}
+Assert-True 'BYO VNet with externally managed subnets does not raise detach failure' (Test-FindingAbsent 'BYO_SUBNET_NSG_DETACH')
+Assert-True 'WARN NSGS_DISABLED raised' (Test-FindingPresent 'NSGS_DISABLED')
+
+# --------------------------------------------------------------------------
+Write-Host 'Topology: enabling AI Foundry local auth warns' -ForegroundColor Cyan
+Reset-Findings
+Test-Topology -P @{ aiFoundryDisableLocalAuth = $false }
+Assert-True 'WARN AI_FOUNDRY_LOCAL_AUTH_ENABLED raised' (Test-FindingPresent 'AI_FOUNDRY_LOCAL_AUTH_ENABLED')
+
+# --------------------------------------------------------------------------
 Write-Host 'Topology: policy + BYO DNS conflict' -ForegroundColor Cyan
 Reset-Findings
 Test-Topology -P @{

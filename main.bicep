@@ -571,6 +571,9 @@ param deployAfProject bool = true
 @description('Deploy AI Foundry Service.')
 param deployAAfAgentSvc bool = true
 
+@description('Whether to disable local (API-key) authentication on the AI Foundry account, enforcing Microsoft Entra ID-only authentication. Local authentication is disabled by default for security.')
+param aiFoundryDisableLocalAuth bool = true
+
 
 @description('Deprecated. Kept for one release for compatibility with existing GPT-RAG deployments. Use retrievalBackend and the Foundry IQ parameters instead.')
 param enableAgenticRetrieval bool = false
@@ -1009,6 +1012,19 @@ param storageAccountContainersList array
 // @description('Use Customer Managed Keys for Storage Account and Key Vault')
 // param useCMK      bool   = false
 
+// ----------------------------------------------------------------------
+// Component deployment invariants. A parameter-only nested deployment keeps
+// these checks compatible with the repository's pinned Bicep version.
+// ----------------------------------------------------------------------
+module componentFlagValidation 'modules/validation/component-flags.bicep' = {
+  name: 'componentFlagValidation'
+  params: {
+    containerAppsRequireEnvironment: !deployContainerApps || deployContainerEnv
+    containerAppApiKeysHavePrerequisites: !useCAppAPIKey || (deployContainerApps && deployKeyVault && deployAppConfig && appRuntimeConfigurationMode == 'appConfig')
+    existingSubnetNsgAssociationsAreProtected: !(networkIsolation && useExistingVNet && deploySubnets && !deployNsgs)
+  }
+}
+
 //////////////////////////////////////////////////////////////////////////
 // VARIABLES
 //////////////////////////////////////////////////////////////////////////
@@ -1253,13 +1269,15 @@ var _containerAppsKeyVaultKeysTemp =  [
     contentType: 'string'
   }
 ]
-var _containerAppsKeyVaultKeys = _useCAppAPIKey ? _containerAppsKeyVaultKeysTemp : []
+var _containerAppsKeyVaultKeys = _useCAppAPIKey && _deployContainerApps && deployKeyVault && deployAppConfig && _runtimeConfigIsAppConfig ? _containerAppsKeyVaultKeysTemp : []
 
 // ----------------------------------------------------------------------
 // // Feature-flagging vars 
 // ----------------------------------------------------------------------
 var _useUAI         = empty(string(useUAI)) ? false : bool(useUAI)
 var _useCAppAPIKey  = empty(string(useCAppAPIKey))? false : bool(useCAppAPIKey)
+var _containerAppApiKeyPrerequisitesMet = !_useCAppAPIKey || (deployKeyVault && deployAppConfig && _runtimeConfigIsAppConfig)
+var _deployContainerApps = deployContainerApps && deployContainerEnv && _containerAppApiKeyPrerequisitesMet
 
 // ----------------------------------------------------------------------
 // App runtime configuration mode (Issue #89)
@@ -1431,7 +1449,7 @@ var baseSubnets = [
 
 var subnets = baseSubnets
 
-module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIsolation && useExistingVNet && deploySubnets) {
+module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIsolation && useExistingVNet && deploySubnets && deployNsgs) {
   name: 'virtualNetworkSubnetsDeployment'
   params: {
     vnetName: useExistingVNet ? varExistingVnetName : resourceNames.vnetName
@@ -1945,7 +1963,7 @@ var _dnsZonesList = _deployPrivateDnsZones ? concat(
   _byoZoneBlob          ? [] : [ { dnsName: 'privatelink.blob.${environment().suffixes.storage}', virtualNetworkLinkName: '${resourceNames.vnetName}-blob-std-link${_dnsZonesLinkSuffix}' } ],
   _byoZoneKeyVault      ? [] : [ { dnsName: 'privatelink.vaultcore.azure.net',         virtualNetworkLinkName: '${resourceNames.vnetName}-kv-link${_dnsZonesLinkSuffix}' } ],
   _byoZoneAppConfig     ? [] : [ { dnsName: 'privatelink.azconfig.io',                 virtualNetworkLinkName: '${resourceNames.vnetName}-appcfg-link${_dnsZonesLinkSuffix}' } ],
-  (deployContainerApps && !_byoZoneContainerApps) ? [
+  (deployContainerEnv && !_byoZoneContainerApps) ? [
     { dnsName: 'privatelink.${location}.azurecontainerapps.io', virtualNetworkLinkName: '${resourceNames.vnetName}-containerapps-link${_dnsZonesLinkSuffix}' }
   ] : [],
   (deployContainerRegistry && !_byoZoneAcr) ? [
@@ -2238,7 +2256,7 @@ module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (
     #disable-next-line BCP321
     (_networkIsolation && !useExistingVNet) ? virtualNetwork : null
     #disable-next-line BCP321
-    (_networkIsolation && useExistingVNet && deploySubnets) ? virtualNetworkSubnets : null
+    (_networkIsolation && useExistingVNet && deploySubnets && deployNsgs) ? virtualNetworkSubnets : null
     #disable-next-line BCP321
     (_networkIsolation && !policyManagedPrivateDns) ? privateDnsZones : null
     // `privateEndpoints` module creates ~10 PEs against `pe-subnet` (already serialized
@@ -2280,6 +2298,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
       accountName: resourceNames.aiFoundryAccountName
       allowProjectManagement: deployAfProject
       createCapabilityHosts: _deployAiFoundryAgentService
+      disableLocalAuth: aiFoundryDisableLocalAuth
       location: location
 
       networking: varAfNetworkingOverride
@@ -2335,7 +2354,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
     #disable-next-line BCP321
     (_networkIsolation && !useExistingVNet) ? virtualNetwork : null
     #disable-next-line BCP321
-    (_networkIsolation && useExistingVNet && deploySubnets) ? virtualNetworkSubnets : null
+    (_networkIsolation && useExistingVNet && deploySubnets && deployNsgs) ? virtualNetworkSubnets : null
     #disable-next-line BCP321
     _networkIsolation ? privateDnsZones : null
     #disable-next-line BCP321
@@ -2684,7 +2703,7 @@ resource acrTaskAgentPool 'Microsoft.ContainerRegistry/registries/agentPools@201
 
 //Container Apps User Managed Identity
 resource containerAppsUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = [
-  for app in containerAppsList: if (_useUAI && deployContainerApps) {
+  for app in containerAppsList: if (_useUAI && _deployContainerApps) {
     name: '${const.abbrs.security.managedIdentity}${const.abbrs.containers.containerApp}${resourceToken}-${app.service_name}'
     location: location
   }
@@ -2796,7 +2815,7 @@ var _containerAppBaseEnvironmentVariables = [
 
 @batchSize(4)
 module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
-  for (app, index) in containerAppsList: if (deployContainerApps) {
+  for (app, index) in containerAppsList: if (_deployContainerApps) {
     name: _containerAppNames[index]
     params: {
       name: _containerAppNames[index]
@@ -3404,7 +3423,7 @@ module assignCosmosDBCosmosDbBuiltInDataContributorExecutor 'modules/security/co
 // deployment invocations does not change the deployed role assignment set.
 // Cosmos DB data-plane assignments stay in their dedicated module below.
 module assignContainerAppRoles 'modules/security/resource-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && ((deployKeyVault && contains(app.roles, const.roles.KeyVaultSecretsUser.key)) || (deployAppConfig && _runtimeConfigIsAppConfig && contains(app.roles, const.roles.AppConfigurationDataReader.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesOpenAIUser.key)) || (deploySpeechService && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployContainerRegistry && contains(app.roles, const.roles.AcrPull.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataReader.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataReader.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDelegator.key)))) {
+  for (app, i) in containerAppsList: if (_deployContainerApps && ((deployKeyVault && contains(app.roles, const.roles.KeyVaultSecretsUser.key)) || (deployAppConfig && _runtimeConfigIsAppConfig && contains(app.roles, const.roles.AppConfigurationDataReader.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployAiFoundry && contains(app.roles, const.roles.CognitiveServicesOpenAIUser.key)) || (deploySpeechService && contains(app.roles, const.roles.CognitiveServicesUser.key)) || (deployContainerRegistry && contains(app.roles, const.roles.AcrPull.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataReader.key)) || (deploySearchService && contains(app.roles, const.roles.SearchIndexDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataContributor.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDataReader.key)) || (deployStorageAccount && contains(app.roles, const.roles.StorageBlobDelegator.key)))) {
     name: 'assignContainerAppRoles-${app.service_name}'
     params: {
       name: 'assignContainerAppRoles-${app.service_name}'
@@ -3591,7 +3610,7 @@ module assignCrossServiceRoles 'modules/security/resource-role-assignment.bicep'
 
 // Cosmos DB Account - Cosmos DB Built-in Data Contributor -> ContainerApp
 module assignCosmosDBCosmosDbBuiltInDataContributorContainerApps 'modules/security/cosmos-data-plane-role-assignment.bicep' = [
-  for (app, i) in containerAppsList: if (deployContainerApps && deployCosmosDb && contains(
+  for (app, i) in containerAppsList: if (_deployContainerApps && deployCosmosDb && contains(
     app.roles,
     const.roles.CosmosDBBuiltInDataContributor.key
   )) {
@@ -3656,7 +3675,7 @@ resource appConfigDataOwner 'Microsoft.Authorization/roleAssignments@2022-04-01'
 }
 
 // prepare the container apps settings for the app configuration store
-module containerAppsSettings 'modules/container-apps/container-apps-list.bicep' = if (deployContainerApps) {
+module containerAppsSettings 'modules/container-apps/container-apps-list.bicep' = if (_deployContainerApps) {
   name: 'containerAppsSettings'
   params: {
     appConfigLabel: appConfigLabel
@@ -3745,7 +3764,7 @@ var _modelDeploymentSettings = [
 ]
 
 // Populate App Configuration store with Container App API keys (only when useAPIKeys is true).
-module appConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (deployAppConfig && _runtimeConfigIsAppConfig && deployKeyVault && _useCAppAPIKey) {
+module appConfigKeyVaultPopulate 'modules/app-configuration/app-configuration.bicep' = if (_deployContainerApps && deployAppConfig && _runtimeConfigIsAppConfig && deployKeyVault && _useCAppAPIKey) {
   name: 'appConfigKeyVaultPopulate'
   params: {
     #disable-next-line BCP318
@@ -3800,9 +3819,9 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
       filter(
       concat(
       #disable-next-line BCP318
-      deployContainerApps ? containerAppsSettings.outputs.containerAppsEndpoints : [],
+      _deployContainerApps ? containerAppsSettings.outputs.containerAppsEndpoints : [],
       #disable-next-line BCP318
-      deployContainerApps ? containerAppsSettings.outputs.containerAppsName : [],
+      _deployContainerApps ? containerAppsSettings.outputs.containerAppsName : [],
       _modelDeploymentNamesSettings,
       _databaseContainerNamesSettings,
       _storageContainerNamesSettings,
@@ -3924,7 +3943,7 @@ module appConfigPopulate 'modules/app-configuration/app-configuration.bicep' = i
 
       // ── Container Apps List & Model Deployments ────────────────────────────
       #disable-next-line BCP318
-      { name: 'CONTAINER_APPS', value: deployContainerApps ? string(containerAppsSettings.outputs.containerAppsList) : '[]', label: appConfigLabel, contentType: 'application/json' }
+      { name: 'CONTAINER_APPS', value: _deployContainerApps ? string(containerAppsSettings.outputs.containerAppsList) : '[]', label: appConfigLabel, contentType: 'application/json' }
       { name: 'MODEL_DEPLOYMENTS', value: string(_modelDeploymentSettings), label: appConfigLabel, contentType: 'application/json' }
 
     ]
@@ -4031,7 +4050,7 @@ output LOG_ANALYTICS_RESOURCE_ID string = _lawResourceId
 output APP_INSIGHTS_RESOURCE_ID string = _appInsightsResourceId
 output OBSERVABILITY_MIXED_WORKSPACES_ALLOWED bool = allowMixedObservabilityWorkspaces
 #disable-next-line BCP318
-output CONTAINER_APP_INTERNAL_FQDN string = (deployContainerApps && length(containerAppsList) > 0) ? containerApps[_publicIngressBackendIndex].outputs.fqdn : ''
+output CONTAINER_APP_INTERNAL_FQDN string = (_deployContainerApps && length(containerAppsList) > 0) ? containerApps[_publicIngressBackendIndex].outputs.fqdn : ''
 
 // Microsoft Foundry hosted-agent deployment handoff. The actual agent version,
 // dedicated agent identity, and invocation endpoint are data-plane resources
