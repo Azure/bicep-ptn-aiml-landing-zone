@@ -5,6 +5,19 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Fixed
+
+- **A release source for the Portal Maintenance Configuration wrapper now
+  forwards its complete typed object to AVM 0.3.1.** `maintenanceScope`, `maintenanceWindow`,
+  `extensionProperties`, `installPatches`, `namespace`, `visibility`,
+  `enableTelemetry`, `lock`, and `roleAssignments` are no longer dropped.
+  Omitted non-nullable values retain the AVM defaults, while nullable lock,
+  role assignments, and tags remain nullable. Regenerated Portal wrappers can
+  therefore retain an `InGuestPatch` configuration's schedule and reboot
+  settings instead of silently falling back to `Host`. The corresponding
+  generated Portal wrapper is updated through the normal downstream release
+  adoption process.
+
 ## [v2.5.1] - 2026-08-11
 
 ### Fixed
