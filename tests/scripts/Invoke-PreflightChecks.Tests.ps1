@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     Synthetic-input tests that exercise the deterministic checks (Test-Topology,
-    Test-AllowedIpRanges, Test-LocalCidrSanity) without touching Azure.
+    Test-HostedAgentConfiguration, Test-AllowedIpRanges, Test-LocalCidrSanity)
+    without touching Azure.
 
     Usage:
         pwsh ./tests/scripts/Invoke-PreflightChecks.Tests.ps1
@@ -128,6 +129,105 @@ finally {
 }
 
 # --------------------------------------------------------------------------
+Write-Host 'Boolean parameter values accept only true and false' -ForegroundColor Cyan
+foreach ($validValue in @($true, $false, 'true', ' FALSE ')) {
+    Reset-Findings
+    Test-BooleanParameterValues -P @{ deployContainerApps = $validValue }
+    Assert-True "Boolean value '$validValue' is accepted" (Test-FindingAbsent 'BOOL_VALUE_INVALID')
+}
+foreach ($invalidValue in @('yes', 'no', '1', '0', 'banana', '')) {
+    Reset-Findings
+    Test-BooleanParameterValues -P @{ deployContainerApps = $invalidValue }
+    Assert-True "Boolean value '$invalidValue' is rejected" (Test-FindingPresent 'BOOL_VALUE_INVALID')
+}
+
+# --------------------------------------------------------------------------
+Write-Host 'Boolean parameter validation preserves explicit empty azd values' -ForegroundColor Cyan
+function Get-AzdEnvValues {
+    return @{
+        DEPLOY_COSMOS_DB              = ''
+        DEPLOY_CONTAINER_APPS         = ''
+        DEPLOY_CONTAINER_REGISTRY     = ''
+        DEPLOY_CONTAINER_ENV          = ''
+        DEPLOY_NSGS                   = ''
+        AI_FOUNDRY_DISABLE_LOCAL_AUTH = ''
+    }
+}
+$mainParametersPath = Join-Path -Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -ChildPath 'main.parameters.json'
+Reset-Findings
+$effectiveEmptyBooleanParams = Get-EffectiveParameters -Path $mainParametersPath
+Test-BooleanParameterValues -P $effectiveEmptyBooleanParams
+$invalidEmptyBooleanFindings = @($script:Findings | Where-Object Code -eq 'BOOL_VALUE_INVALID')
+Assert-True 'All six explicit empty azd Boolean values remain empty after expansion' (
+    $effectiveEmptyBooleanParams['deployCosmosDb'] -eq '' -and
+    $effectiveEmptyBooleanParams['deployContainerApps'] -eq '' -and
+    $effectiveEmptyBooleanParams['deployContainerRegistry'] -eq '' -and
+    $effectiveEmptyBooleanParams['deployContainerEnv'] -eq '' -and
+    $effectiveEmptyBooleanParams['deployNsgs'] -eq '' -and
+    $effectiveEmptyBooleanParams['aiFoundryDisableLocalAuth'] -eq ''
+)
+Assert-True 'All six explicit empty azd Boolean values are rejected' ($invalidEmptyBooleanFindings.Count -eq 6)
+
+# --------------------------------------------------------------------------
+Write-Host 'Topology: Container Apps require an environment' -ForegroundColor Cyan
+Reset-Findings
+Test-Topology -P @{
+    deployContainerApps = $true
+    deployContainerEnv  = $false
+}
+Assert-True 'FAIL ACA_APPS_REQUIRE_ENV raised' (Test-FindingPresent 'ACA_APPS_REQUIRE_ENV')
+
+# --------------------------------------------------------------------------
+Write-Host 'Topology: Container Apps environment-only deployment is valid' -ForegroundColor Cyan
+Reset-Findings
+Test-Topology -P @{
+    deployContainerApps = $false
+    deployContainerEnv  = $true
+}
+Assert-True 'INFO ACA_ENVIRONMENT_ONLY raised' (Test-FindingPresent 'ACA_ENVIRONMENT_ONLY')
+Assert-True 'Environment-only deployment has no failures' (@($script:Findings | Where-Object Severity -eq 'FAIL').Count -eq 0)
+
+# --------------------------------------------------------------------------
+Write-Host 'Topology: Container App API keys require apps, Key Vault, App Configuration, and appConfig mode' -ForegroundColor Cyan
+Reset-Findings
+Test-Topology -P @{
+    deployContainerApps         = $true
+    deployContainerEnv          = $true
+    deployKeyVault              = $false
+    deployAppConfig             = $true
+    appRuntimeConfigurationMode = 'appConfig'
+    useCAppAPIKey               = $true
+}
+Assert-True 'FAIL CAPP_API_KEY_PREREQUISITES raised' (Test-FindingPresent 'CAPP_API_KEY_PREREQUISITES')
+
+# --------------------------------------------------------------------------
+Write-Host 'Topology: BYO subnet NSG associations are protected' -ForegroundColor Cyan
+Reset-Findings
+Test-Topology -P @{
+    networkIsolation = $true
+    useExistingVNet  = $true
+    deploySubnets    = $true
+    deployNsgs       = $false
+}
+Assert-True 'FAIL BYO_SUBNET_NSG_DETACH raised' (Test-FindingPresent 'BYO_SUBNET_NSG_DETACH')
+
+Reset-Findings
+Test-Topology -P @{
+    networkIsolation = $true
+    useExistingVNet  = $true
+    deploySubnets    = $false
+    deployNsgs       = $false
+}
+Assert-True 'BYO VNet with externally managed subnets does not raise detach failure' (Test-FindingAbsent 'BYO_SUBNET_NSG_DETACH')
+Assert-True 'WARN NSGS_DISABLED raised' (Test-FindingPresent 'NSGS_DISABLED')
+
+# --------------------------------------------------------------------------
+Write-Host 'Topology: enabling AI Foundry local auth warns' -ForegroundColor Cyan
+Reset-Findings
+Test-Topology -P @{ aiFoundryDisableLocalAuth = $false }
+Assert-True 'WARN AI_FOUNDRY_LOCAL_AUTH_ENABLED raised' (Test-FindingPresent 'AI_FOUNDRY_LOCAL_AUTH_ENABLED')
+
+# --------------------------------------------------------------------------
 Write-Host 'Topology: policy + BYO DNS conflict' -ForegroundColor Cyan
 Reset-Findings
 Test-Topology -P @{
@@ -209,14 +309,29 @@ Assert-True 'WARN ISO_NO_INGRESS raised' (Test-FindingPresent 'ISO_NO_INGRESS')
 Write-Host 'Hosted agent: disabled contract is inert' -ForegroundColor Cyan
 Reset-Findings
 Test-HostedAgentConfiguration -P @{
+    prepareHostedAgent = $false
     deployHostedAgent = $false
 }
 Assert-True 'Disabled hosted-agent contract emits no findings' (@($script:Findings).Count -eq 0)
 
 # --------------------------------------------------------------------------
-Write-Host 'Hosted agent: valid additive contract passes' -ForegroundColor Cyan
+Write-Host 'Hosted agent: prepare-only contract does not require an image digest' -ForegroundColor Cyan
 Reset-Findings
 Test-HostedAgentConfiguration -P @{
+    prepareHostedAgent    = $true
+    deployHostedAgent     = $false
+    deployAiFoundry       = $true
+    deployContainerRegistry = $true
+    networkIsolation      = $false
+}
+Assert-True 'Prepare-only hosted-agent contract has no failures without hostedAgent.version' (@($script:Findings | Where-Object Severity -eq 'FAIL').Count -eq 0)
+Assert-True 'Prepare-only hosted-agent contract skips immutable image validation' (Test-FindingAbsent 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE')
+
+# --------------------------------------------------------------------------
+Write-Host 'Hosted agent: deploy is a superset and accepts an immutable digest' -ForegroundColor Cyan
+Reset-Findings
+Test-HostedAgentConfiguration -P @{
+    prepareHostedAgent      = $false
     deployHostedAgent       = $true
     deployAiFoundry         = $true
     deployContainerRegistry = $true
@@ -231,25 +346,32 @@ Test-HostedAgentConfiguration -P @{
     }
 }
 Assert-True 'Valid hosted-agent contract has no failures' (@($script:Findings | Where-Object Severity -eq 'FAIL').Count -eq 0)
+Assert-True 'Immutable hosted-agent image digest is accepted' (Test-FindingAbsent 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE')
+
+# --------------------------------------------------------------------------
+Write-Host 'Hosted agent: private preparation reports the VNet build requirement' -ForegroundColor Cyan
+Reset-Findings
+Test-HostedAgentConfiguration -P @{
+    prepareHostedAgent      = $true
+    deployHostedAgent       = $false
+    deployAiFoundry         = $true
+    deployContainerRegistry = $true
+    networkIsolation        = $true
+}
+Assert-True 'Prepare-only private registry requires an in-VNet build path' (Test-FindingPresent 'HOSTED_AGENT_PRIVATE_BUILD_REQUIRED')
+Assert-True 'Prepare-only private registry has no failures' (@($script:Findings | Where-Object Severity -eq 'FAIL').Count -eq 0)
 
 # --------------------------------------------------------------------------
 Write-Host 'Hosted agent: registry role assignment mode is validated' -ForegroundColor Cyan
 Reset-Findings
 Test-HostedAgentConfiguration -P @{
-    deployHostedAgent                               = $true
+    prepareHostedAgent                              = $true
+    deployHostedAgent                               = $false
     deployAiFoundry                                 = $true
     deployContainerRegistry                         = $false
     hostedAgentContainerRegistryResourceId         = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/Microsoft.ContainerRegistry/registries/acr'
     hostedAgentContainerRegistryEndpoint           = 'acr.azurecr.io'
     hostedAgentContainerRegistryRoleAssignmentMode = 'unsupported'
-    hostedAgent                                     = [pscustomobject]@{
-        name           = 'sample-agent'
-        image          = 'agents/sample'
-        version        = "sha256:$('a' * 64)"
-        startupCommand = ''
-        runtime        = [pscustomobject]@{ cpu = '1'; memory = '1Gi' }
-        protocols      = @([pscustomobject]@{ protocol = 'responses'; version = '2.0.0' })
-    }
 }
 Assert-True 'FAIL HOSTED_AGENT_REGISTRY_ROLE_MODE_INVALID raised' (Test-FindingPresent 'HOSTED_AGENT_REGISTRY_ROLE_MODE_INVALID')
 
@@ -310,22 +432,60 @@ Test-HostedAgentConfiguration -P @{
 Assert-True 'FAIL HOSTED_AGENT_IMAGE_NOT_IMMUTABLE raised' (Test-FindingPresent 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE')
 
 # --------------------------------------------------------------------------
-Write-Host 'Hosted agent: Foundry and registry prerequisites are enforced' -ForegroundColor Cyan
+Write-Host 'Hosted agent: missing image digest is rejected during deployment' -ForegroundColor Cyan
 Reset-Findings
 Test-HostedAgentConfiguration -P @{
-    deployHostedAgent                       = $true
-    deployAiFoundry                         = $false
-    deployContainerRegistry                 = $false
-    hostedAgentContainerRegistryResourceId = ''
-    hostedAgentContainerRegistryEndpoint   = ''
-    hostedAgent                             = [pscustomobject]@{
+    prepareHostedAgent      = $true
+    deployHostedAgent       = $true
+    deployAiFoundry         = $true
+    deployContainerRegistry = $true
+    hostedAgent             = [pscustomobject]@{
         name           = 'sample-agent'
         image          = 'agents/sample'
-        version        = "sha256:$('b' * 64)"
+        version        = ''
         startupCommand = 'python main.py'
         runtime        = [pscustomobject]@{ cpu = '1'; memory = '1Gi' }
         protocols      = @([pscustomobject]@{ protocol = 'responses'; version = '2.0.0' })
     }
+}
+Assert-True 'FAIL HOSTED_AGENT_IMAGE_NOT_IMMUTABLE raised for missing digest' (Test-FindingPresent 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE')
+
+# --------------------------------------------------------------------------
+Write-Host 'Hosted agent: noncanonical and placeholder digests are rejected' -ForegroundColor Cyan
+foreach ($invalidDigest in @(
+        " SHA256:$('d' * 64) ",
+        "sha256:$('A' * 64)",
+        "sha256:$('e' * 64)`n",
+        'sha256:<64-hex-digest>'
+    )) {
+    Reset-Findings
+    Test-HostedAgentConfiguration -P @{
+        prepareHostedAgent      = $false
+        deployHostedAgent       = $true
+        deployAiFoundry         = $true
+        deployContainerRegistry = $true
+        hostedAgent             = [pscustomobject]@{
+            name           = 'sample-agent'
+            image          = 'agents/sample'
+            version        = $invalidDigest
+            startupCommand = 'python main.py'
+            runtime        = [pscustomobject]@{ cpu = '1'; memory = '1Gi' }
+            protocols      = @([pscustomobject]@{ protocol = 'responses'; version = '2.0.0' })
+        }
+    }
+    Assert-True "FAIL HOSTED_AGENT_IMAGE_NOT_IMMUTABLE raised for '$invalidDigest'" (Test-FindingPresent 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE')
+}
+
+# --------------------------------------------------------------------------
+Write-Host 'Hosted agent: Foundry and registry prerequisites are enforced during preparation' -ForegroundColor Cyan
+Reset-Findings
+Test-HostedAgentConfiguration -P @{
+    prepareHostedAgent                      = $true
+    deployHostedAgent                       = $false
+    deployAiFoundry                         = $false
+    deployContainerRegistry                 = $false
+    hostedAgentContainerRegistryResourceId = ''
+    hostedAgentContainerRegistryEndpoint   = ''
 }
 Assert-True 'FAIL HOSTED_AGENT_FOUNDRY_REQUIRED raised' (Test-FindingPresent 'HOSTED_AGENT_FOUNDRY_REQUIRED')
 Assert-True 'FAIL HOSTED_AGENT_REGISTRY_REQUIRED raised' (Test-FindingPresent 'HOSTED_AGENT_REGISTRY_REQUIRED')

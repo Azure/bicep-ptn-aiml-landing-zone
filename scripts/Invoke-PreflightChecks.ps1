@@ -193,7 +193,7 @@ function Expand-ParamValue {
             param($m)
             $name = $m.Groups[1].Value
             $def = if ($m.Groups[2].Success) { $m.Groups[2].Value } else { '' }
-            if ($EnvValues.ContainsKey($name) -and -not [string]::IsNullOrEmpty($EnvValues[$name])) {
+            if ($EnvValues.ContainsKey($name)) {
                 return $EnvValues[$name]
             }
             return $def
@@ -308,6 +308,33 @@ function Resolve-DeployFlag {
     return [bool](ConvertTo-Bool $raw)
 }
 
+function Test-BooleanParameterValues {
+    param([hashtable]$P)
+
+    $booleanParameters = [ordered]@{
+        deployCosmosDb             = 'DEPLOY_COSMOS_DB'
+        deployContainerApps        = 'DEPLOY_CONTAINER_APPS'
+        deployContainerRegistry    = 'DEPLOY_CONTAINER_REGISTRY'
+        deployContainerEnv         = 'DEPLOY_CONTAINER_ENV'
+        deployNsgs                 = 'DEPLOY_NSGS'
+        aiFoundryDisableLocalAuth  = 'AI_FOUNDRY_DISABLE_LOCAL_AUTH'
+    }
+
+    foreach ($entry in $booleanParameters.GetEnumerator()) {
+        if (-not $P.ContainsKey($entry.Key)) { continue }
+
+        $value = $P[$entry.Key]
+        if ($value -is [bool]) { continue }
+
+        $normalized = (Get-StringValue $value).Trim().ToLowerInvariant()
+        if ($normalized -notin 'true', 'false') {
+            Add-Finding -Severity FAIL -Code 'BOOL_VALUE_INVALID' `
+                -Message "Parameter '$($entry.Key)' from $($entry.Value) must be 'true' or 'false'; received '$value'." `
+                -Hint "Run 'azd env set $($entry.Value) true' or 'azd env set $($entry.Value) false'. Values such as yes/no and 1/0 are not accepted."
+        }
+    }
+}
+
 # --------------------------------------------------------------------------
 # Deterministic topology checks (no Azure calls)
 # --------------------------------------------------------------------------
@@ -330,6 +357,35 @@ function Test-Tooling {
 
 function Test-Topology {
     param([hashtable]$P)
+
+    $deployContainerApps = Resolve-DeployFlag -P $P -Key 'deployContainerApps' -Default $true
+    $deployContainerEnv = Resolve-DeployFlag -P $P -Key 'deployContainerEnv' -Default $true
+    $deployKeyVault = Resolve-DeployFlag -P $P -Key 'deployKeyVault' -Default $true
+    $deployAppConfig = Resolve-DeployFlag -P $P -Key 'deployAppConfig' -Default $true
+    $deployNsgs = Resolve-DeployFlag -P $P -Key 'deployNsgs' -Default $true
+    $useContainerAppApiKey = Resolve-DeployFlag -P $P -Key 'useCAppAPIKey' -Default $false
+    $runtimeConfigMode = (Get-StringValue $P['appRuntimeConfigurationMode']).Trim()
+
+    if ($deployContainerApps -and -not $deployContainerEnv) {
+        Add-Finding -Severity FAIL -Code 'ACA_APPS_REQUIRE_ENV' `
+            -Message 'deployContainerApps=true requires deployContainerEnv=true.' `
+            -Hint 'Enable DEPLOY_CONTAINER_ENV or disable DEPLOY_CONTAINER_APPS.'
+    }
+    elseif ($deployContainerEnv -and -not $deployContainerApps) {
+        Add-Finding -Severity INFO -Code 'ACA_ENVIRONMENT_ONLY' `
+            -Message 'The Container Apps environment will be deployed without any Container Apps.'
+    }
+
+    if ($useContainerAppApiKey -and -not (
+            $deployContainerApps -and
+            $deployKeyVault -and
+            $deployAppConfig -and
+            $runtimeConfigMode -eq 'appConfig'
+        )) {
+        Add-Finding -Severity FAIL -Code 'CAPP_API_KEY_PREREQUISITES' `
+            -Message 'useCAppAPIKey=true requires Container Apps, Key Vault, App Configuration, and appRuntimeConfigurationMode=appConfig.' `
+            -Hint 'Enable all API-key prerequisites or set useCAppAPIKey=false.'
+    }
 
     # Private DNS conflict: policy-managed + BYO overrides
     $policyMgr = ConvertTo-Bool $P['policyManagedPrivateDns']
@@ -392,6 +448,25 @@ function Test-Topology {
 
     # Network isolation without any access path
     $netIso = ConvertTo-Bool $P['networkIsolation']
+    $useExistingVNet = ConvertTo-Bool $P['useExistingVNet']
+    $deploySubnets = Resolve-DeployFlag -P $P -Key 'deploySubnets' -Default $true
+    if ($netIso -and $useExistingVNet -and $deploySubnets -and -not $deployNsgs) {
+        Add-Finding -Severity FAIL -Code 'BYO_SUBNET_NSG_DETACH' `
+            -Message 'A network-isolated deployment cannot update subnets in an existing VNet while deployNsgs=false because existing NSG associations would be removed.' `
+            -Hint 'Set DEPLOY_NSGS=true, or set deploySubnets=false and manage the existing subnets and NSG associations outside this deployment.'
+    }
+    elseif (-not $deployNsgs) {
+        Add-Finding -Severity WARN -Code 'NSGS_DISABLED' `
+            -Message 'Network security group deployment is disabled. Verify that every workload subnet retains equivalent controls.'
+    }
+
+    $disableFoundryLocalAuth = Resolve-DeployFlag -P $P -Key 'aiFoundryDisableLocalAuth' -Default $true
+    if (-not $disableFoundryLocalAuth) {
+        Add-Finding -Severity WARN -Code 'AI_FOUNDRY_LOCAL_AUTH_ENABLED' `
+            -Message 'AI Foundry local API-key authentication is enabled.' `
+            -Hint 'Keep AI_FOUNDRY_DISABLE_LOCAL_AUTH=true unless API-key authentication is an explicit requirement.'
+    }
+
     $deployJump = Resolve-DeployJumpbox $P
     $allowedIps = Get-ArrayValue $P['allowedIpRanges']
     if ($netIso -and -not $deployJump -and $allowedIps.Count -eq 0) {
@@ -404,12 +479,14 @@ function Test-Topology {
 function Test-HostedAgentConfiguration {
     param([hashtable]$P)
 
-    if (-not (Resolve-DeployFlag -P $P -Key 'deployHostedAgent' -Default $false)) { return }
+    $prepareHostedAgent = Resolve-DeployFlag -P $P -Key 'prepareHostedAgent' -Default $false
+    $deployHostedAgent = Resolve-DeployFlag -P $P -Key 'deployHostedAgent' -Default $false
+    if (-not ($prepareHostedAgent -or $deployHostedAgent)) { return }
 
     $deployAiFoundry = Resolve-DeployFlag -P $P -Key 'deployAiFoundry' -Default $true
     if (-not $deployAiFoundry) {
         Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_FOUNDRY_REQUIRED' `
-            -Message 'deployHostedAgent=true requires deployAiFoundry=true.' `
+            -Message 'Hosted-agent preparation or deployment requires deployAiFoundry=true.' `
             -Hint 'Enable the shared Foundry account/project or disable hosted-agent prerequisites.'
     }
 
@@ -427,9 +504,16 @@ function Test-HostedAgentConfiguration {
     }
     if (-not $deployRegistry -and ([string]::IsNullOrWhiteSpace($existingRegistryId) -or [string]::IsNullOrWhiteSpace($existingRegistryEndpoint))) {
         Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_REGISTRY_REQUIRED' `
-            -Message 'deployHostedAgent=true requires the landing-zone registry or both existing registry inputs.' `
+            -Message 'Hosted-agent preparation or deployment requires the landing-zone registry or both existing registry inputs.' `
             -Hint 'Enable DEPLOY_CONTAINER_REGISTRY, or set HOSTED_AGENT_CONTAINER_REGISTRY_RESOURCE_ID and HOSTED_AGENT_CONTAINER_REGISTRY_ENDPOINT.'
     }
+
+    if ((ConvertTo-Bool $P['networkIsolation'])) {
+        Add-Finding -Severity INFO -Code 'HOSTED_AGENT_PRIVATE_BUILD_REQUIRED' `
+            -Message 'The hosted-agent registry is private. Build and push from a VNet-connected runner/agent or the jumpbox fallback; shared ACR Tasks do not bypass private endpoint access.'
+    }
+
+    if (-not $deployHostedAgent) { return }
 
     $agent = $P['hostedAgent']
     if ($null -eq $agent) {
@@ -446,7 +530,7 @@ function Test-HostedAgentConfiguration {
     $envValues = Get-AzdEnvValues
     $name = (Get-StringValue (Expand-ParamValue -Raw $agent.name -EnvValues $envValues)).Trim()
     $image = (Get-StringValue (Expand-ParamValue -Raw $agent.image -EnvValues $envValues)).Trim()
-    $version = (Get-StringValue (Expand-ParamValue -Raw $agent.version -EnvValues $envValues)).Trim()
+    $version = Get-StringValue (Expand-ParamValue -Raw $agent.version -EnvValues $envValues)
     $startupCommand = (Get-StringValue (Expand-ParamValue -Raw $agent.startupCommand -EnvValues $envValues)).Trim()
     $cpu = (Get-StringValue (Expand-ParamValue -Raw $agent.runtime.cpu -EnvValues $envValues)).Trim()
     $memory = (Get-StringValue (Expand-ParamValue -Raw $agent.runtime.memory -EnvValues $envValues)).Trim()
@@ -463,9 +547,9 @@ function Test-HostedAgentConfiguration {
         }
     }
 
-    if ($version -notmatch '^sha256:[0-9a-fA-F]{64}$') {
+    if ($version -cnotmatch '\Asha256:[0-9a-f]{64}\z') {
         Add-Finding -Severity FAIL -Code 'HOSTED_AGENT_IMAGE_NOT_IMMUTABLE' `
-            -Message 'hostedAgent.version must be an immutable OCI digest in sha256:<64 hex characters> form.' `
+            -Message 'hostedAgent.version must use the exact immutable OCI digest syntax sha256:<64 lowercase hex characters>, without surrounding whitespace.' `
             -Hint 'Build and push the image first, then pin the digest rather than using a mutable tag.'
     }
 
@@ -509,10 +593,6 @@ function Test-HostedAgentConfiguration {
         }
     }
 
-    if ((ConvertTo-Bool $P['networkIsolation'])) {
-        Add-Finding -Severity INFO -Code 'HOSTED_AGENT_PRIVATE_BUILD_REQUIRED' `
-            -Message 'The hosted-agent registry is private. Build and push from a VNet-connected runner/agent or the jumpbox fallback; shared ACR Tasks do not bypass private endpoint access.'
-    }
 }
 
 function Test-AllowedIpRanges {
@@ -1753,6 +1833,7 @@ if ($effective.Count -eq 0) {
     exit $code
 }
 
+Test-BooleanParameterValues -P $effective
 Test-Topology -P $effective
 Test-HostedAgentConfiguration -P $effective
 Test-AllowedIpRanges -P $effective

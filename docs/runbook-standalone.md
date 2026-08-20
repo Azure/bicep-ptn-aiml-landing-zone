@@ -253,12 +253,32 @@ These are the parameters most operators tweak after the first deploy. Set them v
 | `DEPLOY_NAT_GATEWAY` | inherits `DEPLOY_VM` | NAT Gateway for jumpbox outbound traffic |
 | `DEPLOY_SEARCH_SERVICE` | `true` | Set `false` to skip AI Search (saves ~$75/mo and 7 minutes of provision time) |
 | `DEPLOY_POSTGRES` | `false` | Set `true` to add Postgres Flexible Server |
+| `DEPLOY_COSMOS_DB` | `true` | Include the workload Cosmos DB account |
+| `DEPLOY_CONTAINER_APPS` | `true` | Include the configured Container Apps |
+| `DEPLOY_CONTAINER_REGISTRY` | `true` | Include Azure Container Registry |
+| `DEPLOY_CONTAINER_ENV` | `true` | Include the Container Apps Environment |
+| `DEPLOY_NSGS` | `true` | Include landing-zone-managed network security groups |
+| `AI_FOUNDRY_DISABLE_LOCAL_AUTH` | `true` | Keep Foundry local API-key authentication disabled |
 | `AZURE_SEARCH_LOCATION` | same as `AZURE_LOCATION` | Cross-region Search (PE still in spoke region) — workaround for regional SKU capacity |
 | `BASTION_SKU_NAME` | `Standard` | `Basic`, `Standard`, or `Premium` |
 | `BASTION_ENABLE_TUNNELING` | `false` | Set `true` for native-client tunneling (RDP/SSH via `az network bastion rdp/ssh`) |
 | `DEPLOY_SOFTWARE` | `true` when `DEPLOY_VM=true` | Run jumpbox post-config Custom Script Extension during provision |
 | `EXTEND_FIREWALL_FOR_JUMPBOX_BOOTSTRAP` | `true` when `DEPLOY_VM=true` | Add jumpbox-scoped FQDN rules to the firewall |
 | `PUBLIC_INGRESS` | `{ enabled: false }` | Set to `{ enabled: true, ... }` to add an Application Gateway WAF v2 in front of the internal ACA env |
+
+Component selectors `DEPLOY_COSMOS_DB`, `DEPLOY_CONTAINER_APPS`,
+`DEPLOY_CONTAINER_REGISTRY`, `DEPLOY_CONTAINER_ENV`, and `DEPLOY_NSGS` accept
+only `true` or `false` (case-insensitive). Container Apps require
+`DEPLOY_CONTAINER_ENV=true`; an environment-only deployment is supported.
+Container App API keys require apps, Key Vault, App Configuration, and
+`appRuntimeConfigurationMode=appConfig`.
+
+These selectors control what is included in the next incremental deployment.
+Changing one to `false` does not delete a resource or App Configuration key
+created earlier. Decommission those artifacts explicitly after reviewing
+dependencies and data-retention requirements. Keep
+`AI_FOUNDRY_DISABLE_LOCAL_AUTH=true` unless API-key authentication is an
+explicit requirement.
 
 For the full list, see `main.bicep` parameters and `main.parameters.json`.
 

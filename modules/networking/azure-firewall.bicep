@@ -81,7 +81,9 @@ var _firewallEssentialContainerFqdns = ['mcr.microsoft.com', '*.data.mcr.microso
 // from a Container App fails at runtime with HTTP 500 "An unexpected error occured while
 // fetching the AAD Token", with no log entry on the workload side indicating the firewall
 // is the cause. Also includes ACA control-plane and Azure Monitor / Log Analytics /
-// Application Insights ingestion endpoints used by the platform's diagnostics pipeline.
+// Application Insights ingestion endpoints used by the platform's diagnostics pipeline,
+// plus the Microsoft Foundry Agent Service's own `agent365.svc.cloud.microsoft`
+// observability endpoint required by hosted agents on the Foundry Agents subnet.
 // Azure Firewall application-rule wildcards only match a single label, so explicit
 // wildcarded FQDNs are required (a generic `*.windows.net` does NOT match
 // `gsm123eh.servicebus.windows.net`, and `*.azure.com` does NOT match
@@ -114,6 +116,17 @@ var _firewallEssentialPlatformFqdns = [
   'crl3.digicert.com'
   'crl4.digicert.com'
   'ctldl.windowsupdate.com'
+  // Microsoft Foundry Agent Service observability/telemetry endpoint used by
+  // hosted agents running on the AI Foundry Agents subnet (`agentSubnetPrefix`).
+  // Live Azure validation of a network-isolated deployment proved this exact
+  // FQDN is required: without it, hosted-agent requests fail after the
+  // runtime has already started (the capability host provisions successfully
+  // and only the post-startup observability call is blocked by the
+  // firewall's default-deny). Sourced from '*' alongside the other
+  // always-on platform diagnostics endpoints above because the Foundry
+  // Agents subnet is already covered by this rule's source scope and no
+  // separate agent-only rule is needed.
+  'agent365.svc.cloud.microsoft'
 ]
 var _firewallEssentialGitHubFqdns = [
   'github.com'

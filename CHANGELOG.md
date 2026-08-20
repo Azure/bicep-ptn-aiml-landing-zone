@@ -10,6 +10,101 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 - **`aiFoundryDisableLocalAuth` / `AI_FOUNDRY_DISABLE_LOCAL_AUTH` parameter.** The AI Foundry account's local (API-key) authentication toggle was previously hardcoded inside `modules/ai-foundry/foundry/main.bicep` with no way to override it from `main.bicep`/`main.parameters.json`/azd env. It is now a top-level parameter, defaulting to `true` (local auth disabled, Azure AD-only) to preserve prior behavior exactly.
 - **`azd env set` support for `deployCosmosDb`, `deployContainerApps`, `deployContainerRegistry`, `deployContainerEnv`, and `deployNsgs`.** These five flags were previously hardcoded literals in `main.parameters.json` with no environment-variable indirection. They now follow the `${VAR=default}` convention (`DEPLOY_COSMOS_DB`, `DEPLOY_CONTAINER_APPS`, `DEPLOY_CONTAINER_REGISTRY`, `DEPLOY_CONTAINER_ENV`, `DEPLOY_NSGS`), all defaulting to `true` to preserve prior behavior exactly.
 
+### Changed
+
+- Hardened component deployment flags so invalid Container Apps, API-key, and BYO subnet/NSG combinations fail before deployment, while environment-only Container Apps deployments retain the required private DNS zone.
+- Documented that component flags select resources for an incremental deployment and do not delete resources or App Configuration values created by earlier deployments.
+
+## [v2.5.2] - 2026-08-20
+
+### Fixed
+
+- **A release source for the Portal Maintenance Configuration wrapper now
+  forwards its complete typed object to AVM 0.3.1.** `maintenanceScope`, `maintenanceWindow`,
+  `extensionProperties`, `installPatches`, `namespace`, `visibility`,
+  `enableTelemetry`, `lock`, and `roleAssignments` are no longer dropped.
+  Omitted non-nullable values retain the AVM defaults, while nullable lock,
+  role assignments, and tags remain nullable. Regenerated Portal wrappers can
+  therefore retain an `InGuestPatch` configuration's schedule and reboot
+  settings instead of silently falling back to `Host`. The corresponding
+  generated Portal wrapper is updated through the normal downstream release
+  adoption process.
+
+## [v2.5.1] - 2026-08-11
+
+### Fixed
+
+- **Azure Firewall now allows the Microsoft Foundry Agent Service's
+  `agent365.svc.cloud.microsoft` observability endpoint for hosted agents
+  under network isolation.** Live Azure validation of a network-isolated
+  deployment proved that Azure Firewall's default-deny blocked this exact
+  FQDN: the capability host and hosted-agent runtime started successfully,
+  but every hosted-agent request failed immediately after startup because
+  the runtime's own post-startup observability/telemetry call had no allow
+  rule. The FQDN is added to the existing `AllowContainerAppsPlatform`
+  Application Rule (source `*`, already covering the AI Foundry Agents
+  subnet) alongside the other always-on platform diagnostics endpoints — no
+  new firewall rule, resource, or feature flag is introduced, and no other
+  rule, output, or default changes. Upgrade compatibility: this is a
+  strictly additive allow-list change; existing deployments with
+  `networkIsolation=true` and `deployAzureFirewall=true` pick it up on the
+  next `azd provision`/redeploy with no parameter or manual action required,
+  and deployments without network isolation or the firewall are unaffected.
+
+## [v2.5.0] - 2026-08-06
+
+### Added
+
+- **Two-phase Microsoft Foundry hosted-agent preparation and deployment.**
+  Added the backward-compatible `prepareHostedAgent` flag (azd environment
+  variable `PREPARE_HOSTED_AGENT`), defaulting to `false`. Preparation now
+  provisions the existing generic Foundry project and selected-registry RBAC and
+  exposes the Foundry, ACR, network, and private-build handoff before an image
+  exists, without requiring `hostedAgent.version` or enabling an agent payload.
+  `deployHostedAgent=true` remains a superset, still fails closed unless
+  `hostedAgent.version` is an immutable `sha256:<64 lowercase hex>` digest, and
+  continues to represent downstream `azure.ai.agent` deployment intent. Existing
+  deployments with both flags omitted or `false` retain the previous resource
+  graph and empty hosted-agent outputs. Private ACR, VNet-injected ACR Task agent
+  pool, firewall, private endpoint, and DNS topology remain controlled by their
+  existing flags. This additive public contract is a **minor** release change;
+  Portal and Terraform landing-zone parity require follow-up review.
+
+### Fixed
+
+- **Compiled-template size validation now uses one release gate locally and in
+  CI.** The bare `pwsh ./scripts/Measure-MainJsonSize.ps1` command now preserves
+  the 3.5 MB working warning while failing at the repository-authoritative
+  4.7 MB ratchet and 5.0 MB ARM ceiling. GitHub Actions calls the bare command
+  instead of overriding stale script defaults, and deterministic regression
+  coverage prevents the local and CI contracts from diverging again.
+- **Foundry IQ shared private-link names now stay within Azure AI Search's
+  60-character resource-name limit for every Search service name, without
+  requiring short (<=7 character) environment names.** Network-isolated
+  deployments with long explicit or CAF-generated Search service names
+  previously produced `foundry_account` (61 chars) and `cognitiveservices_account`
+  (71 chars) child names longer than the service accepts, failing late in
+  provisioning after the long-running Foundry resources completed — reproduced
+  live against Azure/GPT-RAG. `openai_account` names were unaffected in that
+  scenario but remain in scope for the fix. Each of the three shared
+  private-link names now keeps its existing plain `spl-<searchServiceName>-
+  <groupId>-1` form whenever that name already fits (preserving names —
+  and avoiding orphaned/renamed child resources — for the vast majority of
+  existing deployments and ordinary CAF/azd Search service names), and only
+  falls back to a bounded, collision-resistant token (a truncated Search name
+  plus a deterministic hash) when the plain name would exceed 60 characters.
+  The three names remain pairwise distinct via their semantic group suffix and
+  are bounded to exactly 60 characters in the worst case (a maximum-length
+  60-character Search service name). **Upgrade compatibility:** each of the
+  three shared private-link names is evaluated independently, so an existing
+  deployment is renamed only for the specific name(s) that actually exceed 60
+  characters — a deployment where all three names already fit is completely
+  unaffected on the next `azd provision`/redeploy, with no manual action
+  required. Only names that were already failing to provision (or would
+  newly exceed the limit) move to the bounded fallback form. See
+  [Azure/GPT-RAG#592](https://github.com/Azure/GPT-RAG/issues/592) and
+  [Azure/GPT-RAG#597](https://github.com/Azure/GPT-RAG/issues/597).
+
 ## [v2.4.1] - 2026-08-03
 
 ### Fixed

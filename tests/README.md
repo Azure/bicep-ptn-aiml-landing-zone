@@ -27,14 +27,20 @@ tests/
 ├── contracts/
 │   ├── Test-HostedAgentContract.ps1
 │   ├── Test-AcrTaskAgentPoolFirewallContract.ps1
+│   ├── Test-FoundrySharedPrivateLinkNameContract.ps1
+│   ├── Test-MaintenanceConfigurationWrapperContract.ps1
+│   ├── Test-ComponentDeploymentFlagsContract.ps1
 │   └── fixtures/
-│       └── hosted-agent-resource-graph.json
+│       ├── hosted-agent-resource-graph.json
+│       └── maintenance-configuration/
+│           └── main.bicep
 ├── hub/
 │   ├── main.bicep            (test hub: VNet, Firewall, Bastion, LAW)
 │   ├── main.parameters.json
 │   └── .outputs.json         (gitignored — captured outputs from last deploy)
 └── scripts/
     ├── Deploy-Hub.ps1        (idempotent hub deployer + output capture)
+    ├── Measure-MainJsonSize.Tests.ps1
     └── Invoke-PreflightChecks.Tests.ps1
 ```
 
@@ -45,22 +51,43 @@ Run from the repository root:
 ```pwsh
 pwsh tests/contracts/Test-HostedAgentContract.ps1
 pwsh tests/contracts/Test-AcrTaskAgentPoolFirewallContract.ps1
+pwsh tests/contracts/Test-FoundrySharedPrivateLinkNameContract.ps1
+pwsh tests/contracts/Test-MaintenanceConfigurationWrapperContract.ps1
+pwsh tests/contracts/Test-ComponentDeploymentFlagsContract.ps1
+pwsh tests/scripts/Measure-MainJsonSize.Tests.ps1
 pwsh tests/scripts/Invoke-PreflightChecks.Tests.ps1
 ```
 
 The hosted-agent contract test compiles with the Bicep version recorded in its
 fixture and proves that the default-disabled feature preserves every symbolic
-resource from the merge base. It permits changes only in the two centralized
-RBAC deployment payloads and checks that those additions are
-`deployHostedAgent`-gated, least privilege, and accompanied by the stable
-Foundry/registry handoff. The ACR Task agent pool firewall contract test
+resource from the merge base except named post-baseline mutations covered by
+focused contracts. It checks that hosted-agent additions remain limited to the
+two centralized RBAC deployment payloads and are gated by
+`prepareHostedAgent || deployHostedAgent`, least privilege, and accompanied by
+the stable Foundry/registry handoff. It also proves both flags default to
+`false`, prepare mode never enables the agent payload or creates a hosted-agent
+resource, deployment remains digest-gated, and private ACR agent-pool topology
+stays independently controlled. The ACR Task agent pool firewall contract test
 (Azure/GPT-RAG#597) asserts that the VNet-injected ACR Tasks dedicated agent
 pool's required outbound platform-bootstrap Network Rules (AzureKeyVault,
 Storage, EventHub, AzureActiveDirectory, AzureMonitor) are present, correctly
 gated, ordered, and scoped to the devops build agents subnet — independent of
-the opaque hash check above. The deterministic preflight tests cover disabled,
-valid, mutable-image, and missing-prerequisite configurations without accessing
-Azure.
+the opaque hash check above. The Foundry shared private-link naming contract
+proves valid legacy child IDs remain unchanged, both long suffix variants stay
+within 60 characters, output is deterministic, and distinct tested long inputs
+do not collide. The Maintenance Configuration wrapper contract compiles default
+and InGuestPatch calls and proves every typed property is forwarded to AVM
+0.3.1, with schedules and reboot settings retaining their required nesting and
+omitted values retaining AVM defaults. The deterministic preflight tests cover
+disabled, prepare-only, valid immutable deployment, mutable/missing image
+digest, private build, missing-prerequisite, strict Boolean, Container Apps
+dependency, API-key prerequisite, and BYO subnet/NSG configurations without
+accessing Azure. The component deployment flag contract proves the matching
+Bicep validation expressions and defensive resource, DNS, secret, and
+configuration gates.
+The compiled-template size tests prove that the script's default 3.5 MB warning,
+4.7 MB failure, and 5.0 MB hard ceiling remain aligned with the workflow's bare
+command and exercise each exit path without compiling or accessing Azure.
 
 ## End-to-end test flow
 
