@@ -5,6 +5,8 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.6.0] - 2026-08-20
+
 ### Added
 
 - **`aiFoundryDisableLocalAuth` / `AI_FOUNDRY_DISABLE_LOCAL_AUTH` parameter.** The AI Foundry account's local (API-key) authentication toggle was previously hardcoded inside `modules/ai-foundry/foundry/main.bicep` with no way to override it from `main.bicep`/`main.parameters.json`/azd env. It is now a top-level parameter, defaulting to `true` (local auth disabled, Azure AD-only) to preserve prior behavior exactly.
@@ -14,6 +16,7 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 - Hardened component deployment flags so invalid Container Apps, API-key, and BYO subnet/NSG combinations fail before deployment, while environment-only Container Apps deployments retain the required private DNS zone.
 - Documented that component flags select resources for an incremental deployment and do not delete resources or App Configuration values created by earlier deployments.
+- This backward-compatible public control surface is a minor release. Portal and Terraform landing-zone parity follow-up is tracked in [Azure/AI-Landing-Zones#132](https://github.com/Azure/AI-Landing-Zones/issues/132).
 
 ## [v2.5.2] - 2026-08-20
 
