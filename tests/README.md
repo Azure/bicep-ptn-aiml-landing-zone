@@ -28,8 +28,11 @@ tests/
 │   ├── Test-HostedAgentContract.ps1
 │   ├── Test-AcrTaskAgentPoolFirewallContract.ps1
 │   ├── Test-FoundrySharedPrivateLinkNameContract.ps1
+│   ├── Test-MaintenanceConfigurationWrapperContract.ps1
 │   └── fixtures/
-│       └── hosted-agent-resource-graph.json
+│       ├── hosted-agent-resource-graph.json
+│       └── maintenance-configuration/
+│           └── main.bicep
 ├── hub/
 │   ├── main.bicep            (test hub: VNet, Firewall, Bastion, LAW)
 │   ├── main.parameters.json
@@ -48,6 +51,7 @@ Run from the repository root:
 pwsh tests/contracts/Test-HostedAgentContract.ps1
 pwsh tests/contracts/Test-AcrTaskAgentPoolFirewallContract.ps1
 pwsh tests/contracts/Test-FoundrySharedPrivateLinkNameContract.ps1
+pwsh tests/contracts/Test-MaintenanceConfigurationWrapperContract.ps1
 pwsh tests/scripts/Measure-MainJsonSize.Tests.ps1
 pwsh tests/scripts/Invoke-PreflightChecks.Tests.ps1
 ```
@@ -68,9 +72,13 @@ gated, ordered, and scoped to the devops build agents subnet — independent of
 the opaque hash check above. The Foundry shared private-link naming contract
 proves valid legacy child IDs remain unchanged, both long suffix variants stay
 within 60 characters, output is deterministic, and distinct tested long inputs
-do not collide. The deterministic preflight tests cover disabled, prepare-only,
-valid immutable deployment, mutable/missing image digest, private build, and
-missing-prerequisite configurations without accessing Azure.
+do not collide. The Maintenance Configuration wrapper contract compiles default
+and InGuestPatch calls and proves every typed property is forwarded to AVM
+0.3.1, with schedules and reboot settings retaining their required nesting and
+omitted values retaining AVM defaults. The deterministic preflight tests cover
+disabled, prepare-only, valid immutable deployment, mutable/missing image
+digest, private build, and missing-prerequisite configurations without
+accessing Azure.
 The compiled-template size tests prove that the script's default 3.5 MB warning,
 4.7 MB failure, and 5.0 MB hard ceiling remain aligned with the workflow's bare
 command and exercise each exit path without compiling or accessing Azure.
