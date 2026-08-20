@@ -5,6 +5,8 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.5.2] - 2026-08-20
+
 ### Fixed
 
 - **A release source for the Portal Maintenance Configuration wrapper now
