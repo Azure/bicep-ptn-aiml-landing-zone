@@ -144,6 +144,17 @@ azd env set NETWORK_ISOLATION true
 
 This is unchanged from v1.x. PEs everywhere, public access disabled on PaaS planes.
 
+When reusing a VNet, do not combine `NETWORK_ISOLATION=true`,
+`USE_EXISTING_VNET=true`, subnet deployment, and `DEPLOY_NSGS=false`. Updating
+those existing subnets without deploying NSGs would detach their current NSG
+associations, so preflight and Bicep reject the combination. Either keep
+`DEPLOY_NSGS=true`, or set `deploySubnets=false` and manage the existing subnets
+and NSG associations outside this deployment.
+
+Component flags select resources for the next incremental deployment; they do
+not delete resources or stale App Configuration keys created by an earlier
+deployment.
+
 ### 6.3. Decoupled jumpbox / Bastion / NAT GW
 
 The spoke wants its own jumpbox VM (so it can run data-plane scripts inside the spoke VNet), but reuses the **hub's** Bastion for SSH/RDP access:

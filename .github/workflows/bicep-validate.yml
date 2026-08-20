@@ -114,6 +114,10 @@ jobs:
         shell: pwsh
         run: pwsh ./tests/contracts/Test-MaintenanceConfigurationWrapperContract.ps1
 
+      - name: Validate component deployment flag contract
+        shell: pwsh
+        run: pwsh ./tests/contracts/Test-ComponentDeploymentFlagsContract.ps1
+
       - name: Run deterministic preflight tests
         shell: pwsh
         run: pwsh ./tests/scripts/Invoke-PreflightChecks.Tests.ps1

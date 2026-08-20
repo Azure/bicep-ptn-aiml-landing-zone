@@ -5,6 +5,16 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Added
+
+- **`aiFoundryDisableLocalAuth` / `AI_FOUNDRY_DISABLE_LOCAL_AUTH` parameter.** The AI Foundry account's local (API-key) authentication toggle was previously hardcoded inside `modules/ai-foundry/foundry/main.bicep` with no way to override it from `main.bicep`/`main.parameters.json`/azd env. It is now a top-level parameter, defaulting to `true` (local auth disabled, Azure AD-only) to preserve prior behavior exactly.
+- **`azd env set` support for `deployCosmosDb`, `deployContainerApps`, `deployContainerRegistry`, `deployContainerEnv`, and `deployNsgs`.** These five flags were previously hardcoded literals in `main.parameters.json` with no environment-variable indirection. They now follow the `${VAR=default}` convention (`DEPLOY_COSMOS_DB`, `DEPLOY_CONTAINER_APPS`, `DEPLOY_CONTAINER_REGISTRY`, `DEPLOY_CONTAINER_ENV`, `DEPLOY_NSGS`), all defaulting to `true` to preserve prior behavior exactly.
+
+### Changed
+
+- Hardened component deployment flags so invalid Container Apps, API-key, and BYO subnet/NSG combinations fail before deployment, while environment-only Container Apps deployments retain the required private DNS zone.
+- Documented that component flags select resources for an incremental deployment and do not delete resources or App Configuration values created by earlier deployments.
+
 ## [v2.5.2] - 2026-08-20
 
 ### Fixed
