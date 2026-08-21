@@ -10,9 +10,13 @@
 *.userosscache
 *.sln.docstates
 *.env
+.env*
 .local
 .azure
 .~vsdx
+.DS_Store
+Thumbs.db
+.idea/
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
@@ -426,4 +430,3 @@ FodyWeavers.xsd
 # Test harness — captured outputs from hub deployments (per-run)
 tests/hub/.outputs.json
 tests/hub/main.json
-

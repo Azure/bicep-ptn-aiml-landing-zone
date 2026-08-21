@@ -73,6 +73,56 @@ tools: ["read", "unknown"]
     $invalid = Invoke-Validator
     Assert-Result 'Duplicate names fail' ($invalid.ExitCode -ne 0 -and $invalid.Output -match 'duplicate agent') $invalid.Output
     Assert-Result 'Unsupported tools fail' ($invalid.ExitCode -ne 0 -and $invalid.Output -match 'unsupported tool aliases') $invalid.Output
+
+    Remove-Item (Join-Path $tempRoot '.github/agents/duplicate.agent.md') -Force
+    Set-FixtureFile '.github/agents/terraform-parity.agent.md' @'
+---
+name: terraform-parity
+description: Reviews approved handoffs.
+tools: ["read", "edit"]
+---
+approval.status=approved
+Pending handoffs cannot be consumed.
+inventoryCommitSha
+inventoryReviewUrl
+Azure/terraform-azurerm-avm-ptn-aiml-landing-zone
+Do not edit, merge, deploy, or publish.
+'@
+    $writableParity = Invoke-Validator
+    Assert-Result 'Terraform parity agent rejects write tools' (
+        $writableParity.ExitCode -ne 0 -and $writableParity.Output -match 'must be read-only'
+    ) $writableParity.Output
+
+    Set-FixtureFile '.github/agents/terraform-parity.agent.md' @'
+---
+name: terraform-parity
+description: Reviews approved handoffs.
+tools: ["read", "search"]
+---
+approval.status=approved
+Pending handoffs cannot be consumed.
+inventoryCommitSha
+inventoryReviewUrl
+Azure/terraform-azurerm-avm-ptn-aiml-landing-zone
+Do not edit, merge, deploy, or publish.
+'@
+    $validParity = Invoke-Validator
+    Assert-Result 'Read-only Terraform parity agent requires approved provenance boundaries' (
+        $validParity.ExitCode -eq 0
+    ) $validParity.Output
+
+    Set-FixtureFile '.github/agents/terraform-parity.agent.md' @'
+---
+name: terraform-parity
+description: Reviews approved handoffs.
+tools: ["read", "search"]
+---
+Missing required operational boundaries.
+'@
+    $missingBoundary = Invoke-Validator
+    Assert-Result 'Terraform parity agent requires allow-list and approval boundaries' (
+        $missingBoundary.ExitCode -ne 0 -and $missingBoundary.Output -match 'missing required boundary text'
+    ) $missingBoundary.Output
 }
 finally {
     Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
