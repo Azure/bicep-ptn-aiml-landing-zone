@@ -1,0 +1,60 @@
+name: terraform-parity-validate
+
+on:
+  pull_request:
+    paths:
+      - 'parity/config.json'
+      - 'parity/inventory.json'
+      - 'parity/schemas/**'
+      - 'docs/terraform-parity.md'
+      - 'scripts/parity/**'
+      - 'tests/parity/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'specs/001-terraform-foundry-parity/**'
+      - '.github/workflows/terraform-parity-validate.yml'
+  push:
+    branches:
+      - main
+      - develop
+      - 'v2.*-dev'
+    paths:
+      - 'parity/config.json'
+      - 'parity/inventory.json'
+      - 'parity/schemas/**'
+      - 'docs/terraform-parity.md'
+      - 'scripts/parity/**'
+      - 'tests/parity/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'specs/001-terraform-foundry-parity/**'
+      - '.github/workflows/terraform-parity-validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate parity contracts and fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted repository content
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install pinned JSON Schema validator
+        run: npm ci --ignore-scripts
+
+      - name: Validate parity assets
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/parity/Test-ParityAssets.ps1
+
+      - name: Test parity validators
+        shell: pwsh
+        run: npm run test:parity
+
+      - name: Check generated parity documentation
+        shell: pwsh
+        run: pwsh -NoProfile -File ./scripts/parity/Export-ParityMarkdown.ps1 -Check
