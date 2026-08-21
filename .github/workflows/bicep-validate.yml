@@ -118,6 +118,10 @@ jobs:
         shell: pwsh
         run: pwsh ./tests/contracts/Test-ComponentDeploymentFlagsContract.ps1
 
+      - name: Validate Cosmos DB deployment names
+        shell: pwsh
+        run: pwsh ./tests/contracts/Test-CosmosDeploymentNameContract.ps1
+
       - name: Run deterministic preflight tests
         shell: pwsh
         run: pwsh ./tests/scripts/Invoke-PreflightChecks.Tests.ps1

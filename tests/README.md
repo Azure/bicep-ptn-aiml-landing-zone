@@ -30,6 +30,7 @@ tests/
 │   ├── Test-FoundrySharedPrivateLinkNameContract.ps1
 │   ├── Test-MaintenanceConfigurationWrapperContract.ps1
 │   ├── Test-ComponentDeploymentFlagsContract.ps1
+│   ├── Test-CosmosDeploymentNameContract.ps1
 │   └── fixtures/
 │       ├── hosted-agent-resource-graph.json
 │       └── maintenance-configuration/
@@ -54,6 +55,7 @@ pwsh tests/contracts/Test-AcrTaskAgentPoolFirewallContract.ps1
 pwsh tests/contracts/Test-FoundrySharedPrivateLinkNameContract.ps1
 pwsh tests/contracts/Test-MaintenanceConfigurationWrapperContract.ps1
 pwsh tests/contracts/Test-ComponentDeploymentFlagsContract.ps1
+pwsh tests/contracts/Test-CosmosDeploymentNameContract.ps1
 pwsh tests/scripts/Measure-MainJsonSize.Tests.ps1
 pwsh tests/scripts/Invoke-PreflightChecks.Tests.ps1
 ```
@@ -85,6 +87,11 @@ dependency, API-key prerequisite, and BYO subnet/NSG configurations without
 accessing Azure. The component deployment flag contract proves the matching
 Bicep validation expressions and defensive resource, DNS, secret, and
 configuration gates.
+The Cosmos DB deployment-name contract proves that no top-level deployment
+embeds an environment-derived resource name and that SQL databases and
+containers use direct resources behind a fixed nested deployment name. Long CAF
+environment names therefore cannot exceed ARM's 64-character deployment-name
+limit while configured Azure resource names remain unchanged.
 The compiled-template size tests prove that the script's default 3.5 MB warning,
 4.7 MB failure, and 5.0 MB hard ceiling remain aligned with the workflow's bare
 command and exercise each exit path without compiling or accessing Azure.
