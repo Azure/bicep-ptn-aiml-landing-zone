@@ -5,6 +5,8 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.6.1] - 2026-08-21
+
 ### Fixed
 
 - Fixed provisioning for long azd/CAF environment names by replacing resource-name-derived Foundry deployment names and moving Cosmos DB SQL database/container resources out of the account AVM's name-derived nested deployment. All replacement deployment names stay below ARM's 64-character limit while preserving the configured Azure resource names (fixes #119).
