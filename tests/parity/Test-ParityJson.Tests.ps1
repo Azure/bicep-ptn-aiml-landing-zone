@@ -25,6 +25,11 @@ function Assert-Result {
     }
 }
 
+function Test-OutputMatch {
+    param([string]$Output, [string]$Pattern)
+    return (($Output -replace '\s+', ' ') -match $Pattern)
+}
+
 function Invoke-JsonValidator {
     param([string]$Path, [string]$Schema)
     $arguments = @('-NoProfile', '-File', $jsonValidator, '-Root', $repoRoot, '-Path', $Path)
@@ -128,7 +133,7 @@ try {
         -Handoffs 'tests/parity/fixtures/baseline-approval.json'
     Assert-Result 'Bicep source SHA is rejected when it lacks the inventory blob' (
         $sourceAsInventory.ExitCode -ne 0 -and
-        $sourceAsInventory.Output -match 'cannot verify committed inventory'
+        (Test-OutputMatch $sourceAsInventory.Output 'cannot verify committed inventory')
     ) $sourceAsInventory.Output
 
     $gitFixture = Join-Path $tempRoot 'committed-inventory-repo'
@@ -235,7 +240,8 @@ try {
         -Inventory (Write-TempJson 'declared-without-deployment.json' $declared) `
         -Evidence $evidenceDirectory
     Assert-Result 'Static validation and plan evidence cannot support parity' (
-        $declaredResult.ExitCode -ne 0 -and $declaredResult.Output -match 'lacks successful deployment'
+        $declaredResult.ExitCode -ne 0 -and
+        (Test-OutputMatch $declaredResult.Output 'lacks successful deployment')
     ) $declaredResult.Output
 
     $sensitive = Get-Content (Join-Path $fixtureRoot 'handoff.json') -Raw | ConvertFrom-Json
