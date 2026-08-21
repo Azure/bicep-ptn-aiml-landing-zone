@@ -2273,7 +2273,7 @@ module aiFoundryStorageAccount 'modules/ai-foundry/storage-account.bicep' = if (
 
 // 16.1 AI Foundry Configuration
 module aiFoundry 'modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
-  name: '${resourceNames.aiFoundryAccountName}-${resourceToken}-deployment'
+  name: 'aiFoundryDeployment'
   params: {
     // Required
     baseName: substring(resourceToken, 0, 10)
@@ -2453,7 +2453,7 @@ module bingSearchConnection 'modules/bing-search/main.bicep' = if (deployAiFound
 
 // Bing Search Connection
 module aiFoundryBingConnection 'modules/ai-foundry/connection-bing-search-tool.bicep' = if (deployAiFoundry && deployGroundingWithBing) {
-  name: '${resourceNames.bingSearchName}-connection'
+  name: 'aiFoundryBingConnection'
   params: {
     account_name: aiFoundry!.outputs.aiServicesName
     project_name: aiFoundry!.outputs.aiProjectName
@@ -2937,25 +2937,36 @@ module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' =
       ] : []
     }
     tags: _tags
-    sqlDatabases: [
-      {
-        name: resourceNames.dbDatabaseName
-        throughput: dbDatabaseThroughput
-        containers: [
-          for container in databaseContainersList: {
-            name: container.name
-            paths: [container.partitionKey]
-            defaultTtl: -1
-            throughput: container.?throughput
-            indexingPolicy: container.?indexingPolicy
-          }
-        ]
-      }
-    ]
   }
   dependsOn: [
     #disable-next-line BCP321
     (_networkIsolation) ? virtualNetwork : null
+  ]
+}
+
+// The Cosmos DB AVM composes its SQL database deployment name from the full
+// database resource name. CAF environment names can therefore push that nested
+// deployment beyond ARM's 64-character limit. Keep the account in AVM, but
+// deploy its database and containers through a fixed-name local module so
+// resource names remain unchanged and deployment-name length is constant.
+module cosmosSqlDatabase 'modules/cosmos-db/sql-database.bicep' = if (deployCosmosDb) {
+  name: 'cosmosSqlDatabase'
+  params: {
+    databaseAccountName: resourceNames.dbAccountName
+    databaseName: resourceNames.dbDatabaseName
+    databaseThroughput: dbDatabaseThroughput
+    containers: [
+      for container in databaseContainersList: {
+        name: container.name
+        paths: [container.partitionKey]
+        defaultTtl: -1
+        throughput: container.?throughput
+        indexingPolicy: container.?indexingPolicy
+      }
+    ]
+  }
+  dependsOn: [
+    cosmosDBAccount
   ]
 }
 
