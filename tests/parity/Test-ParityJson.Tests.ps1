@@ -27,7 +27,8 @@ function Assert-Result {
 
 function Test-OutputMatch {
     param([string]$Output, [string]$Pattern)
-    return (($Output -replace '\s+', ' ') -match $Pattern)
+    $withoutAnsi = $Output -replace '\x1B\[[0-?]*[ -/]*[@-~]', ''
+    return (($withoutAnsi -replace '\s+', ' ') -match $Pattern)
 }
 
 function Invoke-JsonValidator {
@@ -66,6 +67,11 @@ function Write-TempJson {
 
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+    $escape = [char]27
+    Assert-Result 'Output matching ignores ANSI and line wrapping' (
+        Test-OutputMatch "cannot`nverify ${escape}[31mcommitted${escape}[0m inventory" `
+            'cannot verify committed inventory'
+    ) ''
 
     $validFixtures = @(
         @{ Name = 'baseline.json'; Schema = 'inventory' },
