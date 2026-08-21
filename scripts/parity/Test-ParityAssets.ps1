@@ -508,7 +508,7 @@ try {
 
     if ($failures.Count -gt 0) {
         foreach ($failure in ($failures | Sort-Object -Unique)) {
-            Write-Error $failure
+            [Console]::Error.WriteLine($failure)
         }
         exit 1
     }
@@ -521,6 +521,6 @@ try {
     exit 0
 }
 catch {
-    Write-Error $_
+    [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
 }
