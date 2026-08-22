@@ -3,7 +3,10 @@
     "The target proposal is human-reviewable, links this handoff and both baselines, and contains no unrelated contract change."
   ],
   "approval": {
-    "status": "pending"
+    "status": "approved",
+    "approvalUrl": "https://github.com/Azure/bicep-ptn-aiml-landing-zone/pull/147#issuecomment-5375280499",
+    "approvedBy": "placerda",
+    "approvedAt": "2026-08-21T20:51:57Z"
   },
   "avmRequirements": [
     "Run the target repository formatting, lint, documentation, examples, test, and AVM pattern-module compliance checks."
@@ -61,9 +64,11 @@
     "baselineId": "baseline-v2.6.1-v0.5.1",
     "inventoryDigest": {
       "algorithm": "sha256",
-      "value": "33fa2bae3144b79c632a0e8f142a85600989ecd04de8cca8b1a49de5edff44b4"
+      "value": "5dd04b6ebb7faa4554954ee9fe27cd3589943f724e9d14e5c799dea0a93bdf75"
     },
-    "type": "baseline-inventory"
+    "type": "baseline-inventory",
+    "inventoryCommitSha": "54d18f53273082dd12f0cab0689ec7968e845950",
+    "inventoryReviewUrl": "https://github.com/Azure/bicep-ptn-aiml-landing-zone/pull/147"
   },
   "rbacRequirements": [
     "Apply least-privilege RBAC and preserve explicit control-plane and data-plane role boundaries.",
@@ -102,5 +107,6 @@
     "commitSha": "abe337894f93de3ddda525ea44898b33e1484070",
     "ref": "main",
     "repository": "Azure/terraform-azurerm-avm-ptn-aiml-landing-zone"
-  }
+  },
+  "terraformPullRequestUrl": "https://github.com/Azure/terraform-azurerm-avm-ptn-aiml-landing-zone/pull/166"
 }
