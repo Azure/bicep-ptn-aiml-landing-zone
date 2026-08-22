@@ -94,8 +94,9 @@ Expected result:
 - the handoff contains no Terraform source, credential, tenant ID, or subscription ID.
 
 Issue #136 supplies design context only; it is not inventory review or handoff approval evidence.
-The five checked-in baseline handoffs remain pending drafts until a later reviewed commit and
-explicit T033 authorization exist.
+The five checked-in baseline handoffs are approved against the reviewed inventory commit, carry
+separate T033 authorization, and link their upstream draft Terraform proposals. Proposal status
+does not claim deployment or functional parity.
 
 ## 5. Validate repository assets
 

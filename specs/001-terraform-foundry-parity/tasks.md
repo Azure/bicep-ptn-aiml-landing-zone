@@ -108,7 +108,7 @@ Terraform repository; no Terraform source exists in this repository.
 - [X] T030 [US2] Add a read-only Terraform parity coding-agent profile that consumes only approved handoffs and cannot merge or deploy in `.github/agents/terraform-parity.agent.md`
 - [X] T031 [US2] Add the agent workflow, acceptance checklist, target-repository boundary, and exit conditions in `.github/skills/terraform-parity-proposal/SKILL.md`
 - [X] T032 [US2] Validate the new agent and skill surfaces through `.github/scripts/Validate-CopilotAssets.ps1` and add focused cases to `tests/scripts/Validate-CopilotAssets.Tests.ps1`
-- [ ] T033 [US2] After explicit human approval, use the approved initial-baseline handoffs and the target repository's existing contribution path to raise draft proposals covering 100 percent of actionable gaps in `Azure/terraform-azurerm-avm-ptn-aiml-landing-zone`, then record each proposal URL or reviewed deferral in `parity/inventory.json`; do not depend on the ongoing dispatch workflow introduced in US3
+- [X] T033 [US2] After explicit human approval, use the approved initial-baseline handoffs and the target repository's existing contribution path to raise draft proposals covering 100 percent of actionable gaps in `Azure/terraform-azurerm-avm-ptn-aiml-landing-zone`, then record each proposal URL or reviewed deferral in `parity/inventory.json`; do not depend on the ongoing dispatch workflow introduced in US3
 
 **Checkpoint**: User Story 2 satisfies this feature's definition of done for gap proposals. Merging,
 deploying, and recording parity evidence remain target-repository follow-up work.

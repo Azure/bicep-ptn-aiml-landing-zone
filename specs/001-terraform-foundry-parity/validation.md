@@ -100,3 +100,35 @@ rechecked because dependencies did not change.
 - Static validation does not prove runtime behavior, effective RBAC, DNS,
   endpoint reachability, or isolation. Each scenario still requires its own
   approved target-repository deployment and reviewed comparison.
+
+# User Story 2 proposal publication
+
+Completed on 2026-08-22 after PR
+[`#147`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/pull/147)
+merged the reviewed inventory and the maintainer recorded separate T033
+authorization in
+[comment `#issuecomment-5375280499`](https://github.com/Azure/bicep-ptn-aiml-landing-zone/pull/147#issuecomment-5375280499).
+Inventory commit `54d18f53273082dd12f0cab0689ec7968e845950`
+contains the exact proposal-linked inventory bytes with SHA-256
+`5dd04b6ebb7faa4554954ee9fe27cd3589943f724e9d14e5c799dea0a93bdf75`.
+
+| Handoff | Upstream draft proposal | Target commit | Local validation |
+| --- | --- | --- | --- |
+| Networking | [`#162`](https://github.com/Azure/terraform-azurerm-avm-ptn-aiml-landing-zone/pull/162) | `2455d2f289baa69787965a82ce1ffcc8c4b07e5c` | `avm test` and `avm pre-commit` passed. |
+| Security | [`#163`](https://github.com/Azure/terraform-azurerm-avm-ptn-aiml-landing-zone/pull/163) | `ecff99f` | `avm pre-commit`, three unit tests, and `terraform validate` passed. |
+| Application Platform | [`#164`](https://github.com/Azure/terraform-azurerm-avm-ptn-aiml-landing-zone/pull/164) | `5a896b6c6d5ef644ea90a616ca566e56b3a414ba` | `terraform validate`, five unit tests, `avm pre-commit`, and `avm test` passed. |
+| AI Foundry | [`#166`](https://github.com/Azure/terraform-azurerm-avm-ptn-aiml-landing-zone/pull/166) | `94965df` | `terraform validate`, three focused tests, and `avm pre-commit` passed. |
+| Data and AI Services | [`#167`](https://github.com/Azure/terraform-azurerm-avm-ptn-aiml-landing-zone/pull/167) | `b742d8b` | `avm pre-commit`, `avm test`, six unit tests, and Terraform validation/tests passed. |
+
+All five proposals are open drafts from the `placerda` fork to upstream
+`main`, are mergeable, and passed the upstream basic check, CodeQL analysis,
+and CLA check. Their bodies record the implemented safe subset and exact
+deferrals. Repository-wide `avm pr-check` lint remains affected by pre-existing
+AzureRM-to-AzAPI compliance findings outside these proposal changes.
+
+The 22 capabilities and both scenario assessments now reference exactly one
+approved handoff, covering all 44 actionable gaps. Every
+`parityDeclared` value remains `false`. No proposal was merged and no Terraform
+apply, Azure deployment, release, publication, or runtime parity claim was
+performed. Each scenario still requires an independently approved deployment
+and reviewed comparison before parity can be declared.

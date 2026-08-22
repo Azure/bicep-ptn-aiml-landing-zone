@@ -39,7 +39,7 @@ try {
     Assert-Result 'Pending provenance contains baseline ID and exact-byte digest only' (
         $generated.approval.status -eq 'pending' -and
         $generated.provenance.baselineId -eq 'baseline-v2.6.1-v0.5.1' -and
-        $generated.provenance.inventoryDigest.value -eq '33fa2bae3144b79c632a0e8f142a85600989ecd04de8cca8b1a49de5edff44b4' -and
+        $generated.provenance.inventoryDigest.value -eq '5dd04b6ebb7faa4554954ee9fe27cd3589943f724e9d14e5c799dea0a93bdf75' -and
         $generated.provenance.PSObject.Properties.Name -notcontains 'inventoryCommitSha' -and
         $generated.provenance.PSObject.Properties.Name -notcontains 'inventoryReviewUrl'
     ) ($generated.provenance | ConvertTo-Json -Compress)

@@ -3731,7 +3731,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform v0.5.1 structurally requires a VNet, subnets, private endpoints, and mostly disabled public network access, so it cannot represent Bicep standalone-standard.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -3757,7 +3759,9 @@
             ],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -3825,7 +3829,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform's naming contract is only usable inside its mandatory VNet/private-endpoint topology, which cannot produce standalone-standard.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -3847,7 +3853,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -3904,7 +3912,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform v0.5.1 always creates Foundry private endpoints and requires VNet/subnet inputs; its service defaults disable public access, so networkIsolation=false has no analogue.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -3925,7 +3935,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -3994,7 +4006,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Required Terraform vnet_definition and always-created private endpoints prevent a no-VNet standalone-standard deployment.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4016,7 +4030,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -4067,7 +4083,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform's required private network means its routing and firewall choices cannot yield Bicep's no-mandatory-network standalone-standard topology.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4088,7 +4106,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -4136,7 +4156,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform still requires its spoke VNet and private endpoints; peering options cannot remove them for standalone-standard.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4156,7 +4178,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -4217,7 +4241,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Mandatory Terraform private endpoints require private DNS decisions, unlike Bicep standalone-standard's public topology.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4238,7 +4264,9 @@
             ],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -4283,7 +4311,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Foundry create_private_endpoints=true and required private endpoint subnet structure make private endpoints structural in Terraform v0.5.1.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4302,7 +4332,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -4372,7 +4404,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform cannot remove the underlying private topology to produce standalone-standard; jumpbox/Bastion flags do not change that constraint.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4395,7 +4429,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -4451,7 +4487,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform's Application Gateway option cannot be combined with a no-VNet/no-private-endpoint standard deployment.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4473,7 +4511,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-networking-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -4540,7 +4580,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform Foundry create_private_endpoints=true plus mandatory VNet/subnet inputs prevents the standalone-standard Foundry account topology.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-ai-foundry-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4565,7 +4607,9 @@
             ],
             "migrationRequired": true
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-ai-foundry-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -4619,7 +4663,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform cannot deploy these Foundry nested resources without its structurally required VNet and private endpoints.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-ai-foundry-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4642,7 +4688,9 @@
             ],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-ai-foundry-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -4709,7 +4757,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform service topology depends on required VNet/private endpoints and mostly disabled public access, preventing standalone-standard.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-data-and-ai-services-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4732,7 +4782,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-data-and-ai-services-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -4794,7 +4846,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform v0.5.1 requires the landing-zone VNet/private endpoints and has no Container Apps workload resources, so it cannot represent Bicep standalone-standard workloads.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4816,7 +4870,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -4888,7 +4944,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform's required private topology prevents the standard scenario, and no App Configuration key-value population/runtime-mode implementation exists.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -4910,7 +4968,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -5014,7 +5074,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform requires private topology and has no Foundry IQ/retrieval-backend runtime configuration contract, so standalone-standard cannot be represented.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -5038,7 +5100,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -5116,7 +5180,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform GenAI Storage, Cosmos, and Key Vault default to disabled public access and private endpoints in the mandatory VNet, preventing standalone-standard.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-data-and-ai-services-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -5141,7 +5207,9 @@
             ],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-data-and-ai-services-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -5200,7 +5268,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform registry public_network_access_enabled defaults false with a private endpoint in the mandatory VNet, preventing standalone-standard.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -5222,7 +5292,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -5289,7 +5361,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform observability remains part of a mandatory private landing-zone topology, so it cannot represent standalone-standard.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-data-and-ai-services-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -5312,7 +5386,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-data-and-ai-services-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -5369,7 +5445,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform identity/RBAC constructs are deployed only in its VNet/private-endpoint topology and cannot produce standalone-standard.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-security-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -5391,7 +5469,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-security-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -5448,7 +5528,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform has no hosted-agent prerequisite/handoff contract and its Foundry resources require the private topology, preventing standalone-standard.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-ai-foundry-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -5471,7 +5553,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-ai-foundry-baseline"
+          ],
           "evidenceIds": []
         }
       ],
@@ -5519,7 +5603,9 @@
             "migrationRequired": false
           },
           "blockedReason": "Terraform's structural private topology means no preflight selection can produce Bicep standalone-standard.",
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         },
         {
@@ -5540,7 +5626,9 @@
             "defaultDifferences": [],
             "migrationRequired": false
           },
-          "proposalIds": [],
+          "proposalIds": [
+            "handoff-application-platform-baseline"
+          ],
           "evidenceIds": []
         }
       ],
