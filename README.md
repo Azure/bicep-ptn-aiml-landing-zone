@@ -76,6 +76,10 @@ and no Terraform source is stored here.
   inventory pinned to Bicep `v2.6.1` and Terraform `v0.5.1`.
 - [`docs/terraform-parity.md`](./docs/terraform-parity.md) is generated from that
   inventory; edit the inventory and regenerate rather than editing the document.
+- [`docs/terraform-parity-process.md`](./docs/terraform-parity-process.md)
+  explains the complete process in plain language, including the high-level and
+  detailed workflows, assessments, handoffs, proposals, file responsibilities,
+  security boundaries, and manual approvals.
 - [`docs/terraform-parity-ownership.md`](./docs/terraform-parity-ownership.md)
   names the accountable owners and describes the GitHub App, protected
   environment, and ledger operations.

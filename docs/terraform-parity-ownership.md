@@ -10,6 +10,8 @@ Related assets:
 
 - Inventory: [`parity/inventory.json`](../parity/inventory.json), generated view
   [`docs/terraform-parity.md`](./terraform-parity.md)
+- Process guide:
+  [`docs/terraform-parity-process.md`](./terraform-parity-process.md)
 - Records: `parity/handoffs/`, `parity/assessments/`, `parity/schemas/`
 - Automation: `scripts/parity/`, `tests/parity/`,
   `.github/workflows/terraform-parity-*.yml`
