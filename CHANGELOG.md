@@ -16,6 +16,10 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
   [`docs/terraform-parity.md`](docs/terraform-parity.md), and ownership and
   operations guidance in
   [`docs/terraform-parity-ownership.md`](docs/terraform-parity-ownership.md).
+  The plain-language
+  [`docs/terraform-parity-process.md`](docs/terraform-parity-process.md) guide
+  explains the complete high-level and detailed workflows, record types, file
+  responsibilities, approval points, and security boundaries.
 - **Per-merge alignment assessments.** `terraform-parity-assess.yml` records
   exactly one assessment for every pull request merged into `develop`, keyed by
   repository, pull request number, and merge commit SHA. Records are appended to
