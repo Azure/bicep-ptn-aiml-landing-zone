@@ -138,8 +138,15 @@ An approved ongoing handoff requires an approved `proposal-required` assessment 
 capabilities. An approved initial catch-up handoff requires the committed inventory blob and review
 above. Pending, rejected, and superseded handoffs may document draft gap coverage but cannot satisfy
 proposal eligibility, dispatch, or authorize T033. The pinned Bicep source commit, Terraform target
-commit, and inventory artifact commit are independent identifiers. Issue #136 is context only. One
-active handoff is allowed per provenance source and capability set.
+commit, inventory artifact commit, and handoff artifact commit are independent identifiers. Issue
+#136 is context only. One active handoff is allowed per provenance source and capability set.
+
+The handoff artifact commit is the commit in this repository that contains the reviewed handoff
+record and the handoff schema. It is not stored in the record, because a record cannot contain the
+SHA of the commit that contains it. It is resolved at publication time from the trusted checkout and
+travels only in the dispatch payload as `handoffCommitSha`. See
+[ADR-0004](../../docs/adr/0004-parity-dispatch-artifact-commit-contract.md) and
+[the workflow event contract](./contracts/workflow-events.md).
 
 ## Parity evidence
 

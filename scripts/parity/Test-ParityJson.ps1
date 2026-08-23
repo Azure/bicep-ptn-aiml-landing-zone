@@ -6,7 +6,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$Path,
-    [ValidateSet('inventory', 'assessment', 'terraformHandoff', 'parityEvidence')]
+    [ValidateSet('inventory', 'assessment', 'terraformHandoff', 'parityEvidence', 'adoptionMarker')]
     [string]$Schema,
     [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [string]$ConfigPath = 'parity/config.json'
@@ -26,6 +26,9 @@ try {
         $document = Read-ParityJson $documentPath
         $Schema = if ($document.PSObject.Properties.Name -contains 'baseline') {
             'inventory'
+        }
+        elseif ($document.PSObject.Properties.Name -contains 'adoptionCommitSha') {
+            'adoptionMarker'
         }
         elseif ($document.PSObject.Properties.Name -contains 'sourcePr') {
             'assessment'

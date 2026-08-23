@@ -50,10 +50,15 @@ pwsh ./scripts/parity/Export-ParityMarkdown.ps1 -Check
 Expected result: `docs/terraform-parity.md` is byte-identical to deterministic output from
 `parity/inventory.json`.
 
-## 3. Exercise assessment fixtures
+## 3. Exercise assessment and workflow fixtures
 
 ```powershell
-pwsh ./tests/parity/Invoke-ParityAssessment.Tests.ps1
+pwsh ./tests/parity/Test-AlignmentAssessment.Tests.ps1
+pwsh ./tests/parity/Test-ParityWorkflowYaml.Tests.ps1
+pwsh ./tests/parity/Test-LedgerAppendOnly.Tests.ps1
+pwsh ./tests/parity/Test-WorkflowEventContract.Tests.ps1
+pwsh ./tests/parity/Test-WorkflowSecurity.Tests.ps1
+pwsh ./tests/parity/Invoke-ParityWorkflow.Tests.ps1
 ```
 
 Fixtures must cover:
@@ -68,6 +73,21 @@ Fixtures must cover:
 Expected result: each unique merged PR creates one assessment, duplicate delivery creates none,
 concurrent events serialize append-only writes to `terraform-parity-assessments`, and no assessment
 workflow writes to `develop`.
+
+Prove ledger coverage against the fetched integration branch. Always validate against
+`origin/develop`; a local `develop` ref is a stale snapshot:
+
+```powershell
+git fetch --no-tags origin '+refs/heads/develop:refs/remotes/origin/develop'
+pwsh ./scripts/parity/Test-AssessmentCoverage.ps1 -Branch origin/develop
+```
+
+Expected result: every merge after the adoption commit recorded in
+`parity/assessments/adoption-marker.json` has exactly one assessment, every assessment
+references a merge commit that is on the integration branch, and no first-parent commit
+after the adoption commit lacks a pull request reference. Use `-Branch HEAD` only to
+validate the merge commit currently checked out, and `-AllowUnattributedCommits` only
+for an integration branch that is not yet protected against direct pushes.
 
 ## 4. Exercise approval and handoff fixtures
 
@@ -106,6 +126,25 @@ pwsh ./tests/scripts/Validate-CopilotAssets.Tests.ps1
 ```
 
 Expected result: existing Copilot assets remain valid after adding parity agent instructions.
+
+## 6. Check publication safety and performance
+
+```powershell
+pwsh ./tests/parity/Test-ParityPublication.Tests.ps1
+pwsh ./tests/parity/Test-ParityPerformance.Tests.ps1
+```
+
+Expected result:
+
+- only an approved handoff with fresh baselines, an allow-listed target repository and branch, and
+  an open inventory gap produces a bounded identifier-only dispatch payload;
+- a recorded Terraform proposal is reconciled instead of dispatched twice, and target rejection
+  fails explicitly while leaving the gap open;
+- complete inventory validation plus deterministic Markdown generation finish within 60 seconds.
+
+Publication itself is never run locally. It requires the protected
+`terraform-parity-publication` environment and an ephemeral GitHub App token, as described in
+`docs/terraform-parity-ownership.md`.
 
 ## Follow-up deployment evidence
 

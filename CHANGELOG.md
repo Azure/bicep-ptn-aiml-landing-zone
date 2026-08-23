@@ -5,6 +5,77 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Added
+
+- **Terraform parity coordination assets.** The repository now owns a pinned,
+  machine-readable parity inventory (`parity/inventory.json`), JSON Schema
+  contracts (`parity/schemas/`), structured Terraform handoffs
+  (`parity/handoffs/`), an append-only alignment-assessment ledger seed
+  (`parity/assessments/`), deterministic PowerShell tooling (`scripts/parity/`),
+  fixture-based tests (`tests/parity/`), the generated view
+  [`docs/terraform-parity.md`](docs/terraform-parity.md), and ownership and
+  operations guidance in
+  [`docs/terraform-parity-ownership.md`](docs/terraform-parity-ownership.md).
+- **Per-merge alignment assessments.** `terraform-parity-assess.yml` records
+  exactly one assessment for every pull request merged into `develop`, keyed by
+  repository, pull request number, and merge commit SHA. Records are appended to
+  the dedicated `terraform-parity-assessments` ledger branch; the workflow never
+  writes to `develop` and never executes pull-request head code. A recorded
+  outcome and rationale are immutable, and an approved or rejected review is
+  terminal apart from supersession; both decisions require a reviewer, an
+  absolute `https` decision URL, and a review timestamp.
+- **Gated cross-repository publication.** `terraform-parity-publish.yml` runs only
+  from a manual dispatch behind the protected `terraform-parity-publication`
+  environment, mints an ephemeral GitHub App token scoped to the Terraform
+  repository, and sends an identifier-only `repository_dispatch` payload. An
+  already recorded proposal is reconciled instead of dispatched twice.
+- **Versioned handoff artifact retrieval.** Publication payload version `2.0.0`
+  carries a distinct immutable handoff commit, branch, schema path, and normalized
+  digest. The producer proves that the trusted checkout contains the exact handoff
+  and schema bytes before dispatch; pinned Bicep and Terraform commits remain
+  comparison baselines rather than artifact locations.
+- **Ledger coverage validation.** `terraform-parity-validate.yml` reads the ledger
+  branch when it exists and fails when any `develop` merge after the adoption
+  marker lacks exactly one assessment.
+
+### Changed
+
+- Parity validation now also validates the ledger adoption marker, scans
+  `parity/` and `tests/parity/fixtures/` for sensitive values with documented
+  exclusions, and asserts a 60-second budget for full inventory validation plus
+  Markdown generation.
+- Parity validation and its workflow tests run entirely from repository content:
+  workflow YAML is read by the pinned in-repository reader
+  `scripts/parity/Parity.WorkflowYaml.ps1`, so no PowerShell module is installed
+  from a package gallery at workflow runtime, and the only installed tooling is
+  the lockfile-pinned JSON Schema validator (`npm ci --ignore-scripts`).
+- The append-only ledger guard moved out of inline workflow YAML into the tested
+  `scripts/parity/Test-LedgerAppendOnly.ps1`, which rejects modification,
+  deletion, rename, foreign paths, and any checkout that is not on the ledger
+  branch before the assessment workflow commits anything.
+- `scripts/parity/Test-AssessmentCoverage.ps1` now fails on a first-parent commit
+  after the adoption marker that has no pull request reference, because such a
+  commit cannot be assessed; `-AllowUnattributedCommits` is a deliberate opt-out
+  for an integration branch that is not yet protected against direct pushes.
+- Publication and aggregate validation read ongoing alignment assessments from
+  the dedicated ledger checkout rather than the frozen seed on `develop`.
+  Ledger discovery distinguishes an absent branch from transport or
+  authentication failures, which now fail explicitly.
+
+Compatibility impact: none for deployments. No Bicep parameter, default, output,
+module interface, manifest field, App Configuration key, identity, or network
+behavior changed; these assets are repository automation and documentation only.
+
+Follow-up boundary: merging Terraform proposals, deploying the standard and
+network-isolated scenarios in an approved test subscription, and recording
+reviewed parity evidence remain owned by
+`Azure/terraform-azurerm-avm-ptn-aiml-landing-zone`. No scenario is declared at
+parity here.
+
+Rollback: disable the `terraform-parity-*` workflows and revoke the GitHub App
+installation or key. Records and the ledger branch are retained and superseded
+rather than deleted, and no Azure resource or consumer contract is affected.
+
 ## [v2.6.1] - 2026-08-21
 
 ### Fixed

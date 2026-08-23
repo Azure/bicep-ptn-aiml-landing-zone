@@ -126,24 +126,24 @@ and then produce exactly one target proposal reference.
 
 ### Tests for User Story 3
 
-- [ ] T034 [P] [US3] Write failing tests for merged-PR assessment creation, supported outcomes, immutable traceability, supersession, duplicate delivery, and serialized append-only ledger writes in `tests/parity/Test-AlignmentAssessment.Tests.ps1`
-- [ ] T035 [P] [US3] Write failing event contract tests for `develop` branch filtering, merged-only handling, trusted commit checkout, dedicated ledger persistence, prohibited direct `develop` writes, and explicit workflow failures in `tests/parity/Test-WorkflowEventContract.Tests.ps1`
-- [ ] T036 [P] [US3] Write failing publication tests for protected-environment approval, configured repository and branch allow-lists, stale baseline, missing gaps, duplicate proposal, and target rejection in `tests/parity/Test-ParityPublication.Tests.ps1`
-- [ ] T037 [P] [US3] Write failing workflow security tests for least-privilege permissions, immutable action pins, prohibited PR-head execution, bounded dispatch payloads, and absent secrets in `tests/parity/Test-WorkflowSecurity.Tests.ps1`
+- [X] T034 [P] [US3] Write failing tests for merged-PR assessment creation, supported outcomes, immutable traceability, supersession, duplicate delivery, and serialized append-only ledger writes in `tests/parity/Test-AlignmentAssessment.Tests.ps1`
+- [X] T035 [P] [US3] Write failing event contract tests for `develop` branch filtering, merged-only handling, trusted commit checkout, dedicated ledger persistence, prohibited direct `develop` writes, and explicit workflow failures in `tests/parity/Test-WorkflowEventContract.Tests.ps1`
+- [X] T036 [P] [US3] Write failing publication tests for protected-environment approval, configured repository and branch allow-lists, stale baseline, missing gaps, duplicate proposal, and target rejection in `tests/parity/Test-ParityPublication.Tests.ps1`
+- [X] T037 [P] [US3] Write failing workflow security tests for least-privilege permissions, immutable action pins, prohibited PR-head execution, bounded dispatch payloads, and absent secrets in `tests/parity/Test-WorkflowSecurity.Tests.ps1`
 
 ### Implementation for User Story 3
 
-- [ ] T038 [US3] Implement idempotent merged-PR assessment creation keyed by repository, PR number, and merge SHA in `scripts/parity/New-AlignmentAssessment.ps1`
-- [ ] T039 [US3] Implement assessment finalization for no-impact, inventory-update, proposal-required, blocked, deferred, rejected, and superseded outcomes in `scripts/parity/Set-AlignmentAssessment.ps1`
-- [ ] T040 [US3] Implement provenance-aware bounded repository-dispatch payload creation and duplicate proposal reconciliation in `scripts/parity/Publish-TerraformHandoff.ps1`
-- [ ] T041 [US3] Add the merged pull-request workflow for `develop`, using trusted metadata, serialized concurrency, and append-only commits to the dedicated `terraform-parity-assessments` ledger branch without direct pushes to `develop` or cross-repository credentials, in `.github/workflows/terraform-parity-assess.yml`
-- [ ] T042 [US3] Add the protected-environment publication workflow that mints a single-repository GitHub App token only after approval in `.github/workflows/terraform-parity-publish.yml`
-- [ ] T043 [US3] Extend parity validation to read the dedicated ledger branch and prove every `develop` merge after the adoption marker has exactly one assessment in `.github/workflows/terraform-parity-validate.yml`
-- [ ] T044 [US3] Document Bicep, Terraform, cross-parity, approval, baseline, rejected-proposal, incident, and cleanup ownership in `docs/terraform-parity-ownership.md`
-- [ ] T045 [US3] Document the minimum GitHub App permissions, protected environment reviewers, key rotation, audit, revocation, and break-glass prohibition in `docs/terraform-parity-ownership.md`
-- [ ] T046 [US3] Create the adoption marker and backfill reviewed assessments for the bounded set of `develop` merges selected before workflow activation under `parity/assessments/` on the dedicated ledger branch
-- [ ] T047 [US3] Prepare a reviewable Terraform-repository proposal for the receiving `repository_dispatch` workflow and coding-agent instructions under `Azure/terraform-azurerm-avm-ptn-aiml-landing-zone/.github/`
-- [ ] T048 [US3] Add an end-to-end fixture test proving merged PR to assessment to approval to handoff to proposal-reference traceability in `tests/parity/Invoke-ParityWorkflow.Tests.ps1`
+- [X] T038 [US3] Implement idempotent merged-PR assessment creation keyed by repository, PR number, and merge SHA in `scripts/parity/New-AlignmentAssessment.ps1`
+- [X] T039 [US3] Implement assessment finalization for no-impact, inventory-update, proposal-required, blocked, deferred, rejected, and superseded outcomes in `scripts/parity/Set-AlignmentAssessment.ps1`
+- [X] T040 [US3] Implement provenance-aware bounded repository-dispatch payload creation and duplicate proposal reconciliation in `scripts/parity/Publish-TerraformHandoff.ps1`
+- [X] T041 [US3] Add the merged pull-request workflow for `develop`, using trusted metadata, serialized concurrency, and append-only commits to the dedicated `terraform-parity-assessments` ledger branch without direct pushes to `develop` or cross-repository credentials, in `.github/workflows/terraform-parity-assess.yml`
+- [X] T042 [US3] Add the protected-environment publication workflow that mints a single-repository GitHub App token only after approval in `.github/workflows/terraform-parity-publish.yml`
+- [X] T043 [US3] Extend parity validation to read the dedicated ledger branch and prove every `develop` merge after the adoption marker has exactly one assessment in `.github/workflows/terraform-parity-validate.yml`
+- [X] T044 [US3] Document Bicep, Terraform, cross-parity, approval, baseline, rejected-proposal, incident, and cleanup ownership in `docs/terraform-parity-ownership.md`
+- [X] T045 [US3] Document the minimum GitHub App permissions, protected environment reviewers, key rotation, audit, revocation, and break-glass prohibition in `docs/terraform-parity-ownership.md`
+- [X] T046 [US3] Create the adoption marker and backfill hand-assessed assessments, each with a recorded outcome and rationale and `review.status=pending` until a parity reviewer approves it, for the bounded set of `develop` merges selected before workflow activation under `parity/assessments/` on the dedicated ledger branch
+- [X] T047 [US3] Prepare a reviewable Terraform-repository proposal for the receiving `repository_dispatch` workflow and coding-agent instructions under `Azure/terraform-azurerm-avm-ptn-aiml-landing-zone/.github/`
+- [X] T048 [US3] Add an end-to-end fixture test proving merged PR to assessment to approval to handoff to proposal-reference traceability in `tests/parity/Invoke-ParityWorkflow.Tests.ps1`
 
 **Checkpoint**: All three user stories are independently functional. Ongoing Bicep changes cannot
 be silently skipped after adoption.
@@ -154,12 +154,12 @@ be silently skipped after adoption.
 
 **Purpose**: Harden and document the complete coordination feature.
 
-- [ ] T049 [P] Update contributor-facing parity workflow, inventory, generated-document, and approval guidance in `README.md`
-- [ ] T050 [P] Add the coordination feature, compatibility impact, follow-up deployment boundary, and rollback guidance to the Unreleased section of `CHANGELOG.md`
-- [ ] T051 Pin every third-party action used by parity workflows to an immutable commit and verify minimum job-level permissions in `.github/workflows/terraform-parity-*.yml`
-- [ ] T052 Run sensitive-value and secret scanning across `parity/`, `tests/parity/fixtures/`, and parity workflow logs, and document exclusions in `scripts/parity/Test-ParityAssets.ps1`
-- [ ] T053 Prove complete inventory validation and Markdown generation finish within 60 seconds and record the timing assertion in `tests/parity/Test-ParityPerformance.Tests.ps1`
-- [ ] T054 Execute every command in `specs/001-terraform-foundry-parity/quickstart.md`, append commands, exit codes, meaningful warnings, skipped checks, proof supplied, and residual risks to `specs/001-terraform-foundry-parity/validation.md`, and confirm no Azure deployment was performed
+- [X] T049 [P] Update contributor-facing parity workflow, inventory, generated-document, and approval guidance in `README.md`
+- [X] T050 [P] Add the coordination feature, compatibility impact, follow-up deployment boundary, and rollback guidance to the Unreleased section of `CHANGELOG.md`
+- [X] T051 Pin every third-party action used by parity workflows to an immutable commit and verify minimum job-level permissions in `.github/workflows/terraform-parity-*.yml`
+- [X] T052 Run sensitive-value and secret scanning across `parity/`, `tests/parity/fixtures/`, and parity workflow logs, and document exclusions in `scripts/parity/Test-ParityAssets.ps1`
+- [X] T053 Prove complete inventory validation and Markdown generation finish within 60 seconds and record the timing assertion in `tests/parity/Test-ParityPerformance.Tests.ps1`
+- [X] T054 Execute every command in `specs/001-terraform-foundry-parity/quickstart.md`, append commands, exit codes, meaningful warnings, skipped checks, proof supplied, and residual risks to `specs/001-terraform-foundry-parity/validation.md`, and confirm no Azure deployment was performed
 
 ---
 
