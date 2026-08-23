@@ -52,12 +52,12 @@ owner from documentation alone.
   absolute `https` review decision URL, and a review timestamp, both require an
   already recorded outcome, and neither can later change to anything except
   `superseded`. A superseded review is final.
-- The seven backfilled records under `parity/assessments/` are a hand-assessed
+- The eight backfilled records under `parity/assessments/` are a hand-assessed
   seed with `review.status=pending`. Their outcomes and rationales were written
-  by hand before workflow activation. The seventh record covers PR #149, whose
-  assessment event could not run because the workflow was not yet present on
-  the default branch. No approver, approval URL, or approval time is recorded,
-  and no automation may treat these records as approved.
+  by hand before workflow activation. The seventh and eighth records cover PRs
+  #149 and #150, whose assessment events could not run because the workflow was
+  not yet present on the default branch. No approver, approval URL, or approval
+  time is recorded, and no automation may treat these records as approved.
 - Only `proposal-required` assessments may reference handoffs, and only an approved
   `proposal-required` assessment can authorize an alignment-provenance handoff.
 - A rejected or closed Terraform proposal leaves its inventory gap open until a
