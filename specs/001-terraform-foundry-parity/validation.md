@@ -210,7 +210,7 @@ Corrective changes applied in this pass:
 
 `parity/assessments/adoption-marker.json` pins adoption commit
 `5a30a4fbb8338b6d1623fdaa7b8e79425b1f4d3b` (the PR #140 merge). Every pull
-request merged into `develop` after it has one hand-assessed record. The six
+request merged into `develop` after it has one hand-assessed record. The seven
 records are a hand-assessed seed with `review.status=pending`: the outcome and
 rationale were written by hand before workflow activation, and no approver,
 approval URL, or approval time is recorded.
@@ -223,11 +223,13 @@ approval URL, or approval time is recorded.
 | #146 | `d2ba2be` | `no-terraform-impact` | pending | v2.6.1 release metadata synchronization: changelog and release manifest only. |
 | #147 | `66a0d76` | `no-terraform-impact` | pending | Parity coordination assets only. |
 | #148 | `479000e` | `no-terraform-impact` | pending | Reviewed proposal references and approved handoff provenance only. |
+| #149 | `ebfeb29` | `no-terraform-impact` | pending | Continuous parity coordination automation and documentation only; no Bicep deployment contract changed. This transition record was added because `pull_request_target` could not load the newly added workflow until it reaches the default branch. |
 
-The seed lives on this branch so the dedicated `terraform-parity-assessments`
-ledger branch can be created from the reviewed commit that contains it. After
-that branch exists, the assessment workflow appends every later record only
-there and never to `develop`.
+The seven-record seed lives on `develop` so the dedicated
+`terraform-parity-assessments` ledger branch can be created from the reviewed
+commit that contains it. After that branch exists and the assessment workflow
+is available on the default branch, the workflow appends every later record
+only there and never to `develop`.
 
 ## Terraform receiver proposal
 
@@ -276,7 +278,7 @@ no deployment, release, or parity claim.
   reviewers, the single-repository GitHub App, and the `PARITY_DISPATCH_APP_ID`
   and `PARITY_DISPATCH_APP_PRIVATE_KEY` environment secrets. Sections 3 to 7 of
   `docs/terraform-parity-ownership.md` record the required values.
-- The six backfilled assessments carry `review.status=pending`. Recording an
+- The seven backfilled assessments carry `review.status=pending`. Recording an
   approver, approval URL, and approval time is a human act; this pass did not
   fabricate one. A reviewer records it with
   `pwsh ./scripts/parity/Set-AlignmentAssessment.ps1 -Path <record> -ReviewStatus approved -Reviewer <handle> -ApprovalUrl <review-url> -ReviewedAt <utc>`.
