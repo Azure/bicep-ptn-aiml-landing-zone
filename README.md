@@ -65,6 +65,49 @@ The script defaults are authoritative for both local and CI validation. The
 gate warns above the 3.5 MB working budget, fails at 4.7 MB, and treats the
 5.0 MB ARM ceiling as an unconditional failure.
 
+### Terraform parity coordination
+
+This repository is the functional reference implementation. The Terraform
+pattern module lives in
+[`Azure/terraform-azurerm-avm-ptn-aiml-landing-zone`](https://github.com/Azure/terraform-azurerm-avm-ptn-aiml-landing-zone)
+and no Terraform source is stored here.
+
+- [`parity/inventory.json`](./parity/inventory.json) is the machine-readable gap
+  inventory pinned to Bicep `v2.6.1` and Terraform `v0.5.1`.
+- [`docs/terraform-parity.md`](./docs/terraform-parity.md) is generated from that
+  inventory; edit the inventory and regenerate rather than editing the document.
+- [`docs/terraform-parity-process.md`](./docs/terraform-parity-process.md)
+  explains the complete process in plain language, including the high-level and
+  detailed workflows, assessments, handoffs, proposals, file responsibilities,
+  security boundaries, and manual approvals.
+- [`docs/terraform-parity-ownership.md`](./docs/terraform-parity-ownership.md)
+  names the accountable owners and describes the GitHub App, protected
+  environment, and ledger operations.
+
+Every pull request merged into `develop` gets exactly one alignment assessment.
+The `terraform-parity-assess` workflow creates it from trusted merge metadata and
+appends it to the dedicated `terraform-parity-assessments` ledger branch; it never
+writes to `develop`. A parity reviewer then records the outcome
+(`no-terraform-impact`, `inventory-update`, `proposal-required`, `blocked`,
+`deferred`, or `superseded`) and rationale. Approved `proposal-required`
+assessments produce a structured handoff, and publication to the Terraform
+repository requires protected-environment approval; nothing is published
+automatically.
+
+Contributor commands, all offline:
+
+```pwsh
+npm ci --ignore-scripts
+pwsh ./scripts/parity/Test-ParityAssets.ps1
+pwsh ./scripts/parity/Export-ParityMarkdown.ps1 -Check
+npm run test:parity
+```
+
+Support status (`full`, `partial`, `absent`, `blocked`) is separate from evidence
+level. A scenario reaches parity only after its own successful test-subscription
+deployment from the Terraform repository plus a reviewed capability comparison.
+Compilation, lint, What-If, and `terraform plan` are never parity evidence.
+
 ### Basic Deployment
 
 Quick setup for demos without network isolation.

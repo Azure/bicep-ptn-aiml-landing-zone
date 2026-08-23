@@ -10,9 +10,13 @@
 *.userosscache
 *.sln.docstates
 *.env
+.env*
 .local
 .azure
 .~vsdx
+.DS_Store
+Thumbs.db
+.idea/
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
@@ -427,3 +431,6 @@ FodyWeavers.xsd
 tests/hub/.outputs.json
 tests/hub/main.json
 
+# Parity dispatch payload produced by scripts/parity/Publish-TerraformHandoff.ps1
+.parity-dispatch/
+.parity-ledger/
