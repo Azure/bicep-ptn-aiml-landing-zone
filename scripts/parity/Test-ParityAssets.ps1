@@ -177,6 +177,41 @@ function Test-SensitiveValue {
     }
 }
 
+function Test-SensitiveFileContent {
+    param([Parameter(Mandatory)] [string]$Path, [Parameter(Mandatory)] [string]$RelativePath)
+
+    $text = [System.IO.File]::ReadAllText($Path)
+    $patterns = [ordered]@{
+        'credential-like content' = '(?i)\b(?:password|client[_-]?secret|access[_-]?token)\s*["'':=]+\s*[^\s"'',}]+'
+        'private key material' = '(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'
+        'GitHub token material' = '\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b'
+        'Azure subscription resource ID' = '(?i)/subscriptions/[0-9a-f-]{36}(?:/|$)'
+        'tenant or subscription ID' = '(?i)\b(?:tenant|subscription)(?:\s+id|Id)?\s*["'':=]+\s*[0-9a-f]{8}-[0-9a-f-]{27,}\b'
+        'private IP address' = '(?<![0-9])(?:10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}|192\.168\.(?:[0-9]{1,3}\.)[0-9]{1,3}|172\.(?:1[6-9]|2[0-9]|3[01])\.(?:[0-9]{1,3}\.)[0-9]{1,3})(?![0-9])'
+    }
+    # Documented sensitive-scanning exclusions:
+    # 1. parity/inventory.json records the pinned public Bicep default address
+    #    prefixes as source contract data under surfaceContracts[].default.value.
+    #    Structured record scanning keeps the same rule for every other field, so
+    #    only the raw private-address pattern is excluded for that one file.
+    # 2. parity/schemas/**/*.json declares prohibited field names inside patterns
+    #    and enumerations, which the credential pattern would otherwise match.
+    # 3. Workflow run logs cannot be scanned offline. The parity workflows never
+    #    print record content, tokens, or dispatch payload bodies, and
+    #    tests/parity/Test-WorkflowSecurity.Tests.ps1 enforces that contract.
+    if ($RelativePath -eq 'parity/inventory.json') {
+        $patterns.Remove('private IP address')
+    }
+    if ($RelativePath -like 'parity/schemas/*') {
+        $patterns.Remove('credential-like content')
+    }
+    foreach ($entry in $patterns.GetEnumerator()) {
+        if ($text -match $entry.Value) {
+            Add-Failure "$($entry.Key) is prohibited in $RelativePath."
+        }
+    }
+}
+
 try {
     $rootPath = Resolve-ParityPath -Root $Root -Path '.'
     $gitRootPath = if ($GitRepositoryPath) {
@@ -221,7 +256,17 @@ try {
     $evidenceSetting = if ($EvidencePath) { $EvidencePath } else { $configuration.records.evidence }
 
     $inventoryFiles = @(Get-RecordFiles $inventorySetting)
-    $assessmentFiles = @(Get-RecordFiles $assessmentSetting)
+    $resolvedAssessmentSetting = Resolve-ParityPath -Root $rootPath -Path $assessmentSetting
+    $adoptionMarkerPath = if (Test-Path -LiteralPath $resolvedAssessmentSetting -PathType Container) {
+        Join-Path $resolvedAssessmentSetting 'adoption-marker.json'
+    }
+    else {
+        $null
+    }
+    $assessmentFiles = @(
+        Get-RecordFiles $assessmentSetting |
+            Where-Object { [IO.Path]::GetFileName($_) -ne 'adoption-marker.json' }
+    )
     $handoffFiles = @(Get-RecordFiles $handoffSetting)
     $evidenceFiles = @(Get-RecordFiles $evidenceSetting)
     if ($inventoryFiles.Count -gt 1) {
@@ -250,6 +295,17 @@ try {
     foreach ($file in $evidenceFiles) {
         if (Test-RecordSchema $file 'parityEvidence') {
             $evidence += Read-ParityJson $file
+        }
+    }
+    if ($adoptionMarkerPath -and (Test-Path -LiteralPath $adoptionMarkerPath -PathType Leaf)) {
+        if (Test-RecordSchema $adoptionMarkerPath 'adoptionMarker') {
+            $adoptionMarker = Read-ParityJson $adoptionMarkerPath
+            if ($adoptionMarker.ledgerBranch -ne $configuration.branches.assessmentLedger) {
+                Add-Failure 'The adoption marker ledger branch does not match parity/config.json.'
+            }
+            if ($adoptionMarker.integrationBranch -ne $configuration.branches.sourceIntegration) {
+                Add-Failure 'The adoption marker integration branch does not match parity/config.json.'
+            }
         }
     }
 
@@ -506,6 +562,22 @@ try {
         Test-SensitiveValue -Value $handoff -JsonPath '$.handoff'
     }
 
+    $scanRoots = @('parity', 'tests/parity/fixtures')
+    $scannedFiles = 0
+    foreach ($scanRoot in $scanRoots) {
+        $resolvedScanRoot = Resolve-ParityPath -Root $rootPath -Path $scanRoot
+        if (-not (Test-Path -LiteralPath $resolvedScanRoot -PathType Container)) { continue }
+        foreach ($file in @(
+            Get-ChildItem -LiteralPath $resolvedScanRoot -File -Recurse |
+                Where-Object { $_.Extension -in @('.json', '.md', '.yml', '.yaml', '.txt') } |
+                Sort-Object FullName
+        )) {
+            $relative = [IO.Path]::GetRelativePath($rootPath, $file.FullName).Replace('\', '/')
+            Test-SensitiveFileContent -Path $file.FullName -RelativePath $relative
+            $scannedFiles++
+        }
+    }
+
     if ($failures.Count -gt 0) {
         foreach ($failure in ($failures | Sort-Object -Unique)) {
             [Console]::Error.WriteLine($failure)
@@ -514,9 +586,9 @@ try {
     }
 
     Write-Host (
-        'Parity assets passed: {0} inventory, {1} capabilities, {2} assessments, {3} handoffs, {4} approved proposal-eligible, {5} evidence records.' -f
+        'Parity assets passed: {0} inventory, {1} capabilities, {2} assessments, {3} handoffs, {4} approved proposal-eligible, {5} evidence records, {6} scanned files.' -f
         $inventories.Count, $capabilities.Count, $assessments.Count, $handoffs.Count,
-        $approvedEligibleHandoffIds.Count, $evidence.Count
+        $approvedEligibleHandoffIds.Count, $evidence.Count, $scannedFiles
     )
     exit 0
 }

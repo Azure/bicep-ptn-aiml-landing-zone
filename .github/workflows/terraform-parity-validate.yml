@@ -3,32 +3,30 @@ name: terraform-parity-validate
 on:
   pull_request:
     paths:
-      - 'parity/config.json'
-      - 'parity/inventory.json'
-      - 'parity/schemas/**'
+      - 'parity/**'
       - 'docs/terraform-parity.md'
+      - 'docs/terraform-parity-ownership.md'
       - 'scripts/parity/**'
       - 'tests/parity/**'
       - 'package.json'
       - 'package-lock.json'
       - 'specs/001-terraform-foundry-parity/**'
-      - '.github/workflows/terraform-parity-validate.yml'
+      - '.github/workflows/terraform-parity-*.yml'
   push:
     branches:
       - main
       - develop
       - 'v2.*-dev'
     paths:
-      - 'parity/config.json'
-      - 'parity/inventory.json'
-      - 'parity/schemas/**'
+      - 'parity/**'
       - 'docs/terraform-parity.md'
+      - 'docs/terraform-parity-ownership.md'
       - 'scripts/parity/**'
       - 'tests/parity/**'
       - 'package.json'
       - 'package-lock.json'
       - 'specs/001-terraform-foundry-parity/**'
-      - '.github/workflows/terraform-parity-validate.yml'
+      - '.github/workflows/terraform-parity-*.yml'
 
 permissions:
   contents: read
@@ -37,7 +35,9 @@ jobs:
   validate:
     name: Validate parity contracts and fixtures
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Check out trusted repository content
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,9 +48,39 @@ jobs:
       - name: Install pinned JSON Schema validator
         run: npm ci --ignore-scripts
 
+      - name: Determine assessment ledger availability
+        id: ledger
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File ./scripts/parity/Get-AssessmentLedgerAvailability.ps1 `
+            -OutputPath "$env:GITHUB_OUTPUT"
+          if ($LASTEXITCODE -ne 0) { throw 'Assessment ledger discovery failed.' }
+
+      - name: Check out the assessment ledger branch
+        if: steps.ledger.outputs.exists == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: terraform-parity-assessments
+          path: .parity-ledger
+          persist-credentials: false
+
       - name: Validate parity assets
         shell: pwsh
-        run: pwsh -NoProfile -File ./scripts/parity/Test-ParityAssets.ps1
+        env:
+          PARITY_LEDGER_EXISTS: ${{ steps.ledger.outputs.exists }}
+        run: |
+          $assessments = if ($env:PARITY_LEDGER_EXISTS -eq 'true') {
+            $ledgerPath = '.parity-ledger/parity/assessments'
+            if (-not (Test-Path -LiteralPath $ledgerPath -PathType Container)) {
+              throw "Assessment ledger branch exists but '$ledgerPath' is missing."
+            }
+            $ledgerPath
+          }
+          else {
+            'parity/assessments'
+          }
+          pwsh -NoProfile -File ./scripts/parity/Test-ParityAssets.ps1 `
+            -AssessmentsPath $assessments
 
       - name: Test parity validators
         shell: pwsh
@@ -59,3 +89,24 @@ jobs:
       - name: Check generated parity documentation
         shell: pwsh
         run: pwsh -NoProfile -File ./scripts/parity/Export-ParityMarkdown.ps1 -Check
+
+      - name: Validate assessment ledger coverage
+        shell: pwsh
+        env:
+          PARITY_LEDGER_EXISTS: ${{ steps.ledger.outputs.exists }}
+        run: |
+          $ledger = if ($env:PARITY_LEDGER_EXISTS -eq 'true') {
+            $ledgerPath = '.parity-ledger/parity/assessments'
+            if (-not (Test-Path -LiteralPath $ledgerPath -PathType Container)) {
+              throw "Assessment ledger branch exists but '$ledgerPath' is missing."
+            }
+            $ledgerPath
+          }
+          else {
+            'parity/assessments'
+          }
+          git fetch --no-tags --quiet origin '+refs/heads/develop:refs/remotes/origin/develop'
+          pwsh -NoProfile -File ./scripts/parity/Test-AssessmentCoverage.ps1 `
+            -LedgerPath $ledger `
+            -MarkerPath "$ledger/adoption-marker.json" `
+            -Branch 'origin/develop'

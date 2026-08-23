@@ -4,6 +4,8 @@
 - Date: 2026-08-21
 - Owners: AI Landing Zone maintainers and Terraform pattern-module maintainers
 - Related context: issue #136 (not review or approval evidence)
+- Refined by: [ADR-0004](./0004-parity-dispatch-artifact-commit-contract.md), which defines the
+  dispatch payload's commit roles and artifact-location contract
 
 ## Context
 

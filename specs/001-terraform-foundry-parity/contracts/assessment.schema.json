@@ -45,7 +45,7 @@
       "then": { "properties": { "rationale": { "minLength": 1 } } }
     },
     {
-      "if": { "properties": { "review": { "properties": { "status": { "const": "approved" } } } } },
+      "if": { "properties": { "review": { "properties": { "status": { "enum": ["approved", "rejected"] } } } } },
       "then": { "properties": { "review": { "required": ["reviewer", "approvalUrl", "reviewedAt"] } } }
     }
   ]
