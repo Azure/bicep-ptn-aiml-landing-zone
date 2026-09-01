@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
   issues: read
+  copilot-requests: write
+engine:
+  id: copilot
+  version: "1.0.80"
 tools:
   github:
     mode: gh-proxy
