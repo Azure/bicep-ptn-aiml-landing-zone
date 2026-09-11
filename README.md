@@ -49,6 +49,64 @@ Before running the script, confirm that you have:
 
 Open PowerShell 7 in the repository root before following the steps below.
 
+## Deployment script parameters
+
+The script has four required parameters. The remaining parameters are optional.
+
+| Parameter | Required | Description | Example |
+| --- | --- | --- | --- |
+| `EnvironmentName` | Yes | Name of the local `azd` environment to create or reuse. Use a short name that identifies the workload and lifecycle environment. Reusing a name also reuses values saved by earlier runs. | `ailz-dev` |
+| `Location` | Yes | Primary Azure region for the deployment. Use an Azure region name without spaces. Resource availability and organizational policy may restrict the allowed regions. | `eastus2` |
+| `HubVnetResourceId` | Yes | Full Azure resource ID of the existing hub virtual network. The deployment uses it to create the spoke-to-hub peering. | `/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Network/virtualNetworks/<hub-vnet>` |
+| `EgressNextHopIp` | Yes | Private IPv4 address of the hub Azure Firewall or network virtual appliance that receives the spoke's default route. Do not use its public IP. | `10.100.0.4` |
+| `ExistingLogAnalyticsWorkspaceResourceId` | No | Full resource ID of a hub-managed Log Analytics workspace to reuse. Leave it out to deploy a new workspace. | `/subscriptions/.../providers/Microsoft.OperationalInsights/workspaces/<name>` |
+| `ExistingApplicationInsightsResourceId` | No | Full resource ID of an existing Application Insights component to reuse. It must be supplied together with `ExistingApplicationInsightsConnectionString`. Leave both out to deploy a new component. | `/subscriptions/.../providers/Microsoft.Insights/components/<name>` |
+| `ExistingApplicationInsightsConnectionString` | No | Connection string belonging to the reused Application Insights component. Store it in a PowerShell variable before invoking the script so it is not typed directly into the command. | `$applicationInsightsConnectionString` |
+| `AdditionalEnvironmentVariables` | No | PowerShell hashtable containing additional `azd` environment values supported by `main.parameters.json`, such as subscription, resource group, private DNS zone IDs, or feature flags. Values persist in the selected local `azd` environment. | `@{ AZURE_SUBSCRIPTION_ID = "<id>" }` |
+| `PreviewOnly` | No | Switch that stops after `azd provision --preview`. Without it, the script displays the preview and then asks you to type `DEPLOY` before provisioning. | `-PreviewOnly` |
+
+### Find the required values
+
+List the Azure regions available to your subscription:
+
+```powershell
+az account list-locations --query "[].name" --output table
+```
+
+Get the hub VNet resource ID:
+
+```powershell
+$hubVnetResourceId = az network vnet show `
+  --resource-group "<hub-resource-group>" `
+  --name "<hub-vnet-name>" `
+  --query id `
+  --output tsv
+```
+
+Get the private IP of an Azure Firewall in the hub:
+
+```powershell
+$egressNextHopIp = az network firewall show `
+  --resource-group "<hub-resource-group>" `
+  --name "<hub-firewall-name>" `
+  --query "ipConfigurations[0].privateIPAddress" `
+  --output tsv
+```
+
+Pass those variables directly to the script:
+
+```powershell
+./Deploy-AilzIntegrated.ps1 `
+  -EnvironmentName "ailz-dev" `
+  -Location "eastus2" `
+  -HubVnetResourceId $hubVnetResourceId `
+  -EgressNextHopIp $egressNextHopIp `
+  -PreviewOnly
+```
+
+If the hub uses a network virtual appliance instead of Azure Firewall, obtain
+its private forwarding IP from the platform or networking team.
+
 ## Deploy
 
 ### 1. Preview the deployment
