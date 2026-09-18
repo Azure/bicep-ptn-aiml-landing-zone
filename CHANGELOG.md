@@ -82,6 +82,9 @@ rather than deleted, and no Azure resource or consumer contract is affected.
 
 ### Fixed
 
+- Parity validation refreshes and revalidates its ledger snapshot immediately
+  before checking coverage, so assessments appended during the test run are
+  observed without suppressing missing-record or transport failures.
 - Parity ledger coverage recognizes custom merge subjects such as
   `Merge pull request #161: synchronize main into develop` while still
   requiring an exact pull request number and merge-SHA assessment. Documented
