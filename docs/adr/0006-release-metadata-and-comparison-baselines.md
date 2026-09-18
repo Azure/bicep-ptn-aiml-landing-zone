@@ -3,7 +3,7 @@
 - Status: proposed; not approved or adopted on main/develop
 - Date: 2026-09-18
 - Owners: AI Landing Zone maintainers and parity reviewers
-- Related issues or pull requests: #159, #160, draft feature PR #164
+- Related issues or pull requests: #159, #160, feature PR #164, candidate PR #165
 
 ## Context
 
@@ -11,6 +11,10 @@ Prepare a reviewable `v2.7.0` candidate without rewriting parity history.
 The feature adds backward-compatible Storage inputs, making the combined
 release minor. `develop` includes released `main` through #161. Candidate
 implementation starts at `ff6b7589022ca79d5b74f07e8f865b04ca22d7f3`.
+The candidate subsequently includes the parent's documentation-only
+`803e20f72660c9e856880fcf2f578fc6b298fe04` and the normal #164 integration
+merge `3d88122ae53d873d68a3d8469525e7cab98b89a1`. Integrating that history
+into the candidate branch did not change its validated file tree.
 
 `Test-BaselineContract.Tests.ps1` originally required both manifest tags and the
 configuration/inventory source tag to equal `v2.6.1`. The inventory collector
@@ -113,8 +117,8 @@ from being hidden behind the release normalization, including a manifest
 ## Adoption and rollback
 
 1. Review this ADR and guard/test/docs diff; record an explicit maintainer decision.
-2. Integrate the feature only through its normal review. Complete Portal and
-   Terraform parity review and coordinated public documentation review.
+2. Preserve the normal #164 feature integration (completed). Complete Portal
+   and Terraform parity review and coordinated public documentation review.
 3. Obtain approved Azure preview and test-scope evidence for cold-start
    ordering, repeat-deployment persistence, authentication and scanning.
 4. Only after release authorization, set the publication date, verify the exact
@@ -152,7 +156,8 @@ read-only through Microsoft Learn instead.
 Update README, candidate changelog, test documentation, parity ownership and
 the parity-view generator/footer. Inventory content and evidence remain
 unchanged. Public feature documentation is coordinated separately in
-`Azure/AI-Landing-Zones`; this repository-guard proposal does not change public
+[Azure/AI-Landing-Zones#139](https://github.com/Azure/AI-Landing-Zones/pull/139);
+this repository-guard proposal does not change public
 deployment defaults or constitute publication of that documentation.
 
 ## Review trigger
