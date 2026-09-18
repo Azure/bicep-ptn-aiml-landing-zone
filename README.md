@@ -264,6 +264,37 @@ az acr agentpool update -r <acr> -n <pool> --count 1
 
 The agent pool can be disabled entirely with `deployAcrTaskAgentPool=false` if builds are handled by a central CI/CD runner that already reaches the registry's private endpoint.
 
+##### BYO VNet subnet ordering
+
+For [issue #159](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/159),
+`acrTaskAgentPool` explicitly depends on completion of `virtualNetworkSubnets`
+(`virtualNetworkSubnetsDeployment`). In a network-isolated BYO VNet deployment
+that creates subnets, the pool waits for the **entire subnet deployment to
+succeed**, not merely for a subnet resource ID to be constructed.
+
+- Keep `deployNsgs=true` when `useExistingVNet=true` and `deploySubnets=true`
+  under network isolation. The existing preflight/Bicep guard still rejects
+  `deployNsgs=false` in this combination to prevent detaching current NSGs.
+- With `deploySubnets=false`, the VNet owner must provide and manage the
+  existing build subnet and its NSG associations. ARM removes the dependency
+  on the skipped subnet deployment; no disabled-module output is read.
+- Template-created VNets retain their existing implicit completion dependency.
+  The pool still requires `networkIsolation`, `deployContainerRegistry`, and
+  `deployAcrTaskAgentPool`; disabled paths still skip it and return the existing
+  empty pool output. Requested tier/count, including count `0`, are unchanged.
+- Cross-resource-group/subscription BYO subnet deployment scopes and VNet
+  ownership are unchanged. The dependency targets the orchestrating subnet
+  module; it does not grant permissions or replace the VNet's subnet collection.
+
+This is separate from [#124](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/124)'s
+firewall bootstrap work: the egress requirements below still apply. In an
+approved cold-start test, record that the build subnet was initially absent,
+subnet deployment completion preceded pool provisioning, and the requested
+pool reached `Succeeded`. A successful retry after the subnet exists is
+**not cold-start evidence**. Capacity, region, identity, and egress failures
+still require separate investigation; a compiled dependency alone does not
+prove live success.
+
 #### Firewall egress allow-list (network isolation)
 
 When `networkIsolation=true`, egress from the jumpbox and workload subnets is forced through the default Azure Firewall. The landing zone codifies the FQDNs required by the default `install.ps1` bootstrap and by the ACR Tasks agent pool. The set is split by purpose so you can audit or trim it:
@@ -331,6 +362,129 @@ These flags select resources for the next incremental deployment. Setting a
 flag to `false` does not delete an existing resource or stale App Configuration
 key created by an earlier deployment; remove decommissioned artifacts
 explicitly.
+
+### Solution Storage access controls
+
+[Issue #160](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/160)
+adds three independent inputs for the **solution** Storage account
+(`storageAccount` / `storageAccountSolution`), using the existing Storage AVM
+**0.26.2**. They do not configure auxiliary `aiFoundryStorageAccount` resources.
+Omitting them preserves the existing effective defaults in both standard and
+network-isolated deployments; `deployStorageAccount=false` still skips the
+solution account.
+
+| Parameter | Type | Default | Controls |
+| --- | --- | --- | --- |
+| `storageAccountNetworkAclsBypass` | `storageTypes.storageAccountNetworkAclsBypassType` (string union) | `AzureServices` | `networkAcls.bypass` only. |
+| `storageAccountResourceAccessRules` | `storageTypes.storageAccountResourceAccessRuleType[]` (sealed objects) | `[]` | Complete desired `networkAcls.resourceAccessRules` list. Each entry requires nonempty string `resourceId` and `tenantId`; no extra fields. |
+| `storageAccountAllowSharedKeyAccess` | Boolean | `true` | Whether the account allows Shared Key authorization. |
+
+The eight accepted bypass spellings are exactly `None`, `AzureServices`,
+`Logging`, `Metrics`, `AzureServices, Logging`, `AzureServices, Metrics`,
+`AzureServices, Logging, Metrics`, and `Logging, Metrics`, including comma-space
+formatting and ordering. Types are defined in
+[`constants/storage-types.bicep`](constants/storage-types.bicep). Empty strings,
+unsupported spellings and wrong types are invalid, not fallback profiles.
+Bicep accepts top-level `null` for a defaulted parameter as omission/default
+selection; it is not a request for stricter access. Specify `None` and native
+Boolean `false` explicitly for that profile. Required fields inside a supplied
+resource-instance rule must still be non-null, nonempty strings.
+
+#### Native parameter profiles
+
+The following are **incomplete JSON fragments**, not full deployment parameter
+files. Merge their entries into the `parameters` object of the actual
+`main.parameters.json` or consumer-owned parameter overlay used by deployment.
+Keep all other required parameters and secure-value resolution intact. Use
+native arrays/objects and Booleans, not stringified JSON or `"false"`.
+These three fields have **no environment-variable mappings**:
+`azd env set` alone does not set them. Direct ARM/Bicep callers can pass the
+typed values; Azure DevOps uses its existing parameter artifact.
+
+**Omitted/default profile:** omitting all three selects these Bicep defaults;
+the repository parameter file declares the same values explicitly:
+
+```json
+{
+  "storageAccountNetworkAclsBypass": { "value": "AzureServices" },
+  "storageAccountResourceAccessRules": { "value": [] },
+  "storageAccountAllowSharedKeyAccess": { "value": true }
+}
+```
+
+**Private / Shared Key disabled, no Defender or scanner exception:** after
+testing consumer compatibility, use this fragment with `networkIsolation=true`
+and empty `allowedIpRanges`. It does not enable Defender:
+
+```json
+{
+  "storageAccountNetworkAclsBypass": { "value": "None" },
+  "storageAccountResourceAccessRules": { "value": [] },
+  "storageAccountAllowSharedKeyAccess": { "value": false }
+}
+```
+
+**Optional approved existing resource-instance exception:** only when an
+eligible instance (for example, an already-enabled Defender scanner) already
+exists and its access is approved, supply its exact ARM ID and tenant:
+
+```json
+{
+  "storageAccountNetworkAclsBypass": { "value": "None" },
+  "storageAccountResourceAccessRules": {
+    "value": [
+      {
+        "resourceId": "<exact-approved-existing-resource-ARM-ID>",
+        "tenantId": "<same-tenant-GUID>"
+      }
+    ]
+  },
+  "storageAccountAllowSharedKeyAccess": { "value": false }
+}
+```
+
+These placeholders are deliberately unusable. Replace them only in the
+operator's private overlay; never commit live IDs or credentials. Supply the
+actual existing instance ID, not a principal ID, wildcard, or a scanner ID
+guessed from the solution resource group. The instance and Storage account
+must belong to the **same Microsoft Entra tenant** and the resource type must
+be eligible; typed strings alone do not prove existence or eligibility.
+
+#### Ownership and security boundaries
+
+The supplied rule list **replaces the complete desired set of resource-instance
+exceptions**. It is not appended to live rules: `[]` (including the default)
+removes those exceptions on reconciliation. Coordinate with every external ACL
+owner and explicitly include each approved ID/tenant pair that must remain.
+The landing zone does not discover/import arbitrary live ACLs, generate
+wildcard rules, create a scanner, enable a Defender plan, or add roles for these
+inputs. A rule grants network eligibility, **not data permission**.
+
+Bypass, authentication, and network reachability remain independent:
+
+- `None` disables bypass, not IP rules or public access. Existing logic keeps
+  `publicNetworkAccess=Enabled` in standard mode or with nonempty
+  `allowedIpRanges`; isolated mode with no IP exceptions uses `Disabled`.
+  `networkAcls.defaultAction` remains `Deny` with IP rules and `Allow` otherwise;
+  the existing IP rules and empty VNet-rule list are unchanged.
+- Neither `None` alone nor disabled public network access alone guarantees
+  isolation. Trusted-service and resource-instance exceptions matter and may
+  remain effective with public access disabled. Review effective Azure Policy
+  results as well as declared values; see
+  [Storage network security limitations](https://learn.microsoft.com/en-us/azure/storage/common/storage-network-security-limitations).
+- `false` is an opt-in authentication change. Inventory key-based clients
+  first and test supported Microsoft Entra authorization / Blob user-delegation
+  SAS paths. Managed identities, RBAC, private endpoints/DNS, names, containers,
+  Blob public-access prohibition, HTTPS, and encryption remain unchanged.
+  AVM retains secure outputs that call management-plane `listKeys()`: disabling
+  Shared Key does **not** make deployment key-free or remove those calls.
+
+For existing accounts and downstream consumers, follow the migration sequence
+in the [Standalone runbook](docs/runbook-standalone.md#43-opt-in-solution-storage-migration)
+or [Hub-and-Spoke runbook](docs/runbook-hub-spoke.md#612-opt-in-solution-storage-migration).
+Rule persistence, client authentication, and any optional scanner operation
+require separate approved live checks; successful compilation or preview is
+not proof of any of them.
 
 ### AI Foundry deployment modes
 

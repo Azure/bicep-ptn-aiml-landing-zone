@@ -151,6 +151,26 @@ associations, so preflight and Bicep reject the combination. Either keep
 `DEPLOY_NSGS=true`, or set `deploySubnets=false` and manage the existing subnets
 and NSG associations outside this deployment.
 
+For an enabled ACR Tasks pool in a BYO VNet, the pool now explicitly waits for
+the entire enabled `virtualNetworkSubnets` deployment to succeed before it
+starts ([#159](https://github.com/Azure/bicep-ptn-aiml-landing-zone/issues/159)).
+With `deploySubnets=false`, that deployment and its dependency are skipped:
+the network owner must already provide the build subnet and retain its NSG
+associations. The existing `deployNsgs` guard above, pool/registry/isolation
+gates, template-created VNet dependency, and requested tier/count (including
+`0`) remain unchanged.
+
+Cross-RG/subscription VNet ownership, child subnet deployment scopes, and
+required permissions are unchanged; the dependency targets the orchestrating
+subnet module, not a broad VNet rewrite. Coordinate with the network owner
+before any subnet mutation and compare unrelated subnet configuration before
+and after an approved test. This ordering correction does not replace #124's
+firewall requirements or change hub egress/peering responsibilities. See the
+canonical [BYO VNet subnet ordering](../README.md#byo-vnet-subnet-ordering)
+guidance: a retry after the subnet exists is not cold-start proof. Live proof
+requires an initially absent build subnet, deployment-operation ordering,
+and successful pool provisioning in an explicitly approved scope.
+
 Component flags select resources for the next incremental deployment; they do
 not delete resources or stale App Configuration keys created by an earlier
 deployment.
@@ -258,6 +278,68 @@ azd env get-values | Sort-Object
 ```
 
 Confirm `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `AZURE_LOCATION=eastus2`, `AZURE_PRINCIPAL_ID`, and the flags above are present.
+
+### 6.12. Opt-in solution Storage migration
+
+Use [Solution Storage access controls](../README.md#solution-storage-access-controls)
+as the canonical parameter/profile reference and the
+[Standalone migration sequence](./runbook-standalone.md#43-opt-in-solution-storage-migration)
+for the full procedure. The three inputs apply only to solution Storage
+through AVM 0.26.2, not auxiliary Foundry Storage. The standard/public and
+isolated defaults remain `AzureServices`, `[]`, and `true`; managed identities,
+RBAC, private endpoints/DNS, and VNet ownership do not change.
+
+For an existing spoke account, follow this order with the application,
+network, security, and any external ACL owners:
+
+1. **Inventory before opting in:** identify account-key/connection-string,
+   account SAS, service SAS, and Azure Files clients, plus current trusted
+   and resource-instance exceptions and Policy effects. Migrate and test
+   supported Microsoft Entra authorization (prefer managed identity) and Blob
+   user-delegation SAS from each client's intended network before disabling
+   Shared Key. Account/service SAS are key-authorized and will be denied;
+   validate Azure Files service/protocol support separately. No role changes
+   are supplied by these parameters.
+2. **Agree on the entire desired rule list:** supply only approved, eligible
+   existing instances with their exact ARM `resourceId` and `tenantId`. The
+   instance and account must be in the same Microsoft Entra tenant, even when
+   resource groups/subscriptions differ. This does not grant data permissions.
+   Do not infer scanner IDs from the spoke RG, import arbitrary live ACLs, or
+   use wildcard rules. `[]` (including the default) removes resource-instance
+   exceptions; it does not retain an external owner's manual additions.
+   Coordinate ownership rather than allowing competing reconciliations.
+3. **Use the native overlay:** after client tests, select `None` / `false` and
+   `[]` for no exception, or the complete approved list for an existing
+   instance. No scanner, Defender plan, or role is created. The README's JSON
+   examples are incomplete fragments with unusable placeholders, not full
+   parameter files. `azd env set` does not map these inputs; inspect the actual
+   deployment parameter artifact. Adopt a reviewed ALZ pin containing the
+   contract through the normal consumer pin/overlay process, not by patching
+   generated `infra/` or accelerator checkouts.
+4. **Review preflight/preview before seeking approval:** run
+   `pwsh ./scripts/Invoke-PreflightChecks.ps1` and `azd provision --preview`
+   from the direct template project. Submodule consumers should use their
+   existing preprovision hook/script path against the resolved overlay and
+   run preview from the consumer project. Resolve findings. PNA, IP rules,
+   and `defaultAction` remain independent of bypass. Neither `None` alone nor
+   private PNA alone guarantees isolation: trusted-service/resource-instance
+   exceptions may remain effective. Review effective Policy results and
+   retained deployment permissions too: AVM still has secure `listKeys()`
+   outputs, so Shared Key disabled does not mean key-free deployment.
+5. **Verify only with separate live approval:** compare effective properties
+   and the full ID/tenant list after two approved identical deployments;
+   re-test Entra/Blob user-delegation access and denial of key-based requests.
+   If an approved Defender integration already exists, test its operation
+   separately and observe scan results. Compilation, preview, or retained ACLs
+   do not prove authentication, persistence, or scanning; record checks not
+   run as such. This does not authorize changes to the shared hub or VNet.
+
+**Prefer safe roll-forward:** preserve the reviewed desired list and correct
+the configuration with its owners. Blindly reverting to older ALZ code
+reintroduces `AzureServices`, can re-enable Shared Key, and loses rule
+declarations. Enabling keys or broadening bypass requires explicit operator
+approval, not an automatic retry. Review a new preview before any approved
+recovery deployment.
 
 ---
 

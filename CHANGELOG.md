@@ -7,6 +7,13 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ### Added
 
+- **Reproducible solution Storage access profiles (#160).** Added typed
+  `storageAccountNetworkAclsBypass`, `storageAccountResourceAccessRules`, and
+  `storageAccountAllowSharedKeyAccess` inputs with native parameter-file values.
+  Defaults remain `AzureServices`, `[]`, and `true`, using the existing Storage
+  AVM 0.26.2. Explicit rules are desired state; no live exceptions are imported
+  and no Defender scanner, plan or role is created. The inputs do not change
+  auxiliary Foundry Storage or existing public-network/IP-rule behavior.
 - **Terraform parity coordination assets.** The repository now owns a pinned,
   machine-readable parity inventory (`parity/inventory.json`), JSON Schema
   contracts (`parity/schemas/`), structured Terraform handoffs
@@ -66,9 +73,11 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
   Ledger discovery distinguishes an absent branch from transport or
   authentication failures, which now fail explicitly.
 
-Compatibility impact: none for deployments. No Bicep parameter, default, output,
-module interface, manifest field, App Configuration key, identity, or network
-behavior changed; these assets are repository automation and documentation only.
+Compatibility impact of the parity coordination assets: none for deployments;
+these assets are repository automation and documentation only. The solution
+Storage inputs are an additive public contract with unchanged defaults.
+Operators opting out of Shared Key must migrate affected consumers first and
+declare every approved resource-instance exception they intend to retain.
 
 Follow-up boundary: merging Terraform proposals, deploying the standard and
 network-isolated scenarios in an approved test subscription, and recording
@@ -82,6 +91,11 @@ rather than deleted, and no Azure resource or consumer contract is affected.
 
 ### Fixed
 
+- **ACR Task agent-pool BYO subnet ordering (#159).** The pool explicitly waits
+  for the conditional BYO subnet deployment, preserving new-VNet dependencies,
+  existing-subnet ownership, disabled-pool behavior and unrelated subnet
+  configuration. Added focused compiled-template coverage without sleeps or
+  public-network workarounds.
 - Parity validation refreshes and revalidates its ledger snapshot immediately
   before checking coverage, so assessments appended during the test run are
   observed without suppressing missing-record or transport failures.

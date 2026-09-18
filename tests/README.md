@@ -27,6 +27,8 @@ tests/
 ├── contracts/
 │   ├── Test-HostedAgentContract.ps1
 │   ├── Test-AcrTaskAgentPoolFirewallContract.ps1
+│   ├── Test-AcrTaskAgentPoolSubnetContract.ps1
+│   ├── Test-SolutionStorageAccessContract.ps1
 │   ├── Test-FoundrySharedPrivateLinkNameContract.ps1
 │   ├── Test-MaintenanceConfigurationWrapperContract.ps1
 │   ├── Test-ComponentDeploymentFlagsContract.ps1
@@ -52,6 +54,8 @@ Run from the repository root:
 ```pwsh
 pwsh tests/contracts/Test-HostedAgentContract.ps1
 pwsh tests/contracts/Test-AcrTaskAgentPoolFirewallContract.ps1
+pwsh tests/contracts/Test-AcrTaskAgentPoolSubnetContract.ps1
+pwsh tests/contracts/Test-SolutionStorageAccessContract.ps1
 pwsh tests/contracts/Test-FoundrySharedPrivateLinkNameContract.ps1
 pwsh tests/contracts/Test-MaintenanceConfigurationWrapperContract.ps1
 pwsh tests/contracts/Test-ComponentDeploymentFlagsContract.ps1
@@ -95,6 +99,28 @@ limit while configured Azure resource names remain unchanged.
 The compiled-template size tests prove that the script's default 3.5 MB warning,
 4.7 MB failure, and 5.0 MB hard ceiling remain aligned with the workflow's bare
 command and exercise each exit path without compiling or accessing Azure.
+
+The ACR subnet contract (#159) checks the compiled pool dependency on BYO subnet
+creation, the existing registry/new-VNet dependencies, conditional resource and
+output gates, count-zero behavior, the existing NSG guard, cross-scope subnet
+targets, and serialized subnet operations (A1-A9). A live cold-start test must
+still start with an absent build subnet and show subnet completion before pool
+provisioning; a successful retry is not cold-start evidence.
+
+The solution Storage access contract (#160) checks typed input/default and
+native JSON parameter values, exact root-to-AVM-to-resource forwarding, all
+supported bypass values, true/false, zero/one/multiple resource-instance rules,
+invalid typed inputs, and standard/isolated/IP-exception/disabled-account cases
+(S1-S9). It checks nested compiled expressions rather than treating source-token
+presence as proof, and protects unrelated Storage configuration and auxiliary
+accounts. Default equivalence means unchanged effective values, not identical
+template bytes. No Defender resource, plan, role or exception is inferred.
+
+Both scripts accept `-MainFile` for isolated regression fixtures and remove their
+temporary compiler artifacts. Their offline checks do not prove live subnet
+preservation, ACL persistence, consumer authentication or Defender scanning.
+The [private-deployment validation guide](../specs/002-private-deployment-reliability/quickstart.md)
+separates those approved operational scenarios and their evidence.
 
 ## End-to-end test flow
 
