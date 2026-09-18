@@ -255,6 +255,84 @@ try {
         $LASTEXITCODE -eq 0 -and $colonCovered -match '2 merged pull requests'
     ) $colonCovered
 
+    $validationWorkflow = ConvertFrom-ParityWorkflowYaml -Yaml (
+        Get-Content (Join-Path $repo '.github\workflows\terraform-parity-validate.yml') -Raw
+    )
+    $validationSteps = @($validationWorkflow['jobs']['validate']['steps'])
+    $refreshSteps = @($validationSteps | Where-Object {
+        "$($_['name'])" -eq 'Refresh assessment ledger before coverage'
+    })
+    Assert-Result 'Coverage refreshes its ledger snapshot after the long-running tests' (
+        $refreshSteps.Count -eq 1
+    ) 'Expected exactly one ledger refresh step.'
+
+    if ($refreshSteps.Count -eq 1) {
+        $refreshIndex = [array]::FindIndex($validationSteps, [Predicate[object]] {
+            param($step) "$($step['name'])" -eq 'Refresh assessment ledger before coverage'
+        })
+        $testsIndex = [array]::FindIndex($validationSteps, [Predicate[object]] {
+            param($step) "$($step['name'])" -eq 'Test parity validators'
+        })
+        $coverageIndex = [array]::FindIndex($validationSteps, [Predicate[object]] {
+            param($step) "$($step['name'])" -eq 'Validate assessment ledger coverage'
+        })
+        Assert-Result 'Ledger refresh runs after tests and before coverage only when the branch exists' (
+            $refreshIndex -gt $testsIndex -and $coverageIndex -gt $refreshIndex -and
+            "$($refreshSteps[0]['if'])" -eq "steps.ledger.outputs.exists == 'true'"
+        ) "tests=$testsIndex refresh=$refreshIndex coverage=$coverageIndex"
+        $coverageRun = "$($validationSteps[$coverageIndex]['run'])"
+        Assert-Result 'Refreshed ledger records are validated before coverage uses them' (
+            $coverageRun.IndexOf('Test-ParityAssets.ps1') -ge 0 -and
+            $coverageRun.IndexOf('Test-ParityAssets.ps1') -lt $coverageRun.IndexOf('Test-AssessmentCoverage.ps1')
+        ) $coverageRun
+
+        Invoke-Git $ledgerRoot @('init', '--initial-branch', $config.branches.assessmentLedger) | Out-Null
+        Invoke-Git $ledgerRoot @(
+            'add', '--', 'parity/assessments/adoption-marker.json',
+            "parity/assessments/assessment-950-$($mergeSha.Substring(0, 7)).json"
+        ) | Out-Null
+        Invoke-Git $ledgerRoot @('commit', '-m', 'chore: seed ledger') | Out-Null
+        $refreshRoot = Join-Path $temp 'coverage-refresh'
+        New-Item -ItemType Directory $refreshRoot -Force | Out-Null
+        Invoke-Git $refreshRoot @(
+            'clone', '--quiet', '--branch', $config.branches.assessmentLedger, $ledgerRoot, '.parity-ledger'
+        ) | Out-Null
+        Invoke-Git $ledgerRoot @(
+            'add', '--', "parity/assessments/assessment-951-$($colonMergeSha.Substring(0, 7)).json"
+        ) | Out-Null
+        Invoke-Git $ledgerRoot @('commit', '-m', 'chore: append completed assessment') | Out-Null
+
+        $staleCoverage = & pwsh -NoProfile -File $coverage -Root $temp `
+            -LedgerPath 'coverage-refresh/.parity-ledger/parity/assessments' `
+            -MarkerPath 'coverage-refresh/.parity-ledger/parity/assessments/adoption-marker.json' `
+            -GitRepositoryPath $gitRoot -Branch develop 2>&1 | Out-String
+        Assert-Result 'An early checkout misses an assessment appended by the concurrent writer' (
+            $LASTEXITCODE -ne 0 -and $staleCoverage -match '#951.*has 0 assessments'
+        ) $staleCoverage
+
+        Push-Location $refreshRoot
+        try { & ([scriptblock]::Create("$($refreshSteps[0]['run'])")) }
+        finally { Pop-Location }
+        $freshCoverage = & pwsh -NoProfile -File $coverage -Root $temp `
+            -LedgerPath 'coverage-refresh/.parity-ledger/parity/assessments' `
+            -MarkerPath 'coverage-refresh/.parity-ledger/parity/assessments/adoption-marker.json' `
+            -GitRepositoryPath $gitRoot -Branch develop 2>&1 | Out-String
+        Assert-Result 'The actual workflow refresh observes the appended assessment without rewriting records' (
+            $LASTEXITCODE -eq 0 -and $freshCoverage -match '2 merged pull requests'
+        ) $freshCoverage
+
+        $cachedLedger = Join-Path $refreshRoot '.parity-ledger'
+        Invoke-Git $cachedLedger @('remote', 'set-url', 'origin', (Join-Path $temp 'missing-ledger.git')) | Out-Null
+        $refreshFailure = ''
+        Push-Location $refreshRoot
+        try { & ([scriptblock]::Create("$($refreshSteps[0]['run'])")) }
+        catch { $refreshFailure = $_.Exception.Message }
+        finally { Pop-Location }
+        Assert-Result 'A ledger refresh transport failure stops validation explicitly' (
+            $refreshFailure -match 'Assessment ledger fetch failed'
+        ) $refreshFailure
+    }
+
     Set-Content (Join-Path $gitRoot 'direct.md') 'pushed straight to the integration branch' -Encoding utf8NoBOM
     Invoke-Git $gitRoot @('add', '.') | Out-Null
     Invoke-Git $gitRoot @('commit', '-m', 'chore: direct push without a pull request') | Out-Null

@@ -115,6 +115,12 @@ workflows:
   rerun the failed assessment job. Confirm its new pending record was appended
   before rerunning coverage validation; do not fabricate an approved outcome or
   use `-AllowUnattributedCommits` to hide the failure.
+- The validation workflow refreshes its read-only ledger checkout after running
+  tests, then validates the refreshed records before checking coverage. The
+  assessment workflow can append a new record while those tests run; the initial
+  checkout must not be treated as the current ledger. Fetch failures and missing
+  assessments still fail explicitly. If the writer has not finished, wait for
+  its successful completion before rerunning coverage; no record is inferred.
 - To pause coordination, disable the workflows. Records and the branch remain
   readable, and no Azure resource or consumer contract is affected.
 
