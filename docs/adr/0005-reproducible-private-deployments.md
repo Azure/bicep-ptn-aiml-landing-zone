@@ -163,6 +163,40 @@ advance; follow the existing human-gated assessment/handoff process.
 | Terraform `data-services-contract` | Assess the three typed solution Storage inputs in standard and network-isolated scenarios, preserving defaults and explicit rule ownership. | Assessment/handoff approval pending. |
 | Public Bicep documentation | Companion parameterization and deployment guidance. | Local draft work coordinated separately; publication not authorized by this ADR. |
 
+#### Release engineering source review
+
+A bounded read-only review was completed against Portal commit
+`76431d6a2ee8fc92ee0f0c8493bc3540e549c9d8`, Terraform's approved comparison
+commit `abe337894f93de3ddda525ea44898b33e1484070`, and observed Terraform
+`main` commit `ffe3d5aa4b1763fd23c864fe2803eaf5f75020af`.
+These are source findings, not maintainer approval or runtime parity:
+
+- Portal's [solution Storage input](https://github.com/Azure/AI-Landing-Zones/blob/76431d6a2ee8fc92ee0f0c8493bc3540e549c9d8/portal/template.json)
+  hardcodes `networkAcls.bypass=AzureServices` and `defaultAction=Allow`, sets
+  PNA Disabled, and omits Shared Key and resource-instance-rule selection.
+  Its [Storage wrapper](https://github.com/Azure/AI-Landing-Zones/blob/76431d6a2ee8fc92ee0f0c8493bc3540e549c9d8/portal/wrappers/avm.res.storage.storage-account.json)
+  already forwards `allowSharedKeyAccess` and `networkAcls`, with nested support
+  for resource-instance rules and Shared Key default true. The gap is the
+  solution input/form wiring, not a need to assume a new Storage provider.
+- Terraform's [solution Storage input type](https://github.com/Azure/terraform-azurerm-avm-ptn-aiml-landing-zone/blob/ffe3d5aa4b1763fd23c864fe2803eaf5f75020af/variables.genai_services.tf)
+  exposes `shared_access_key_enabled` with default true, and its
+  [module call](https://github.com/Azure/terraform-azurerm-avm-ptn-aiml-landing-zone/blob/ffe3d5aa4b1763fd23c864fe2803eaf5f75020af/main.genai_services.tf)
+  forwards it to Storage AVM 0.6.6. Neither surface exposes/forwards solution
+  bypass or resource-instance rules. These relevant definitions are unchanged
+  at the approved comparison pin. Preserve Terraform's existing PNA/SKU
+  defaults rather than silently aligning unrelated settings.
+- No ACR agent-pool surface was found in the reviewed Portal template/form/
+  registry wrapper or Terraform GenAI-service/build inputs. Terraform's
+  [build implementation](https://github.com/Azure/terraform-azurerm-avm-ptn-aiml-landing-zone/blob/ffe3d5aa4b1763fd23c864fe2803eaf5f75020af/main.build.tf)
+  uses a VM with `local.subnet_ids["DevOpsBuildSubnet"]`, not the Bicep ACR
+  Task pool. Do not mechanically copy the pool-specific dependency into a
+  different build topology; review private-build equivalence separately.
+
+Recommended follow-up is explicit Portal solution/form and Terraform bypass/
+resource-rule exposure under the existing human-gated process. Shared Key
+already has a Terraform input. No external source, comparison pin, inventory,
+ledger, approval or handoff was changed by this review.
+
 #159 alone is patch scope; the combined additive contract is minor scope.
 No version or release pin has been changed. The existing parity inventory,
 generated inventory documentation and Terraform repository remain unchanged.
