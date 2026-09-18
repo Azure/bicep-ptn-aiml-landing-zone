@@ -5,15 +5,21 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
-## [v2.7.0] - Unreleased
+## [v2.7.0] - 2026-09-18
 
-Release candidate only; not a published release. The release/comparison
-baseline guard change is proposed in
-[ADR-0006](docs/adr/0006-release-metadata-and-comparison-baselines.md), not
-approved. Human release authorization, Portal/Terraform parity review, and the
-coordinated public documentation review remain pending. Live Azure cold-start
-ordering, two-deployment ACL persistence, consumer authentication and Defender
-scanner evidence are still outstanding; offline contracts do not prove them.
+This backward-compatible minor release adds explicit solution Storage access
+inputs and corrects private ACR build-pool subnet ordering. The release metadata
+guard is independent of historical parity comparisons as documented in
+[ADR-0006](docs/adr/0006-release-metadata-and-comparison-baselines.md).
+Portal/Terraform source-impact findings and follow-up gaps are recorded in
+[ADR-0005](docs/adr/0005-reproducible-private-deployments.md).
+
+**Validation boundary:** build, lint, offline contracts, mutation checks and CI
+passed. Live Azure cold-start ordering, repeated-deployment ACL persistence,
+consumer authentication and Defender scanning were not executed for this
+release. No runtime parity or automatic approval for production rollout is
+claimed. Operators must use the documented preflight, preview and approved
+test-scope procedure before adopting an explicit private/keyless profile.
 
 ### Added
 
