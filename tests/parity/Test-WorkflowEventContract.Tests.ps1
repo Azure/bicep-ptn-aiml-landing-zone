@@ -223,6 +223,38 @@ try {
     ) $duplicated
     Remove-Item $strayPath -Force
 
+    Invoke-Git $gitRoot @('checkout', '-b', 'feature-colon') | Out-Null
+    Set-Content (Join-Path $gitRoot 'feature-colon.md') 'custom merge subject' -Encoding utf8NoBOM
+    Invoke-Git $gitRoot @('add', '.') | Out-Null
+    Invoke-Git $gitRoot @('commit', '-m', 'chore: synchronization fixture') | Out-Null
+    Invoke-Git $gitRoot @('checkout', 'develop') | Out-Null
+    Invoke-Git $gitRoot @('merge', '--no-ff', 'feature-colon', '-m', 'Merge pull request #951: synchronize main into develop') | Out-Null
+    $colonMergeSha = Invoke-Git $gitRoot @('rev-parse', 'HEAD')
+
+    $colonMissing = & pwsh -NoProfile -File $coverage -Root $temp `
+        -LedgerPath '.parity-ledger/parity/assessments' `
+        -MarkerPath '.parity-ledger/parity/assessments/adoption-marker.json' `
+        -GitRepositoryPath $gitRoot -Branch develop 2>&1 | Out-String
+    Assert-Result 'A colon-delimited merge still requires its exact assessment' (
+        $LASTEXITCODE -ne 0 -and $colonMissing -match 'Merged pull request #951.*has 0 assessments'
+    ) $colonMissing
+
+    $colonCreated = & pwsh -NoProfile -File $creator -Root $temp `
+        -LedgerPath '.parity-ledger/parity/assessments' `
+        -PullRequestNumber 951 -MergeCommitSha $colonMergeSha -BaseBranch develop `
+        -MergedAt '2026-08-22T12:10:00Z' -Merged true 2>&1 | Out-String
+    Assert-Result 'Trusted metadata creates the colon-delimited merge assessment' (
+        $LASTEXITCODE -eq 0
+    ) $colonCreated
+
+    $colonCovered = & pwsh -NoProfile -File $coverage -Root $temp `
+        -LedgerPath '.parity-ledger/parity/assessments' `
+        -MarkerPath '.parity-ledger/parity/assessments/adoption-marker.json' `
+        -GitRepositoryPath $gitRoot -Branch develop 2>&1 | Out-String
+    Assert-Result 'Standard and colon-delimited merge subjects both have coverage' (
+        $LASTEXITCODE -eq 0 -and $colonCovered -match '2 merged pull requests'
+    ) $colonCovered
+
     Set-Content (Join-Path $gitRoot 'direct.md') 'pushed straight to the integration branch' -Encoding utf8NoBOM
     Invoke-Git $gitRoot @('add', '.') | Out-Null
     Invoke-Git $gitRoot @('commit', '-m', 'chore: direct push without a pull request') | Out-Null
@@ -247,6 +279,17 @@ try {
         $optOut -match 'AllowUnattributedCommits' -and
         $optOut -match '1 unattributed commits'
     ) $optOut
+
+    Invoke-Git $gitRoot @('commit', '--allow-empty', '-m', 'Merge pull request #951suffix: misleading number') | Out-Null
+    $malformedSha = Invoke-Git $gitRoot @('rev-parse', 'HEAD')
+    $malformed = & pwsh -NoProfile -File $coverage -Root $temp `
+        -LedgerPath '.parity-ledger/parity/assessments' `
+        -MarkerPath '.parity-ledger/parity/assessments/adoption-marker.json' `
+        -GitRepositoryPath $gitRoot -Branch develop 2>&1 | Out-String
+    Assert-Result 'A numeric prefix without a valid merge-subject delimiter is not a pull request reference' (
+        $LASTEXITCODE -ne 0 -and
+        $malformed -match "$($malformedSha.Substring(0, 7)).*has no pull request reference"
+    ) $malformed
 }
 finally { Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue }
 

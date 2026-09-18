@@ -80,6 +80,13 @@ Rollback: disable the `terraform-parity-*` workflows and revoke the GitHub App
 installation or key. Records and the ledger branch are retained and superseded
 rather than deleted, and no Azure resource or consumer contract is affected.
 
+### Fixed
+
+- Parity ledger coverage recognizes custom merge subjects such as
+  `Merge pull request #161: synchronize main into develop` while still
+  requiring an exact pull request number and merge-SHA assessment. Documented
+  recovery for a missing assessment ledger branch without bypassing coverage.
+
 ## [v2.6.1] - 2026-08-21
 
 ### Fixed
