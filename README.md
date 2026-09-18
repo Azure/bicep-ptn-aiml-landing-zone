@@ -8,12 +8,13 @@ The Azure AI Landing Zone is an enterprise-scale, production-ready reference arc
 
 ## What's new in v2
 
-The **v2.7.0 candidate** adds reproducible solution Storage access inputs
+**v2.7.0** adds reproducible solution Storage access inputs
 and fixes ACR Task agent-pool BYO subnet ordering. See the
-[candidate changelog](CHANGELOG.md#v270---unreleased) and
-[proposed release-guard decision](docs/adr/0006-release-metadata-and-comparison-baselines.md).
-It is not published or approved for deployment. Portal/Terraform human review,
-public documentation review and live Azure evidence remain pending.
+[changelog](CHANGELOG.md#v270---2026-09-18) and
+[release-guard decision](docs/adr/0006-release-metadata-and-comparison-baselines.md).
+Offline contracts and CI cover both changes; live Azure cold-start, persistence,
+authentication and scanning evidence remains outstanding. Use preflight,
+preview and an approved test scope before production adoption.
 
 The v2 line adds two things that matter most for everyday use:
 
@@ -91,7 +92,7 @@ and no Terraform source is stored here.
   names the accountable owners and describes the GitHub App, protected
   environment, and ledger operations.
 
-The [proposed release guard](docs/adr/0006-release-metadata-and-comparison-baselines.md)
+The [release guard](docs/adr/0006-release-metadata-and-comparison-baselines.md)
 validates current manifest/changelog versions independently of those historical
 comparison pins. A release bump does not update inventory evidence or approve
 parity; baseline advancement remains a separate reviewed operation.

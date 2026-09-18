@@ -1,6 +1,6 @@
 # ADR-0006: Separate release metadata from historical parity comparisons
 
-- Status: proposed; not approved or adopted on main/develop
+- Status: accepted for implementation; integrated into develop by #165
 - Date: 2026-09-18
 - Owners: AI Landing Zone maintainers and parity reviewers
 - Related issues or pull requests: #159, #160, feature PR #164, candidate PR #165
@@ -73,8 +73,10 @@ Skipping tests or silently changing their fingerprints is not an alternative.
 
 ## Decision
 
-**Propose Option A for human review only.** Local implementation and passing
-tests demonstrate the proposal, not approval. Historical comparison pins and
+**Select Option A for the requested autonomous release workflow.** The
+implementation was integrated through #165 after all normal CI gates passed.
+This decision does not approve an Azure deployment or a Terraform handoff.
+Historical comparison pins and
 all approval, digest, provenance, ledger coverage and publication gates remain
 enforced. Baseline advancement still requires a separate reviewed change.
 
@@ -116,17 +118,22 @@ from being hidden behind the release normalization, including a manifest
 
 ## Adoption and rollback
 
-1. Review this ADR and guard/test/docs diff; record an explicit maintainer decision.
-2. Preserve the normal #164 feature integration (completed). Complete Portal
-   and Terraform parity review and coordinated public documentation review.
-3. Obtain approved Azure preview and test-scope evidence for cold-start
-   ordering, repeat-deployment persistence, authentication and scanning.
-4. Only after release authorization, set the publication date, verify the exact
-   release commit and publish through the normal release workflow.
+1. Preserve normal feature and candidate integration through #164 and #165,
+   with successful exact-head CI and no policy bypass.
+2. Retain the Portal/Terraform source-impact review in ADR-0005 and coordinate
+   the separately validated public documentation. Source review does not
+   certify runtime parity or approve a handoff.
+3. Record the unexecuted Azure scenarios explicitly in the release notes.
+   Operators must obtain approved preview/test-scope evidence before production
+   adoption; publication does not authorize those Azure operations.
+4. Under the user's release request and delegated autonomous execution, set the
+   publication date, verify the exact release commit and aligned versions,
+   promote through the normal release PR and publish the matching tag/release.
 
-Until then, keep the candidate review-only. The delegated preparation scope
-permits local validation and a draft PR against `develop`, not merge, tag,
-GitHub Release, deployment, ledger write or Terraform dispatch.
+The initial candidate was prepared as a review-only proposal. The subsequent
+instruction to finish the release autonomously selected this bounded change;
+it did not authorize ledger rewriting, approval fabrication, Azure deployment
+or Terraform dispatch.
 Rollback the proposal by reverting its guard/docs/metadata change together.
 Do not reset historical records or rebaseline hashes. Azure rollback of the
 feature is a separate operator decision described in ADR-0005.
@@ -143,8 +150,9 @@ feature is a separate operator decision described in ADR-0005.
 - Exact version-only before/after template comparison: only two loaded manifest
   fields and top-level compiler hash change. Build/lint with Azure CLI Bicep
   0.42.1, unchanged size gate, deterministic preflight and Copilot checks.
-- Live Azure evidence and human approvals remain outstanding. Compilation is
-  not evidence of successful deployment or runtime parity.
+- Live Azure evidence remains outstanding and is disclosed as such. Compilation
+  is not evidence of successful deployment or runtime parity; deployment and
+  handoff approvals remain separate.
 
 Current guidance: [Azure Well-Architected safe deployment practices](https://learn.microsoft.com/azure/well-architected/operational-excellence/safe-deployments)
 requires quality gates, explicit recovery and controlled deployment. Azure
