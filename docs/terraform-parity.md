@@ -854,4 +854,4 @@ Baseline: Bicep `v2.6.1` at `64195c01b70974fa7256c2f54a0035fb06804139`; Terrafor
 
 ## Baseline advancement
 
-Advance `manifest.json`, `parity/config.json`, and `parity/inventory.json` together in a reviewed change. Re-run complete surface coverage and regenerate this document; never follow a moving branch or tag silently.
+Under [proposed ADR-0006](adr/0006-release-metadata-and-comparison-baselines.md), release metadata is independent of this historical comparison. Advancing `parity/config.json` and `parity/inventory.json` requires a separate reviewed change, complete surface coverage, regeneration of this document, and explicit treatment of historical record references. A manifest version bump neither advances these pins nor rewrites records, approvals, handoffs or digests; never follow a moving branch or tag silently.

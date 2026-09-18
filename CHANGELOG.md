@@ -5,8 +5,31 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.7.0] - 2026-09-18
+
+This backward-compatible minor release adds explicit solution Storage access
+inputs and corrects private ACR build-pool subnet ordering. The release metadata
+guard is independent of historical parity comparisons as documented in
+[ADR-0006](docs/adr/0006-release-metadata-and-comparison-baselines.md).
+Portal/Terraform source-impact findings and follow-up gaps are recorded in
+[ADR-0005](docs/adr/0005-reproducible-private-deployments.md).
+
+**Validation boundary:** build, lint, offline contracts, mutation checks and CI
+passed. Live Azure cold-start ordering, repeated-deployment ACL persistence,
+consumer authentication and Defender scanning were not executed for this
+release. No runtime parity or automatic approval for production rollout is
+claimed. Operators must use the documented preflight, preview and approved
+test-scope procedure before adopting an explicit private/keyless profile.
+
 ### Added
 
+- **Reproducible solution Storage access profiles (#160).** Added typed
+  `storageAccountNetworkAclsBypass`, `storageAccountResourceAccessRules`, and
+  `storageAccountAllowSharedKeyAccess` inputs with native parameter-file values.
+  Defaults remain `AzureServices`, `[]`, and `true`, using the existing Storage
+  AVM 0.26.2. Explicit rules are desired state; no live exceptions are imported
+  and no Defender scanner, plan or role is created. The inputs do not change
+  auxiliary Foundry Storage or existing public-network/IP-rule behavior.
 - **Terraform parity coordination assets.** The repository now owns a pinned,
   machine-readable parity inventory (`parity/inventory.json`), JSON Schema
   contracts (`parity/schemas/`), structured Terraform handoffs
@@ -44,6 +67,14 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ### Changed
 
+- **Proposed independent release-metadata guard.** Candidate manifest tags must
+  be equal, exact `vMAJOR.MINOR.PATCH` values matching the latest changelog
+  section. Historical parity comparison pins, inventory bytes, handoffs,
+  assessments and approvals remain unchanged. The Storage graph guard verifies
+  the actual compiled manifest, then normalizes only its two release fields
+  against the original fingerprint; all other graph protections remain.
+  Manifest, changelog and shared guard edits now trigger both validation
+  workflows without changing permissions or publication gates.
 - Parity validation now also validates the ledger adoption marker, scans
   `parity/` and `tests/parity/fixtures/` for sensitive values with documented
   exclusions, and asserts a 60-second budget for full inventory validation plus
@@ -66,9 +97,11 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
   Ledger discovery distinguishes an absent branch from transport or
   authentication failures, which now fail explicitly.
 
-Compatibility impact: none for deployments. No Bicep parameter, default, output,
-module interface, manifest field, App Configuration key, identity, or network
-behavior changed; these assets are repository automation and documentation only.
+Compatibility impact of the parity coordination assets: none for deployments;
+these assets are repository automation and documentation only. The solution
+Storage inputs are an additive public contract with unchanged defaults.
+Operators opting out of Shared Key must migrate affected consumers first and
+declare every approved resource-instance exception they intend to retain.
 
 Follow-up boundary: merging Terraform proposals, deploying the standard and
 network-isolated scenarios in an approved test subscription, and recording
@@ -79,6 +112,21 @@ parity here.
 Rollback: disable the `terraform-parity-*` workflows and revoke the GitHub App
 installation or key. Records and the ledger branch are retained and superseded
 rather than deleted, and no Azure resource or consumer contract is affected.
+
+### Fixed
+
+- **ACR Task agent-pool BYO subnet ordering (#159).** The pool explicitly waits
+  for the conditional BYO subnet deployment, preserving new-VNet dependencies,
+  existing-subnet ownership, disabled-pool behavior and unrelated subnet
+  configuration. Added focused compiled-template coverage without sleeps or
+  public-network workarounds.
+- Parity validation refreshes and revalidates its ledger snapshot immediately
+  before checking coverage, so assessments appended during the test run are
+  observed without suppressing missing-record or transport failures.
+- Parity ledger coverage recognizes custom merge subjects such as
+  `Merge pull request #161: synchronize main into develop` while still
+  requiring an exact pull request number and merge-SHA assessment. Documented
+  recovery for a missing assessment ledger branch without bypassing coverage.
 
 ## [v2.6.1] - 2026-08-21
 

@@ -26,7 +26,8 @@ Related assets:
 | Terraform implementation | Terraform AI Landing Zone (AVM pattern-module) maintainers | Terraform source, branches, AVM checks, merge, deployment, and release |
 | Cross-implementation parity | AI Landing Zone maintainers with a Terraform maintainer reviewer | Capability classification, consumer impact, compatibility expectation, and scenario acceptance |
 | Assessment approval | Parity reviewers listed on the `terraform-parity-publication` environment | Assessment outcome approval and publication authorization |
-| Baseline advancement | AI Landing Zone maintainers | Advancing `manifest.json`, `parity/config.json`, and `parity/inventory.json` together in one reviewed pull request |
+| Release metadata | AI Landing Zone maintainers | Matching manifest/changelog versions and explicit release approval; independent from historical comparison pins under proposed ADR-0006 |
+| Baseline advancement | AI Landing Zone maintainers | A separate reviewed comparison change to `parity/config.json` and `parity/inventory.json`, including evidence and historical-record compatibility; never an automatic release-bump side effect |
 | Rejected or closed proposals | Parity reviewers | Whether the gap is superseded, deferred, or stays open |
 | Incidents and revocation | Repository administrators | Disabling workflows, revoking the GitHub App, rotating keys |
 | Cleanup | Terraform maintainers for test subscriptions, AI Landing Zone maintainers for records | Deleting test deployments; superseding, never deleting, records |
@@ -35,11 +36,22 @@ Capability-level owners are recorded per capability in `parity/inventory.json` a
 are reproduced in the generated view, so any parity question resolves to a named
 owner from documentation alone.
 
+This guard separation is [proposed, not approved](./adr/0006-release-metadata-and-comparison-baselines.md).
+The candidate retains the existing Bicep `v2.6.1` and Terraform `v0.5.1`
+comparison. No existing inventory, assessment, review, handoff or digest is
+rewritten by the release bump. A future comparison advance must explicitly
+address historical references; this proposal does not introduce that migration.
+
 ## 2. Assessment ownership rules
 
 - Every pull request merged into `develop` after the adoption marker
   (`parity/assessments/adoption-marker.json`) needs exactly one assessment.
   `scripts/parity/Test-AssessmentCoverage.ps1` proves this in CI.
+- Coverage recognizes standard `Merge pull request #123 from ...` subjects,
+  custom `Merge pull request #123: ...` subjects, and squash subjects ending
+  in `(#123)`. Each still requires exactly one record matching both the full
+  merge commit SHA and pull request number. An unrecognized subject is not
+  permission to bypass coverage or rewrite integration history.
 - The assessment workflow creates the record with outcome `pending`. A parity
   reviewer records the final outcome and rationale with
   `scripts/parity/Set-AlignmentAssessment.ps1`.
@@ -103,6 +115,19 @@ workflows:
   Modifications, deletions, renames, and any path outside that directory fail the
   job.
 - Retain the branch. Superseded records stay; history is never rewritten.
+- Verify that the ledger branch exists before the first assessed merge.
+  Initialize it from a reviewed `develop` commit containing the adoption marker
+  and all current backfilled records, not an older incomplete seed. If checkout
+  fails because the branch is absent, perform this one-time initialization and
+  rerun the failed assessment job. Confirm its new pending record was appended
+  before rerunning coverage validation; do not fabricate an approved outcome or
+  use `-AllowUnattributedCommits` to hide the failure.
+- The validation workflow refreshes its read-only ledger checkout after running
+  tests, then validates the refreshed records before checking coverage. The
+  assessment workflow can append a new record while those tests run; the initial
+  checkout must not be treated as the current ledger. Fetch failures and missing
+  assessments still fail explicitly. If the writer has not finished, wait for
+  its successful completion before rerunning coverage; no record is inferred.
 - To pause coordination, disable the workflows. Records and the branch remain
   readable, and no Azure resource or consumer contract is affected.
 

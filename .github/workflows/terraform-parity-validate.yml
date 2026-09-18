@@ -3,6 +3,10 @@ name: terraform-parity-validate
 on:
   pull_request:
     paths:
+      - 'manifest.json'
+      - 'CHANGELOG.md'
+      - 'scripts/ReleaseMetadata.ps1'
+      - 'tests/contracts/Test-ReleaseMetadataContract.ps1'
       - 'parity/**'
       - 'docs/terraform-parity.md'
       - 'docs/terraform-parity-ownership.md'
@@ -18,6 +22,10 @@ on:
       - develop
       - 'v2.*-dev'
     paths:
+      - 'manifest.json'
+      - 'CHANGELOG.md'
+      - 'scripts/ReleaseMetadata.ps1'
+      - 'tests/contracts/Test-ReleaseMetadataContract.ps1'
       - 'parity/**'
       - 'docs/terraform-parity.md'
       - 'docs/terraform-parity-ownership.md'
@@ -86,9 +94,22 @@ jobs:
         shell: pwsh
         run: npm run test:parity
 
+      - name: Validate release metadata and trigger coverage
+        shell: pwsh
+        run: pwsh ./tests/contracts/Test-ReleaseMetadataContract.ps1
+
       - name: Check generated parity documentation
         shell: pwsh
         run: pwsh -NoProfile -File ./scripts/parity/Export-ParityMarkdown.ps1 -Check
+
+      - name: Refresh assessment ledger before coverage
+        if: steps.ledger.outputs.exists == 'true'
+        shell: pwsh
+        run: |
+          git -C '.parity-ledger' fetch --no-tags --quiet origin 'refs/heads/terraform-parity-assessments'
+          if ($LASTEXITCODE -ne 0) { throw 'Assessment ledger fetch failed.' }
+          git -C '.parity-ledger' checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Assessment ledger checkout refresh failed.' }
 
       - name: Validate assessment ledger coverage
         shell: pwsh
@@ -105,7 +126,13 @@ jobs:
           else {
             'parity/assessments'
           }
+          if ($env:PARITY_LEDGER_EXISTS -eq 'true') {
+            pwsh -NoProfile -File ./scripts/parity/Test-ParityAssets.ps1 `
+              -AssessmentsPath $ledger
+            if ($LASTEXITCODE -ne 0) { throw 'Refreshed assessment ledger validation failed.' }
+          }
           git fetch --no-tags --quiet origin '+refs/heads/develop:refs/remotes/origin/develop'
+          if ($LASTEXITCODE -ne 0) { throw 'Integration branch fetch failed.' }
           pwsh -NoProfile -File ./scripts/parity/Test-AssessmentCoverage.ps1 `
             -LedgerPath $ledger `
             -MarkerPath "$ledger/adoption-marker.json" `
