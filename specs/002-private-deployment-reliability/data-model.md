@@ -14,7 +14,7 @@ and [ACR](contracts/acr-subnet-ordering.md) contracts.
 | `deploySubnets` | Boolean / unchanged | Whether ALZ creates/updates BYO subnets. |
 | `deployNsgs` | Boolean / true | Required for BYO subnet mutation under existing validation. |
 | `deployContainerRegistry` | Boolean / true | Parent registry gate. |
-| `deployAcrTaskAgentPool` | Boolean / false | Pool opt-in. |
+| `deployAcrTaskAgentPool` | Boolean / true in Bicep; false in the azd parameter-file mapping | Existing independent pool selection; both defaults are preserved. |
 | `devopsBuildAgentsSubnetName` | String / `devops-build-agents-subnet` | Existing subnet name contract. |
 | `acrTaskAgentPoolTier` | S1, S2 or S3 / S1 | Pool tier. |
 | `acrTaskAgentPoolCount` | Integer >= 0 / 1 | Requested workers; 0 remains supported. |
