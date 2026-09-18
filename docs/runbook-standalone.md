@@ -145,6 +145,86 @@ azd env set DEPLOY_SOFTWARE true
 
 You can leave it off (`false`) and run the bootstrap manually after RDP'ing into the jumpbox via Bastion.
 
+### 4.3. Opt-in solution Storage migration
+
+Use the canonical [Solution Storage access controls](../README.md#solution-storage-access-controls)
+reference for the three parameter types, exact bypass spellings, and native JSON
+profiles. Defaults remain `AzureServices`, `[]`, and `true` in both basic and
+isolated modes. These inputs affect only solution Storage, not auxiliary
+Foundry Storage. Existing managed identities, RBAC, private endpoints/DNS, and
+other account settings are unchanged.
+
+For a new private deployment with no Defender integration, the README's
+`None` / `false` / `[]` profile needs no scanner exception. For an existing
+account, **complete the inventory and authentication tests before opting in**:
+
+1. **Inventory consumers and owners first.** Identify account-key clients,
+   key-based connection strings, account SAS, service SAS, and Azure Files
+   clients (including tools, mounts, and portal workflows). Record their
+   supported authentication paths without logging credentials. Inventory
+   current trusted-service/resource-instance exceptions, Azure Policy effects,
+   and any automation or team that also owns the account ACLs.
+2. **Test replacement authentication before disabling Shared Key.** Migrate
+   clients to supported Microsoft Entra authorization, preferably managed
+   identity; test Blob user-delegation SAS where used. Account/service SAS use
+   Shared Key and are denied when it is disabled; Blob user-delegation SAS is
+   distinct. Confirm service/protocol-specific support for Azure Files rather
+   than assuming Blob behavior applies. Test each actual client from its
+   intended network with approved data permissions. See
+   [Prevent Shared Key authorization](https://learn.microsoft.com/en-us/azure/storage/common/shared-key-authorization-prevent).
+   These inputs do not create or change RBAC assignments.
+3. **Declare the complete approved exceptions.** In the consumer-owned native
+   parameter overlay, include only explicitly approved existing `resourceId`
+   and `tenantId` pairs. Each instance must be eligible and in the same tenant
+   as Storage; copy its exact ARM ID, not a principal ID or a guessed
+   solution-RG scanner ID. Network eligibility is independent of data
+   permission. Coordinate the complete list with external ACL owners:
+   `[]`, including omission/default, removes resource-instance exceptions
+   rather than preserving manual rules. Do not import arbitrary live rules
+   or use wildcards. No scanner, Defender plan, or role is created.
+4. **Select the profile and review the effective deployment.** After the client
+   tests, set `storageAccountNetworkAclsBypass` to `None` and
+   `storageAccountAllowSharedKeyAccess` to native Boolean `false`, with `[]`
+   or the approved complete rule list. Ensure the actual deployment parameter
+   file receives the overlay; `azd env set` has no mapping for these fields.
+   For a private profile, also review `networkIsolation=true` and empty
+   `allowedIpRanges`. `None` alone or disabled public network access alone is
+   not a guarantee: trusted-service/resource-instance exceptions can still
+   matter. PNA, IP rules, and `defaultAction` retain the independent behavior
+   described in the README. Inspect Azure Policy outcomes, not just inputs.
+5. **Review preflight and preview, then seek deployment approval.** For a direct
+   template deployment, run the existing
+   `pwsh ./scripts/Invoke-PreflightChecks.ps1` and `azd provision --preview`.
+   Submodule consumers should use their existing preprovision hook/script path
+   against the resolved overlay and run preview from the consumer project.
+   Review scopes, effective parameter values, unexpected exposure/replacement,
+   and Policy findings; do not bypass failures. AVM 0.26.2 still has secure
+   outputs calling management-plane `listKeys()`, so disabling Shared Key is
+   not a key-free deployment or removal of the deployment identity's existing
+   requirements. Preflight/preview are risk controls, not live authentication
+   proof or authorization to provision.
+6. **Verify after separately approved provisioning.** Compare bypass, Shared
+   Key, the entire rule list, PNA/default action, and IP rules with the reviewed
+   desired state. For a persistence check, obtain approval for two deployments
+   with identical inputs and compare after both, without manual ACL repair.
+   Re-test approved Entra/user-delegation clients and confirm key-based requests
+   are denied. An already-enabled Defender scanner needs its own authorized
+   operational test and observed scan result; ACL equality does not prove
+   scanning. Record each unrun check as not run.
+
+**Consumer adoption and recovery:** use the normal reviewed ALZ pin and
+parameter-overlay workflow with a revision containing these inputs. Do not
+patch generated `infra/` checkouts or accelerator-generated files to work
+around an older pin. Keep reviewed desired rules and fix forward with the
+least-permissive working profile if validation fails. Reverting to an older
+ALZ template can reintroduce `AzureServices`, allow Shared Key again, and lose
+the declared rules. Re-enabling keys or broader bypass requires explicit
+operator approval; it is not an automatic recovery step. Coordinate any rule
+change with its owners and repeat preview before an approved roll-forward.
+
+For BYO networks or shared ACL ownership, also see the
+[Hub-and-Spoke migration guidance](./runbook-hub-spoke.md#612-opt-in-solution-storage-migration).
+
 ---
 
 ## 5. Provision

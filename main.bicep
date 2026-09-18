@@ -52,6 +52,7 @@ targetScope = 'resourceGroup'
 // Imports
 // ----------------------------------------------------------------------
 import * as const from 'constants/constants.bicep'
+import * as storageTypes from 'constants/storage-types.bicep'
 
 // ----------------------------------------------------------------------
 // General Parameters
@@ -320,6 +321,15 @@ param speechServiceSku string = 'S0'
 
 @description('Deploy an Azure Storage Account to hold blobs, queues, tables, and files.')
 param deployStorageAccount bool = true
+
+@description('Network ACL bypass for the solution Storage account only. AzureServices preserves existing behavior; None removes trusted-service bypass without changing public network access or IP rules.')
+param storageAccountNetworkAclsBypass storageTypes.storageAccountNetworkAclsBypassType = 'AzureServices'
+
+@description('Complete desired resource-instance network access rules for the solution Storage account. Empty means no resource-instance exceptions. Supply only approved resource IDs and tenant IDs; no live rules are imported and no Defender scanner, plan, or role is created.')
+param storageAccountResourceAccessRules storageTypes.storageAccountResourceAccessRuleType[] = []
+
+@description('Allow Shared Key authorization for the solution Storage account. Defaults to true for compatibility. Set false only after migrating affected key-based clients and SAS tokens; this does not remove the pinned AVM management-plane key-listing outputs.')
+param storageAccountAllowSharedKeyAccess bool = true
 
 @description('Deploy an Azure Cosmos DB account for globally distributed NoSQL data storage.')
 param deployCosmosDb bool = true
@@ -2699,6 +2709,10 @@ resource acrTaskAgentPool 'Microsoft.ContainerRegistry/registries/agentPools@201
     #disable-next-line BCP318
     virtualNetworkSubnetResourceId: _networkIsolation ? '${virtualNetworkResourceId}/subnets/${devopsBuildAgentsSubnetName}' : ''
   }
+  dependsOn: [
+    // The constructed BYO subnet ID does not imply subnet creation order.
+    virtualNetworkSubnets
+  ]
 }
 
 //Container Apps User Managed Identity
@@ -3262,10 +3276,12 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.26.2' = if (d
     skuName: 'Standard_LRS'
     kind: 'StorageV2'
     allowBlobPublicAccess: false
+    allowSharedKeyAccess: storageAccountAllowSharedKeyAccess
     supportsHttpsTrafficOnly: true
     requireInfrastructureEncryption: true
     networkAcls: {
-      bypass: 'AzureServices'
+      bypass: storageAccountNetworkAclsBypass
+      resourceAccessRules: storageAccountResourceAccessRules
       virtualNetworkRules: []
       ipRules: _storageIpRules
       defaultAction: _applyIpRules ? 'Deny' : 'Allow'
