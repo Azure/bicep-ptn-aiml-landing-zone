@@ -105,7 +105,7 @@ try {
     $unattributed = [System.Collections.Generic.List[string]]::new()
     foreach ($commit in $commits) {
         $subject = (Invoke-ParityGit -RepositoryPath $repositoryPath -Arguments @('log', '-1', '--format=%s', $commit)).Output
-        $match = [regex]::Match($subject, '^Merge pull request #(?<number>[0-9]+) ')
+        $match = [regex]::Match($subject, '^Merge pull request #(?<number>[0-9]+)(?: |: )')
         if (-not $match.Success) { $match = [regex]::Match($subject, '\(#(?<number>[0-9]+)\)\s*$') }
         if (-not $match.Success) {
             $unattributed.Add("$($commit.Substring(0, 7)) $subject")

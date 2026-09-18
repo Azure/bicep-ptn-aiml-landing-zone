@@ -40,6 +40,11 @@ owner from documentation alone.
 - Every pull request merged into `develop` after the adoption marker
   (`parity/assessments/adoption-marker.json`) needs exactly one assessment.
   `scripts/parity/Test-AssessmentCoverage.ps1` proves this in CI.
+- Coverage recognizes standard `Merge pull request #123 from ...` subjects,
+  custom `Merge pull request #123: ...` subjects, and squash subjects ending
+  in `(#123)`. Each still requires exactly one record matching both the full
+  merge commit SHA and pull request number. An unrecognized subject is not
+  permission to bypass coverage or rewrite integration history.
 - The assessment workflow creates the record with outcome `pending`. A parity
   reviewer records the final outcome and rationale with
   `scripts/parity/Set-AlignmentAssessment.ps1`.
@@ -103,6 +108,13 @@ workflows:
   Modifications, deletions, renames, and any path outside that directory fail the
   job.
 - Retain the branch. Superseded records stay; history is never rewritten.
+- Verify that the ledger branch exists before the first assessed merge.
+  Initialize it from a reviewed `develop` commit containing the adoption marker
+  and all current backfilled records, not an older incomplete seed. If checkout
+  fails because the branch is absent, perform this one-time initialization and
+  rerun the failed assessment job. Confirm its new pending record was appended
+  before rerunning coverage validation; do not fabricate an approved outcome or
+  use `-AllowUnattributedCommits` to hide the failure.
 - To pause coordination, disable the workflows. Records and the branch remain
   readable, and no Azure resource or consumer contract is affected.
 
