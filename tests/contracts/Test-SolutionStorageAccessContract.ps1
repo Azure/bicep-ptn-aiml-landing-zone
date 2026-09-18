@@ -31,6 +31,9 @@
     precise #159 virtualNetworkSubnets edge is accepted. Per-resource hashes
     identify unexpected changes without printing parameter values. Do not
     regenerate these hashes merely to obtain a passing test.
+    Release metadata is checked against the actual manifest and changelog first.
+    Only tag and ailz_tag on the pinned $fxv#0 object behind _manifest are then
+    normalized to v2.6.1 for the historical fingerprint (proposed ADR-0006).
 
     Uses a unique temporary directory beside MainFile for portable relative
     'using' paths (also across Windows drives). Deletes only its own files.
@@ -71,7 +74,7 @@ function Assert-Contract {
 }
 
 function ConvertTo-Canonical {
-    param([AllowNull()]$Value)
+    param([AllowNull()]$Value, [switch]$PreserveGeneratorMetadata)
     if ($null -eq $Value) { return $null }
     if ($Value -is [string]) { return $Value.Replace("`r`n", "`n").Replace("`r", "`n") }
     if ($Value -is [System.Collections.IDictionary]) {
@@ -79,14 +82,14 @@ function ConvertTo-Canonical {
         [string[]]$keys = @($Value.Keys)
         [Array]::Sort($keys, [StringComparer]::Ordinal)
         foreach ($key in $keys) {
-            if ($key -ceq '_generator') { continue }
-            $result[$key] = ConvertTo-Canonical $Value[$key]
+            if ($key -ceq '_generator' -and -not $PreserveGeneratorMetadata) { continue }
+            $result[$key] = ConvertTo-Canonical $Value[$key] -PreserveGeneratorMetadata:($PreserveGeneratorMetadata -or $key -cin @('_manifest', '$fxv#0'))
         }
         return $result
     }
     if ($Value -is [System.Collections.IEnumerable]) {
         $result = [System.Collections.Generic.List[object]]::new()
-        foreach ($item in $Value) { $result.Add((ConvertTo-Canonical $item)) }
+        foreach ($item in $Value) { $result.Add((ConvertTo-Canonical $item -PreserveGeneratorMetadata:$PreserveGeneratorMetadata)) }
         return ,$result.ToArray()
     }
     return $Value
@@ -108,7 +111,7 @@ function Get-ContractHash {
 }
 
 function Test-UnchangedGraph {
-    param($Template, $OriginalSolution)
+    param($Template, $OriginalSolution, $Manifest, [string]$Changelog)
     # These are the SAME e3d94e5 objects as the original aggregate fingerprint,
     # now individually fingerprinted for actionable diagnostics. No new graph
     # baseline or mutation exemption is introduced. Keep all nested properties,
@@ -205,7 +208,13 @@ virtualNetworkSubnets df346eb5b939add3fea49a9177b2a0a116b0e931a62e5d3ca7354a1f62
         else { $Template.resources[$name] }
         if ((Get-ContractHash $resource) -cne $resourceHashes[$name]) { $changed.Add("resources.$name") }
     }
-    if ((Get-ContractHash $Template.variables) -cne 'd46fe765f8a6b5f30f73b8c0a66c1d06fa02475718205658c5a74ec805378906') { $changed.Add('root.variables') }
+    Assert-ReleaseMetadata -Manifest $Manifest -Changelog $Changelog
+    Assert-Equal 'Compiled _manifest must retain its exact compiler binding.' $Template.variables._manifest '[variables(''$fxv#0'')]'
+    Assert-Equal 'Compiled _manifest must match the actual manifest before release normalization.' @{ _manifest = $Template.variables['$fxv#0'] } @{ _manifest = $Manifest }
+    $variables = $Template.variables | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
+    $variables['$fxv#0'].tag = 'v2.6.1'
+    $variables['$fxv#0'].ailz_tag = 'v2.6.1'
+    if ((Get-ContractHash $variables) -cne 'd46fe765f8a6b5f30f73b8c0a66c1d06fa02475718205658c5a74ec805378906') { $changed.Add('root.variables') }
     if ((Get-ContractHash $Template.outputs) -cne '529fe5c247e2cf87232f0fbfee048317643f11b8d62b527c4b1247d8b4dc0d92') { $changed.Add('root.outputs') }
     Assert-Contract ($changed.Count -eq 0) "S3/S8 unexpected baseline change at [$($changed -join ', ')]. Nested properties/definitions remain protected; no resource is exempt."
 }
@@ -450,6 +459,9 @@ try {
     Assert-Contract ($PSVersionTable.PSVersion.Major -ge 7) 'PowerShell 7 is required.'
     $MainFile = (Resolve-Path -LiteralPath $MainFile).Path
     $root = Split-Path -Parent $MainFile
+    . (Join-Path $PSScriptRoot '..\..\scripts\ReleaseMetadata.ps1')
+    $manifest = Get-Content -LiteralPath (Join-Path $root 'manifest.json') -Raw | ConvertFrom-Json -AsHashtable
+    $changelog = Get-Content -LiteralPath (Join-Path $root 'CHANGELOG.md') -Raw
     if (-not (Get-Command az -ErrorAction SilentlyContinue)) { throw 'Azure CLI is required; standalone Bicep is not used.' }
     $env:PYTHONIOENCODING = 'utf-8'
     $versionOutput = (& az bicep version 2>&1) -join "`n"
@@ -550,7 +562,34 @@ try {
     $null = $oldSolution.properties.parameters.Remove('allowSharedKeyAccess')
     $null = $oldSolution.properties.parameters.networkAcls.value.Remove('resourceAccessRules')
     $oldSolution.properties.parameters.networkAcls.value.bypass = 'AzureServices'
-    Test-UnchangedGraph $template $oldSolution
+    Test-UnchangedGraph $template $oldSolution $manifest $changelog
+    $graphMutations = @(
+        @{ Name = 'manifest repo drift'; Expected = 'root.variables'; Change = { param($t, $m) $m.repo = 'https://example.invalid/changed.git'; $t.variables['$fxv#0'].repo = $m.repo } },
+        @{ Name = 'manifest components drift'; Expected = 'root.variables'; Change = { param($t, $m) $m.components = @(@{ repo = 'https://example.invalid/component.git'; tag = 'v1.0.0' }); $t.variables['$fxv#0'].components = $m.components } },
+        @{ Name = 'extra manifest field'; Expected = 'root.variables'; Change = { param($t, $m) $m.extra = 'drift'; $t.variables['$fxv#0'].extra = 'drift' } },
+        @{ Name = 'manifest generator is not compiler metadata'; Expected = 'root.variables'; Change = { param($t, $m) $m._generator = 'drift'; $t.variables['$fxv#0']._generator = 'drift' } },
+        @{ Name = 'unrelated root variable'; Expected = 'root.variables'; Change = { param($t, $m) $t.variables._publicNetworkAccess = 'Enabled' } },
+        @{ Name = 'compiled release mismatch'; Expected = 'Compiled _manifest'; Change = { param($t, $m) $t.variables['$fxv#0'].tag = 'v99.0.0'; $t.variables['$fxv#0'].ailz_tag = 'v99.0.0' } },
+        @{ Name = 'compiler manifest binding drift'; Expected = 'Compiled _manifest'; Change = { param($t, $m) $t.variables._manifest = '[variables(''other'')]' } },
+        @{ Name = 'manifest tag mismatch'; Expected = 'RELEASE:'; Change = { param($t, $m) $m.ailz_tag = 'v99.0.0'; $t.variables['$fxv#0'].ailz_tag = $m.ailz_tag } },
+        @{ Name = 'invalid release format'; Expected = 'RELEASE:'; Change = { param($t, $m) $m.tag = 'v2.7.0-rc.1'; $m.ailz_tag = $m.tag; $t.variables['$fxv#0'].tag = $m.tag; $t.variables['$fxv#0'].ailz_tag = $m.tag } },
+        @{ Name = 'changelog mismatch'; Expected = 'RELEASE:'; Change = { param($t, $m) $m.tag = 'v99.0.0'; $m.ailz_tag = $m.tag; $t.variables['$fxv#0'].tag = $m.tag; $t.variables['$fxv#0'].ailz_tag = $m.tag } },
+        @{ Name = 'unrelated resource'; Expected = 'resources.aiFoundryStorageAccount'; Change = { param($t, $m) $t.resources.aiFoundryStorageAccount.condition = $false } },
+        @{ Name = 'unrelated output'; Expected = 'root.outputs'; Change = { param($t, $m) $t.outputs.extra = @{ type = 'string'; value = 'drift' } } }
+    )
+    foreach ($mutation in $graphMutations) {
+        $changedTemplate = $template | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
+        $changedManifest = $manifest | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
+        & $mutation.Change $changedTemplate $changedManifest
+        $caught = $false
+        try { Test-UnchangedGraph $changedTemplate $oldSolution $changedManifest $changelog }
+        catch {
+            if ($_.Exception.Message -notmatch [regex]::Escape($mutation.Expected)) { throw }
+            $caught = $true
+        }
+        Assert-Contract $caught "Graph guard accepted $($mutation.Name)."
+    }
+    Write-Host "  [PASS] $($graphMutations.Count) release/manifest/graph mutations rejected without replacing fingerprints." -ForegroundColor Green
     # Also prevent misdirected consumption, including the separately owned ACR.
     $outsideSolution = ConvertTo-Json -InputObject @{
         resources = @($template.resources.GetEnumerator() | Where-Object Key -CNE 'storageAccount' | ForEach-Object Value)

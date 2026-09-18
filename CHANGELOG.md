@@ -5,6 +5,16 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.7.0] - Unreleased
+
+Release candidate only; not a published release. The release/comparison
+baseline guard change is proposed in
+[ADR-0006](docs/adr/0006-release-metadata-and-comparison-baselines.md), not
+approved. Human release authorization, Portal/Terraform parity review, and the
+coordinated public documentation review remain pending. Live Azure cold-start
+ordering, two-deployment ACL persistence, consumer authentication and Defender
+scanner evidence are still outstanding; offline contracts do not prove them.
+
 ### Added
 
 - **Reproducible solution Storage access profiles (#160).** Added typed
@@ -51,6 +61,14 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ### Changed
 
+- **Proposed independent release-metadata guard.** Candidate manifest tags must
+  be equal, exact `vMAJOR.MINOR.PATCH` values matching the latest changelog
+  section. Historical parity comparison pins, inventory bytes, handoffs,
+  assessments and approvals remain unchanged. The Storage graph guard verifies
+  the actual compiled manifest, then normalizes only its two release fields
+  against the original fingerprint; all other graph protections remain.
+  Manifest, changelog and shared guard edits now trigger both validation
+  workflows without changing permissions or publication gates.
 - Parity validation now also validates the ledger adoption marker, scans
   `parity/` and `tests/parity/fixtures/` for sensitive values with documented
   exclusions, and asserts a 60-second budget for full inventory validation plus

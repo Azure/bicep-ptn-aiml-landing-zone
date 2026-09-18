@@ -37,6 +37,7 @@ try {
     Assert-True ($first.Contains('Pipe \| slash \\ and &lt;tag&gt;')) 'Markdown table content must be escaped.'
     Assert-True ($first.Contains('2026-01-02T03:04:05Z')) 'The pinned assessedAt timestamp must be rendered.'
     Assert-True ($first.Contains('## Detailed source contract')) 'Detailed source contracts must be rendered.'
+    Assert-True ($first.Contains('proposed ADR-0006') -and $first.Contains('A manifest version bump neither advances these pins')) 'The generated footer must distinguish proposed release metadata separation from historical comparison advancement.'
     Assert-True ($first.Contains('| `sample` | `input` | `built-in` | `string` | `false` | `literal` | `"sample-default"` | `["sample-default","alternate"]` |')) 'Input type/default/allowed values must be inspectable.'
     Assert-True ($first.Contains('| `expressionSample` | `input` | `built-in` | `string` | `false` | `expression` | `[resourceGroup().location]` | `[]` |')) 'Expression defaults and empty allowed values must be explicit.'
     Assert-True ($first.Contains('| `SAMPLE_OUTPUT` | `output` | `built-in` | `string` |')) 'Output type metadata must be inspectable.'
