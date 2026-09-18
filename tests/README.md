@@ -56,6 +56,8 @@ pwsh tests/contracts/Test-HostedAgentContract.ps1
 pwsh tests/contracts/Test-AcrTaskAgentPoolFirewallContract.ps1
 pwsh tests/contracts/Test-AcrTaskAgentPoolSubnetContract.ps1
 pwsh tests/contracts/Test-SolutionStorageAccessContract.ps1
+pwsh tests/contracts/Test-ReleaseMetadataContract.ps1
+pwsh tests/parity/Test-BaselineContract.Tests.ps1
 pwsh tests/contracts/Test-FoundrySharedPrivateLinkNameContract.ps1
 pwsh tests/contracts/Test-MaintenanceConfigurationWrapperContract.ps1
 pwsh tests/contracts/Test-ComponentDeploymentFlagsContract.ps1
@@ -115,6 +117,18 @@ invalid typed inputs, and standard/isolated/IP-exception/disabled-account cases
 presence as proof, and protects unrelated Storage configuration and auxiliary
 accounts. Default equivalence means unchanged effective values, not identical
 template bytes. No Defender resource, plan, role or exception is inferred.
+
+The [proposed release guard](../docs/adr/0006-release-metadata-and-comparison-baselines.md)
+checks exact equal manifest tags and the latest unique versioned changelog
+heading, separately from historical parity tag/SHA pins. Its offline tests
+include metadata mutations and both workflows' path coverage.
+The Storage graph guard verifies that `_manifest` retains its Bicep 0.42.1
+binding to `$fxv#0` and that this loaded object matches the actual manifest.
+Only that object's `tag` and `ailz_tag` are normalized to `v2.6.1` before the
+original root-variable fingerprint. No fingerprints are regenerated; manifest
+repo/components/extra fields, unrelated variables, resources and outputs remain
+protected by negative mutations. `-MainFile` fixture roots must include their
+corresponding manifest and changelog. These checks do not authorize a release.
 
 Both scripts accept `-MainFile` for isolated regression fixtures and remove their
 temporary compiler artifacts. Their offline checks do not prove live subnet

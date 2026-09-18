@@ -3,6 +3,10 @@ name: terraform-parity-validate
 on:
   pull_request:
     paths:
+      - 'manifest.json'
+      - 'CHANGELOG.md'
+      - 'scripts/ReleaseMetadata.ps1'
+      - 'tests/contracts/Test-ReleaseMetadataContract.ps1'
       - 'parity/**'
       - 'docs/terraform-parity.md'
       - 'docs/terraform-parity-ownership.md'
@@ -18,6 +22,10 @@ on:
       - develop
       - 'v2.*-dev'
     paths:
+      - 'manifest.json'
+      - 'CHANGELOG.md'
+      - 'scripts/ReleaseMetadata.ps1'
+      - 'tests/contracts/Test-ReleaseMetadataContract.ps1'
       - 'parity/**'
       - 'docs/terraform-parity.md'
       - 'docs/terraform-parity-ownership.md'
@@ -85,6 +93,10 @@ jobs:
       - name: Test parity validators
         shell: pwsh
         run: npm run test:parity
+
+      - name: Validate release metadata and trigger coverage
+        shell: pwsh
+        run: pwsh ./tests/contracts/Test-ReleaseMetadataContract.ps1
 
       - name: Check generated parity documentation
         shell: pwsh

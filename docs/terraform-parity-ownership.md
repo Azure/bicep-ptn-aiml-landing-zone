@@ -26,7 +26,8 @@ Related assets:
 | Terraform implementation | Terraform AI Landing Zone (AVM pattern-module) maintainers | Terraform source, branches, AVM checks, merge, deployment, and release |
 | Cross-implementation parity | AI Landing Zone maintainers with a Terraform maintainer reviewer | Capability classification, consumer impact, compatibility expectation, and scenario acceptance |
 | Assessment approval | Parity reviewers listed on the `terraform-parity-publication` environment | Assessment outcome approval and publication authorization |
-| Baseline advancement | AI Landing Zone maintainers | Advancing `manifest.json`, `parity/config.json`, and `parity/inventory.json` together in one reviewed pull request |
+| Release metadata | AI Landing Zone maintainers | Matching manifest/changelog versions and explicit release approval; independent from historical comparison pins under proposed ADR-0006 |
+| Baseline advancement | AI Landing Zone maintainers | A separate reviewed comparison change to `parity/config.json` and `parity/inventory.json`, including evidence and historical-record compatibility; never an automatic release-bump side effect |
 | Rejected or closed proposals | Parity reviewers | Whether the gap is superseded, deferred, or stays open |
 | Incidents and revocation | Repository administrators | Disabling workflows, revoking the GitHub App, rotating keys |
 | Cleanup | Terraform maintainers for test subscriptions, AI Landing Zone maintainers for records | Deleting test deployments; superseding, never deleting, records |
@@ -34,6 +35,12 @@ Related assets:
 Capability-level owners are recorded per capability in `parity/inventory.json` and
 are reproduced in the generated view, so any parity question resolves to a named
 owner from documentation alone.
+
+This guard separation is [proposed, not approved](./adr/0006-release-metadata-and-comparison-baselines.md).
+The candidate retains the existing Bicep `v2.6.1` and Terraform `v0.5.1`
+comparison. No existing inventory, assessment, review, handoff or digest is
+rewritten by the release bump. A future comparison advance must explicitly
+address historical references; this proposal does not introduce that migration.
 
 ## 2. Assessment ownership rules
 
