@@ -1,0 +1,20 @@
+{
+  "baselineId": "baseline-v2.6.1-v0.5.1",
+  "changedCapabilities": [],
+  "handoffIds": [],
+  "id": "assessment-169-1ef18ff",
+  "outcome": "pending",
+  "rationale": "",
+  "review": {
+    "status": "pending"
+  },
+  "schemaVersion": "1.0.0",
+  "sourcePr": {
+    "baseBranch": "develop",
+    "mergeCommitSha": "1ef18ffdda59223a996fc697f31fffe137404965",
+    "mergedAt": "2026-09-20T21:14:22Z",
+    "number": 169,
+    "repository": "Azure/bicep-ptn-aiml-landing-zone",
+    "url": "https://github.com/Azure/bicep-ptn-aiml-landing-zone/pull/169"
+  }
+}
