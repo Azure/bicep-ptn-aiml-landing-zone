@@ -8,6 +8,13 @@ The Azure AI Landing Zone is an enterprise-scale, production-ready reference arc
 
 ## What's new in v2
 
+**v2.7.1** fixes BYO subnet creation with Bastion disabled: the reserved
+`AzureBastionSubnet` no longer inherits a generic NSG. An explicit dedicated
+Bastion NSG still takes precedence when enabled. No subnet renaming workaround
+is needed for new deployments; existing renamed subnets require a reviewed
+address plan before removing their overrides. See the
+[patch changelog](CHANGELOG.md#v271---2026-09-20).
+
 **v2.7.0** adds reproducible solution Storage access inputs
 and fixes ACR Task agent-pool BYO subnet ordering. See the
 [changelog](CHANGELOG.md#v270---2026-09-18) and

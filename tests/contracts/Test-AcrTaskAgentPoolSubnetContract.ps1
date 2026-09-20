@@ -14,6 +14,8 @@
     They are not a general ARM evaluator or evidence of runtime deployment order,
     capacity, unrelated-subnet preservation, or successful pool provisioning.
     The separate firewall contract remains necessary.
+    Issue #168 additionally guards reserved-subnet NSG fallback and precedence
+    of the dedicated NSG when Bastion is enabled.
 
     Use the repository's Azure CLI Bicep 0.42.1 toolchain; deliberately do not fall
     back to an older standalone compiler. The unique compiled artifact is removed
@@ -298,6 +300,41 @@ try {
     Test-Set 'Subnet child waits for its cross-scope NSG' $subnetChild.dependsOn @(
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('subscriptionId'), parameters('resourceGroupName')), 'Microsoft.Resources/deployments', format('{0}{1}-{2}', parameters('prefix'), parameters('vnetName'), parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].name))]"
     )
+    $excluded = @($subnets.properties.template.variables.invalidNsgSubnets)
+    Test-Equal '#168 generic NSG exclusions include the reserved Bastion subnet' `
+        $excluded @('AzureFirewallSubnet', 'AppGatewaySubnet', 'AzureBastionSubnet')
+    $selection = @'
+[if(not(empty(coalesce(tryGet(parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]], 'networkSecurityGroupResourceId'), ''))), createObject('value', string(parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].networkSecurityGroupResourceId)), if(and(parameters('deployNsgs'), not(contains(variables('invalidNsgSubnets'), parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].name))), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', parameters('subscriptionId'), parameters('resourceGroupName')), 'Microsoft.Resources/deployments', format('{0}{1}-{2}', parameters('prefix'), parameters('vnetName'), parameters('subnets')[range(0, length(parameters('subnets')))[copyIndex()]].name)), '2025-04-01').outputs.id.value), createObject('value', '')))]
+'@
+    Test-Equal '#168 explicit NSG selection precedes the unchanged generic fallback' `
+        $subnetChild.properties.parameters.networkSecurityGroupId $selection
+    Test-Equal '#168 dedicated Bastion NSG stays gated on Bastion and NSGs' `
+        $template.resources.bastionNsg.condition "[and(variables('_deployBastion'), parameters('deployNsgs'))]"
+    $bastionEntries = @($subnets.properties.parameters.subnets.value | Where-Object { $_.name -ceq "[parameters('azureBastionSubnetName')]" })
+    Test-Equal '#168 reserved subnet remains present independently of host deployment' $bastionEntries.Count 1
+    if ($bastionEntries.Count -eq 1) {
+        Test-Equal '#168 enabled Bastion retains the dedicated NSG binding' `
+            $bastionEntries[0].networkSecurityGroupResourceId "[if(and(variables('_deployBastion'), parameters('deployNsgs')), reference('bastionNsg').outputs.id.value, '')]"
+    }
+    if ($subnetChild.properties.parameters.networkSecurityGroupId -ceq $selection) {
+        foreach ($case in @(
+            @{ Name = 'Bastion disabled'; Subnet = 'AzureBastionSubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
+            @{ Name = 'Bastion enabled'; Subnet = 'AzureBastionSubnet'; Explicit = 'dedicated-bastion-nsg'; Nsgs = $true; Expected = 'dedicated-bastion-nsg' }
+            @{ Name = 'NSGs disabled'; Subnet = 'AzureBastionSubnet'; Explicit = ''; Nsgs = $false; Expected = '' }
+            @{ Name = 'Explicit override'; Subnet = 'AzureBastionSubnet'; Explicit = 'operator-nsg'; Nsgs = $false; Expected = 'operator-nsg' }
+            @{ Name = 'Firewall exclusion'; Subnet = 'AzureFirewallSubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
+            @{ Name = 'Gateway exclusion'; Subnet = 'AppGatewaySubnet'; Explicit = ''; Nsgs = $true; Expected = '' }
+            @{ Name = 'Build subnet'; Subnet = 'devops-build-agents-subnet'; Explicit = ''; Nsgs = $true; Expected = 'generic-nsg' }
+            @{ Name = 'Custom idle subnet'; Subnet = 'unused-bastion-subnet'; Explicit = ''; Nsgs = $true; Expected = 'generic-nsg' }
+            @{ Name = 'Ordinary explicit NSG'; Subnet = 'workload'; Explicit = 'operator-nsg'; Nsgs = $true; Expected = 'operator-nsg' }
+            @{ Name = 'Ordinary NSGs disabled'; Subnet = 'workload'; Explicit = ''; Nsgs = $false; Expected = '' }
+        )) {
+            $selected = if ($case.Explicit) { $case.Explicit }
+            elseif ($case.Nsgs -and $case.Subnet -cnotin $excluded) { 'generic-nsg' }
+            else { '' }
+            Test-Equal "#168 $($case.Name)" $selected $case.Expected
+        }
+    }
     $subnetResources = @($subnetChild.properties.template.resources)
     Test-Equal 'Child template contains only one subnet resource' $subnetResources.Count 1
     if ($subnetResources.Count -eq 1) {
