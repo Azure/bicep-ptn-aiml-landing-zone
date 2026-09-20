@@ -28,6 +28,9 @@ subnets or unattached NSGs, enable Bastion, or change existing Bastion rules.
 test environment. The sentinel subnet, ACR pool and exact Storage access profile
 remained unchanged. The test used a free subnet prefix to avoid the prior
 workaround subnet; it did not rename or delete existing subnets.
+Live deployment completed on 2026-09-20 at 21:07:03 UTC. The 188-assertion
+compiled subnet contract also covers enabled-Bastion NSG precedence; no new
+Bastion host was provisioned to validate that enabled path.
 
 ## [v2.7.0] - 2026-09-18
 
