@@ -5,6 +5,30 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.7.1] - 2026-09-20
+
+### Fixed
+
+- **Bastion-disabled BYO subnet creation (#168).** Do not attach the generic
+  fallback NSG to reserved `AzureBastionSubnet`. This prevents Azure's
+  `NetworkSecurityGroupNotCompliantForAzureBastionSubnet` failure when
+  `deployBastion=false` and BYO subnet/NSG creation are enabled. Explicit NSGs
+  still take precedence, preserving the dedicated NSG when Bastion is enabled.
+  Subnet creation, other subnet NSGs, feature flags and public contracts are
+  unchanged. Added compiled regression and narrow graph-mutation coverage.
+
+**Migration:** New deployments can retain the default reserved subnet name.
+If an environment used a renamed-subnet workaround, do not rename/delete it
+or reuse its occupied address prefix automatically. Review the subnet plan
+and What-If before reverting that override. The patch does not delete old
+subnets or unattached NSGs, enable Bastion, or change existing Bastion rules.
+
+**Validation:** The patched orchestrator successfully created the default-named
+`AzureBastionSubnet` without a generic NSG or Bastion host in the isolated Azure
+test environment. The sentinel subnet, ACR pool and exact Storage access profile
+remained unchanged. The test used a free subnet prefix to avoid the prior
+workaround subnet; it did not rename or delete existing subnets.
+
 ## [v2.7.0] - 2026-09-18
 
 This backward-compatible minor release adds explicit solution Storage access

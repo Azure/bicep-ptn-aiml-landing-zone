@@ -109,6 +109,13 @@ targets, and serialized subnet operations (A1-A9). A live cold-start test must
 still start with an absent build subnet and show subnet completion before pool
 provisioning; a successful retry is not cold-start evidence.
 
+The same compiled subnet contract covers #168: reserved `AzureBastionSubnet`
+does not receive a generic NSG when Bastion is disabled, while explicit NSGs,
+enabled Bastion's dedicated binding, ordinary/custom subnets and disabled-NSG
+paths retain their precedence. The Storage graph guard permits only that
+precise additional exclusion, retaining the historical fingerprints and
+rejecting unrelated exclusion or explicit-NSG selector changes.
+
 The solution Storage access contract (#160) checks typed input/default and
 native JSON parameter values, exact root-to-AVM-to-resource forwarding, all
 supported bypass values, true/false, zero/one/multiple resource-instance rules,

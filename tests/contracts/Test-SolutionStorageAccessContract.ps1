@@ -31,6 +31,8 @@
     precise #159 virtualNetworkSubnets edge is accepted. Per-resource hashes
     identify unexpected changes without printing parameter values. Do not
     regenerate these hashes merely to obtain a passing test.
+    The subnet guard also permits only #168's exact AzureBastionSubnet addition
+    to generic-NSG exclusions; other nested properties remain fingerprinted.
     Release metadata is checked against the actual manifest and changelog first.
     Only tag and ailz_tag on the pinned $fxv#0 object behind _manifest are then
     normalized to v2.6.1 for the historical fingerprint (proposed ADR-0006).
@@ -201,10 +203,20 @@ virtualNetworkSubnets df346eb5b939add3fea49a9177b2a0a116b0e931a62e5d3ca7354a1f62
     else { $originalDependencies }
     Assert-Equal 'resources.acrTaskAgentPool.dependsOn: only the exact original list or the single #159 virtualNetworkSubnets edge is permitted.' $acr.dependsOn $acceptedDependencies
     $acr.dependsOn = $originalDependencies
+    $subnets = $Template.resources.virtualNetworkSubnets | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
+    $originalNsgExclusions = @('AzureFirewallSubnet', 'AppGatewaySubnet')
+    $acceptedNsgExclusions = if (@($subnets.properties.template.variables.invalidNsgSubnets).Count -eq 3) {
+        @('AzureFirewallSubnet', 'AppGatewaySubnet', 'AzureBastionSubnet')
+    }
+    else { $originalNsgExclusions }
+    Assert-Equal 'resources.virtualNetworkSubnets: only the exact #168 reserved Bastion NSG exclusion is permitted.' `
+        $subnets.properties.template.variables.invalidNsgSubnets $acceptedNsgExclusions
+    $subnets.properties.template.variables.invalidNsgSubnets = $originalNsgExclusions
     $changed = [System.Collections.Generic.List[string]]::new()
     foreach ($name in $resourceHashes.Keys) {
         $resource = if ($name -ceq 'storageAccount') { $OriginalSolution }
         elseif ($name -ceq 'acrTaskAgentPool') { $acr }
+        elseif ($name -ceq 'virtualNetworkSubnets') { $subnets }
         else { $Template.resources[$name] }
         if ((Get-ContractHash $resource) -cne $resourceHashes[$name]) { $changed.Add("resources.$name") }
     }
@@ -564,6 +576,8 @@ try {
     $oldSolution.properties.parameters.networkAcls.value.bypass = 'AzureServices'
     Test-UnchangedGraph $template $oldSolution $manifest $changelog
     $graphMutations = @(
+        @{ Name = 'unrelated subnet exclusion'; Expected = 'resources.virtualNetworkSubnets'; Change = { param($t, $m) $t.resources.virtualNetworkSubnets.properties.template.variables.invalidNsgSubnets += 'workload' } },
+        @{ Name = 'subnet explicit NSG priority drift'; Expected = 'resources.virtualNetworkSubnets'; Change = { param($t, $m) $child = @($t.resources.virtualNetworkSubnets.properties.template.resources | Where-Object { $_.Contains('copy') -and $_.copy.name -ceq 'subnetsM' })[0]; $child.properties.parameters.networkSecurityGroupId = @{ value = '' } } },
         @{ Name = 'manifest repo drift'; Expected = 'root.variables'; Change = { param($t, $m) $m.repo = 'https://example.invalid/changed.git'; $t.variables['$fxv#0'].repo = $m.repo } },
         @{ Name = 'manifest components drift'; Expected = 'root.variables'; Change = { param($t, $m) $m.components = @(@{ repo = 'https://example.invalid/component.git'; tag = 'v1.0.0' }); $t.variables['$fxv#0'].components = $m.components } },
         @{ Name = 'extra manifest field'; Expected = 'root.variables'; Change = { param($t, $m) $m.extra = 'drift'; $t.variables['$fxv#0'].extra = 'drift' } },
