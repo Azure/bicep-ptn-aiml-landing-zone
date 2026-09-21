@@ -37,6 +37,8 @@ param(
     [string] $ExistingApplicationInsightsResourceId,
     [string] $ExistingApplicationInsightsConnectionString,
     [hashtable] $AdditionalEnvironmentVariables = @{},
+    [ValidateSet('Full', 'Slim')]
+    [string] $PreviewOutput = 'Slim',
     [switch] $PreviewOnly
 )
 
@@ -152,10 +154,118 @@ function Get-ResourceDescription {
     $label = switch ($resourceType) {
         'Microsoft.CognitiveServices/accounts' { ' [Microsoft Foundry account]' }
         'Microsoft.CognitiveServices/accounts/projects' { ' [Microsoft Foundry project]' }
+        'Microsoft.CognitiveServices/accounts/deployments' { ' [Microsoft Foundry model deployment]' }
         default { '' }
     }
 
     return '{0} : {1}{2}' -f $resourceType, $resourceName, $label
+}
+
+function Get-CompiledResourceDeclarations {
+    param(
+        [Parameter(Mandatory)] $Template,
+        [string] $Path = 'main',
+        [bool] $AncestorConditional = $false
+    )
+
+    $resourcesProperty = $Template.PSObject.Properties['resources']
+    if ($null -eq $resourcesProperty) {
+        return
+    }
+
+    $entries = if ($resourcesProperty.Value -is [pscustomobject]) {
+        @($resourcesProperty.Value.PSObject.Properties | ForEach-Object {
+                [pscustomobject]@{ Key = $_.Name; Resource = $_.Value }
+            })
+    }
+    else {
+        $resourceIndex = 0
+        @($resourcesProperty.Value | ForEach-Object {
+                [pscustomobject]@{ Key = "resource[$resourceIndex]"; Resource = $_ }
+                $resourceIndex++
+            })
+    }
+
+    foreach ($entry in $entries) {
+        $typeProperty = $entry.Resource.PSObject.Properties['type']
+        if ($null -eq $typeProperty) {
+            continue
+        }
+
+        $resourceType = [string]$typeProperty.Value
+        $resourcePath = '{0}/{1}' -f $Path, $entry.Key
+        $conditionProperty = $entry.Resource.PSObject.Properties['condition']
+        $isConditional = $AncestorConditional -or $null -ne $conditionProperty
+
+        if ($resourceType -ieq 'Microsoft.Resources/deployments') {
+            $propertiesProperty = $entry.Resource.PSObject.Properties['properties']
+            $nestedTemplateProperty = if ($null -ne $propertiesProperty) {
+                $propertiesProperty.Value.PSObject.Properties['template']
+            }
+            if ($null -ne $nestedTemplateProperty) {
+                Get-CompiledResourceDeclarations `
+                    -Template $nestedTemplateProperty.Value `
+                    -Path $resourcePath `
+                    -AncestorConditional $isConditional
+            }
+            continue
+        }
+
+        [pscustomobject]@{
+            Conditional = $isConditional
+            Path        = $resourcePath
+            Type        = $resourceType
+        }
+    }
+}
+
+function Get-CompiledResourceDescription {
+    param([Parameter(Mandatory)] $Declaration)
+
+    $label = switch ([string]$Declaration.Type) {
+        'Microsoft.CognitiveServices/accounts' { ' [Microsoft Foundry account]' }
+        'Microsoft.CognitiveServices/accounts/projects' { ' [Microsoft Foundry project]' }
+        'Microsoft.CognitiveServices/accounts/deployments' { ' [Microsoft Foundry model deployment]' }
+        'Microsoft.CognitiveServices/accounts/capabilityHosts' { ' [Microsoft Foundry account capability host]' }
+        'Microsoft.CognitiveServices/accounts/projects/capabilityHosts' { ' [Microsoft Foundry project capability host]' }
+        'Microsoft.CognitiveServices/accounts/connections' { ' [Microsoft Foundry connection]' }
+        'Microsoft.CognitiveServices/accounts/projects/connections' { ' [Microsoft Foundry project connection]' }
+        default { '' }
+    }
+
+    return '{0} : {1}{2}' -f $Declaration.Type, $Declaration.Path, $label
+}
+
+function Get-WhatIfResourceChanges {
+    param([Parameter(Mandatory)] $Node)
+
+    $changes = [System.Collections.Generic.List[object]]::new()
+    $visitNode = {
+        param($CurrentNode)
+
+        if ($null -eq $CurrentNode -or $CurrentNode -is [string]) {
+            return
+        }
+
+        if ($CurrentNode -is [System.Collections.IEnumerable] -and $CurrentNode -isnot [pscustomobject]) {
+            foreach ($item in $CurrentNode) {
+                & $visitNode $item
+            }
+            return
+        }
+
+        $properties = $CurrentNode.PSObject.Properties
+        if ($null -ne $properties['resourceId'] -and $null -ne $properties['changeType']) {
+            $changes.Add($CurrentNode)
+        }
+
+        foreach ($property in $properties) {
+            & $visitNode $property.Value
+        }
+    }
+
+    & $visitNode $Node
+    return $changes
 }
 
 function Invoke-CompletePreview {
@@ -172,6 +282,46 @@ function Invoke-CompletePreview {
     $templatePath = Join-Path $PSScriptRoot 'main.bicep'
     $parameterDocument = Get-Content -Path $parametersPath -Raw | ConvertFrom-Json
     $parameterDocument = Resolve-AzdParameterValue -Value $parameterDocument -EnvironmentValues $environmentValues
+    $temporaryTemplateFile = (New-TemporaryFile).FullName
+    & az bicep build --file $templatePath --outfile $temporaryTemplateFile --only-show-errors
+    if ($LASTEXITCODE -ne 0) {
+        throw "Bicep compilation failed with exit code $LASTEXITCODE."
+    }
+
+    $compiledTemplate = Get-Content -Path $temporaryTemplateFile -Raw | ConvertFrom-Json
+    foreach ($property in @($parameterDocument.parameters.PSObject.Properties)) {
+        $compiledParameter = $compiledTemplate.parameters.PSObject.Properties[$property.Name]
+        if ($null -eq $compiledParameter) {
+            $parameterDocument.parameters.PSObject.Properties.Remove($property.Name)
+            continue
+        }
+
+        $typeProperty = $compiledParameter.Value.PSObject.Properties['type']
+        if ($null -eq $typeProperty) {
+            continue
+        }
+
+        $parameterType = [string]$typeProperty.Value
+        $nullableProperty = $compiledParameter.Value.PSObject.Properties['nullable']
+        $parameterValue = $property.Value.value
+        if ($parameterValue -isnot [string]) {
+            continue
+        }
+
+        $primitiveType = $parameterType.ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($parameterValue) -and $primitiveType -in @('bool', 'int')) {
+            $parameterDocument.parameters.PSObject.Properties.Remove($property.Name)
+        }
+        elseif ($null -ne $nullableProperty -and $nullableProperty.Value -eq $true -and $parameterValue -eq 'null') {
+            $property.Value.value = $null
+        }
+        elseif ($primitiveType -eq 'bool' -and $parameterValue -match '^(true|false)$') {
+            $property.Value.value = [bool]::Parse($parameterValue)
+        }
+        elseif ($primitiveType -eq 'int' -and $parameterValue -match '^-?\d+$') {
+            $property.Value.value = [int64]::Parse($parameterValue, [Globalization.CultureInfo]::InvariantCulture)
+        }
+    }
     $temporaryParametersFile = New-TemporaryFile
 
     try {
@@ -184,7 +334,8 @@ function Invoke-CompletePreview {
             --resource-group $resourceGroupName `
             --template-file $templatePath `
             --parameters "@$temporaryParametersFile" `
-            --result-format ResourceIdOnly `
+            --result-format FullResourcePayloads `
+            --validation-level Template `
             --no-pretty-print `
             --only-show-errors `
             --output json
@@ -193,18 +344,31 @@ function Invoke-CompletePreview {
         }
 
         $whatIfResult = ($whatIfOutput -join "`n") | ConvertFrom-Json
-        $changes = @($whatIfResult.changes | Sort-Object -Property resourceId, changeType)
+        $changes = @(Get-WhatIfResourceChanges -Node $whatIfResult |
+            Sort-Object -Property resourceId, changeType -Unique)
         $createCount = @($changes | Where-Object changeType -eq 'Create').Count
+        $declarations = @(Get-CompiledResourceDeclarations -Template $compiledTemplate |
+            Sort-Object -Property Type, Path)
 
         Write-Host ''
-        Write-Host "Complete ARM What-If resource inventory ($($changes.Count) changes; $createCount creates):"
+        Write-Host "ARM What-If resource changes ($($changes.Count) changes; $createCount creates):"
         foreach ($change in $changes) {
             $description = Get-ResourceDescription -ResourceId ([string]$change.resourceId)
             Write-Host ('  {0,-11} {1}' -f ([string]$change.changeType).ToUpperInvariant(), $description)
         }
+
+        Write-Host ''
+        Write-Host "Complete compiled nested resource inventory ($($declarations.Count) declarations):"
+        Write-Host '  INCLUDED entries are unconditional. CONDITIONAL entries depend on a template or module condition.'
+        foreach ($declaration in $declarations) {
+            $status = if ($declaration.Conditional) { 'CONDITIONAL' } else { 'INCLUDED' }
+            $description = Get-CompiledResourceDescription -Declaration $declaration
+            Write-Host ('  {0,-11} {1}' -f $status, $description)
+        }
     }
     finally {
         Remove-Item -Path $temporaryParametersFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $temporaryTemplateFile -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -260,7 +424,12 @@ try {
         }
     }
 
-    Invoke-CompletePreview -EnvironmentName $EnvironmentName
+    if ($PreviewOutput -eq 'Full') {
+        Invoke-CompletePreview -EnvironmentName $EnvironmentName
+    }
+    else {
+        Invoke-Azd -Arguments @('provision', '--preview')
+    }
     if ($PreviewOnly) {
         return
     }

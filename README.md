@@ -63,6 +63,7 @@ The script has four required parameters. The remaining parameters are optional.
 | `ExistingApplicationInsightsResourceId` | No | Full resource ID of an existing Application Insights component to reuse. It must be supplied together with `ExistingApplicationInsightsConnectionString`. Leave both out to deploy a new component. | `/subscriptions/.../providers/Microsoft.Insights/components/<name>` |
 | `ExistingApplicationInsightsConnectionString` | No | Connection string belonging to the reused Application Insights component. Store it in a PowerShell variable before invoking the script so it is not typed directly into the command. | `$applicationInsightsConnectionString` |
 | `AdditionalEnvironmentVariables` | No | PowerShell hashtable containing additional `azd` environment values supported by `main.parameters.json`, such as subscription, resource group, private DNS zone IDs, or feature flags. Values persist in the selected local `azd` environment. | `@{ AZURE_SUBSCRIPTION_ID = "<id>" }` |
+| `PreviewOutput` | No | Preview detail level. `Full` displays ARM What-If changes plus every nested compiled resource declaration. `Slim` (default) displays the original condensed `azd provision --preview` summary. | `Full` |
 | `PreviewOnly` | No | Switch that stops after `azd provision --preview`. Without it, the script displays the preview and then asks you to type `DEPLOY` before provisioning. | `-PreviewOnly` |
 
 ### Find the required values
@@ -123,13 +124,26 @@ Replace the example values, then run:
 ```
 
 The script signs in when needed, creates or selects the named `azd`
-environment, sets the integrated-topology values, runs the repository's
-preflight hook, and displays the Azure deployment preview. `-PreviewOnly`
-guarantees that this invocation does not provision resources.
+environment, sets the integrated-topology values, and displays two preview
+sections:
 
-Review the preview for deleted or replaced resources, unexpected role
+- `ARM What-If resource changes` is Azure's evaluated change set for resources
+  ARM expands during What-If.
+- `Complete compiled nested resource inventory` recursively lists every
+  resource declaration in the compiled template, including resources such as
+  Microsoft Foundry accounts, projects, model deployments, capability hosts,
+  and connections that ARM may omit when nested deployments exceed What-If's
+  expansion depth. `INCLUDED` entries are unconditional; `CONDITIONAL` entries
+  remain subject to their template or parent-module conditions.
+
+`-PreviewOnly` guarantees that this invocation does not provision resources.
+Pass `-PreviewOutput Slim` when the condensed `azd` resource summary is
+preferred. Omitting `-PreviewOutput` uses `Full`.
+
+Review both sections for deleted or replaced resources, unexpected role
 assignments, public network access, incorrect regions, and changes outside the
-intended resource group.
+intended resource group. Treat ARM What-If as the authoritative evaluated
+change set and the compiled inventory as the exhaustive declaration audit.
 
 ### 2. Provision the deployment
 
