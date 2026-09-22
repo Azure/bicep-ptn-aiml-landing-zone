@@ -388,10 +388,15 @@ az resource show --ids "<resource-id>" --output table
 ### Preflight reports overlapping CIDR ranges
 
 The default spoke range in this checkout is `192.168.0.0/21`. Choose a range
-that does not overlap the hub or any connected network. The
-`vnetAddressPrefixes` parameter is not currently exposed as an `azd` environment
-variable, so add this entry inside the `parameters` object in
-[main.parameters.json](main.parameters.json):
+that does not overlap the hub or any connected network. Changing only
+`vnetAddressPrefixes` is not sufficient: every subnet prefix must remain inside
+the new VNet range, must not overlap another subnet, and must meet the sizing
+requirements of the Azure service that uses it.
+
+The VNet and subnet parameters are not currently exposed as `azd` environment
+variables. Add the complete address plan inside the `parameters` object in
+[main.parameters.json](main.parameters.json). This example preserves the
+default subnet sizes and relative allocations in a `10.200.0.0/21` spoke:
 
 ```json
 "vnetAddressPrefixes": {
@@ -399,10 +404,44 @@ variable, so add this entry inside the `parameters` object in
     "10.200.0.0/21"
   ]
 },
+"agentSubnetPrefix": {
+  "value": "10.200.0.0/24"
+},
+"acaEnvironmentSubnetPrefix": {
+  "value": "10.200.1.0/24"
+},
+"peSubnetPrefix": {
+  "value": "10.200.2.0/26"
+},
+"azureBastionSubnetPrefix": {
+  "value": "10.200.2.64/26"
+},
+"azureFirewallSubnetPrefix": {
+  "value": "10.200.2.128/26"
+},
+"gatewaySubnetPrefix": {
+  "value": "10.200.2.192/26"
+},
+"azureAppGatewaySubnetPrefix": {
+  "value": "10.200.3.0/27"
+},
+"jumpboxSubnetPrefix": {
+  "value": "10.200.3.64/27"
+},
+"devopsBuildAgentsSubnetPrefix": {
+  "value": "10.200.3.96/27"
+},
+"apiManagementSubnetPrefix": {
+  "value": "10.200.3.128/27"
+},
 ```
 
-Keep enough address space for the template's subnets, rerun with `-PreviewOnly`,
-and confirm that preflight accepts the new range before provisioning.
+The API Management subnet uses `/27` as this repository's conservative sizing
+policy; its network address is not fixed and may be moved to any aligned,
+non-overlapping block inside the spoke. Keep enough unused address space for
+future subnets and service growth. Rerun with `-PreviewOnly`, confirm that
+preflight accepts the complete address plan, and review the resulting VNet and
+subnet changes before provisioning.
 
 ### Authorization or role-assignment failure
 
