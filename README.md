@@ -29,6 +29,7 @@ The script configures this topology automatically:
 - `DEPLOY_AZURE_FIREWALL=false`
 - Spoke-to-hub peering using the supplied hub VNet resource ID
 - Spoke egress through the supplied hub firewall or NVA private IP
+- Optional internal Developer-tier API Management in a dedicated spoke subnet
 
 ## Prerequisites
 
@@ -62,6 +63,10 @@ The script has four required parameters. The remaining parameters are optional.
 | `ExistingLogAnalyticsWorkspaceResourceId` | No | Full resource ID of a hub-managed Log Analytics workspace to reuse. Leave it out to deploy a new workspace. | `/subscriptions/.../providers/Microsoft.OperationalInsights/workspaces/<name>` |
 | `ExistingApplicationInsightsResourceId` | No | Full resource ID of an existing Application Insights component to reuse. It must be supplied together with `ExistingApplicationInsightsConnectionString`. Leave both out to deploy a new component. | `/subscriptions/.../providers/Microsoft.Insights/components/<name>` |
 | `ExistingApplicationInsightsConnectionString` | No | Connection string belonging to the reused Application Insights component. Store it in a PowerShell variable before invoking the script so it is not typed directly into the command. | `$applicationInsightsConnectionString` |
+| `DeployApiManagement` | No | Deploy a Developer-tier API Management service with internal VNet injection into the AILZ spoke. Disabled by default. | `-DeployApiManagement` |
+| `ApiManagementPublisherEmail` | Conditional | Publisher contact email. Required when `DeployApiManagement` is enabled. | `api-owners@contoso.com` |
+| `ApiManagementPublisherName` | No | Publisher display name. Defaults to `AI Landing Zone`. | `Contoso API Team` |
+| `ApiManagementIngressSourceAddressPrefixes` | No | Hub firewall private IP CIDRs allowed to reach the internal APIM gateway after DNAT. Defaults to `EgressNextHopIp/32`; pass every firewall instance IP when the hub uses multiple addresses. | `@("10.100.0.4/32")` |
 | `AdditionalEnvironmentVariables` | No | PowerShell hashtable containing additional `azd` environment values supported by `main.parameters.json`, such as subscription, resource group, private DNS zone IDs, or feature flags. Values persist in the selected local `azd` environment. | `@{ AZURE_SUBSCRIPTION_ID = "<id>" }` |
 | `PreviewOutput` | No | Preview detail level. `Full` displays ARM What-If changes plus every nested compiled resource declaration. `Slim` (default) displays the original condensed `azd provision --preview` summary. | `Full` |
 | `PreviewOnly` | No | Switch that stops after `azd provision --preview`. Without it, the script displays the preview and then asks you to type `DEPLOY` before provisioning. | `-PreviewOnly` |
@@ -177,6 +182,53 @@ See the [hub-and-spoke deployment walkthrough](https://azure.github.io/AI-Landin
 for the post-deployment network checks.
 
 ## Optional configuration
+
+### Deploy API Management
+
+Enable API Management and provide its publisher contact email:
+
+```powershell
+./Deploy-AilzIntegrated.ps1 `
+  -EnvironmentName "ailz-dev" `
+  -Location "eastus2" `
+  -HubVnetResourceId $hubVnetResourceId `
+  -EgressNextHopIp $egressNextHopIp `
+  -DeployApiManagement `
+  -ApiManagementPublisherEmail "api-owners@contoso.com" `
+  -PreviewOnly
+```
+
+The deployment uses the Developer SKU and internal VNet mode. It creates the
+dedicated `api-management-subnet` at `192.168.3.128/27`, an NSG for required
+Azure control-plane and load-balancer traffic plus HTTPS from the approved hub
+firewall CIDRs, and a dedicated route table. The default route sends workload
+and APIM dependency egress to the hub firewall. The required `ApiManagement`
+service-tag route sends control-plane responses directly to the Internet to
+keep TCP 3443 symmetric; this is the sole intentional forced-tunneling
+exception. Set `-ApiManagementPublisherName` to override the default publisher
+name.
+
+The platform team must complete these hub-owned changes before the gateway is
+usable:
+
+1. Configure hub firewall DNAT for TCP 443 to the APIM private VIP. Azure
+  Firewall source-NATs DNAT traffic, so the APIM NSG permits the firewall
+  private IP `/32` by default. Pass
+  `-ApiManagementIngressSourceAddressPrefixes` when multiple firewall private
+  IPs can source the traffic.
+2. Permit the documented APIM VNet dependency service tags, ports, and FQDNs
+  in the hub firewall policy. See the [APIM VNet configuration
+  reference](https://learn.microsoft.com/azure/api-management/virtual-network-reference).
+3. Publish A records that resolve the APIM gateway, management, portal,
+  developer portal, and SCM host names to its private VIP in DNS visible from
+  the hub and spoke.
+4. Validate that direct spoke access to TCP 443 is denied and that requests
+  succeed only through the hub firewall listener.
+
+Disabling `DeployApiManagement` does not delete existing resources because ARM
+deployments are incremental. After exporting any APIM data-plane configuration,
+delete the APIM service and its dedicated subnet, NSG, and route table through
+an approved cleanup change.
 
 ### Select the subscription and resource group
 

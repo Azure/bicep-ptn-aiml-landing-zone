@@ -36,6 +36,10 @@ param(
     [string] $ExistingLogAnalyticsWorkspaceResourceId,
     [string] $ExistingApplicationInsightsResourceId,
     [string] $ExistingApplicationInsightsConnectionString,
+    [switch] $DeployApiManagement,
+    [string] $ApiManagementPublisherEmail,
+    [string] $ApiManagementPublisherName = 'AI Landing Zone',
+    [string[]] $ApiManagementIngressSourceAddressPrefixes = @(),
     [hashtable] $AdditionalEnvironmentVariables = @{},
     [ValidateSet('Full', 'Slim')]
     [string] $PreviewOutput = 'Slim',
@@ -155,6 +159,7 @@ function Get-ResourceDescription {
         'Microsoft.CognitiveServices/accounts' { ' [Microsoft Foundry account]' }
         'Microsoft.CognitiveServices/accounts/projects' { ' [Microsoft Foundry project]' }
         'Microsoft.CognitiveServices/accounts/deployments' { ' [Microsoft Foundry model deployment]' }
+        'Microsoft.ApiManagement/service' { ' [Azure API Management]' }
         default { '' }
     }
 
@@ -230,6 +235,7 @@ function Get-CompiledResourceDescription {
         'Microsoft.CognitiveServices/accounts/projects/capabilityHosts' { ' [Microsoft Foundry project capability host]' }
         'Microsoft.CognitiveServices/accounts/connections' { ' [Microsoft Foundry connection]' }
         'Microsoft.CognitiveServices/accounts/projects/connections' { ' [Microsoft Foundry project connection]' }
+        'Microsoft.ApiManagement/service' { ' [Azure API Management]' }
         default { '' }
     }
 
@@ -382,13 +388,25 @@ if ([bool]$ExistingApplicationInsightsResourceId -ne [bool]$ExistingApplicationI
     throw 'ExistingApplicationInsightsResourceId and ExistingApplicationInsightsConnectionString must be supplied together.'
 }
 
+$effectiveApiManagementIngressSourceAddressPrefixes = if ($ApiManagementIngressSourceAddressPrefixes.Count -gt 0) {
+    @($ApiManagementIngressSourceAddressPrefixes)
+}
+else {
+    @("$EgressNextHopIp/32")
+}
+
 $settings = [ordered]@{
     AZURE_LOCATION                           = $Location
     DEPLOYMENT_MODE                         = 'ailz-integrated'
     NETWORK_ISOLATION                       = 'true'
     DEPLOY_AZURE_FIREWALL                   = 'false'
+    DEPLOY_API_MANAGEMENT                   = $DeployApiManagement.ToString().ToLowerInvariant()
+    API_MANAGEMENT_PUBLISHER_EMAIL          = $ApiManagementPublisherEmail
+    API_MANAGEMENT_PUBLISHER_NAME           = $ApiManagementPublisherName
+    API_MANAGEMENT_INGRESS_SOURCE_ADDRESS_PREFIXES = ConvertTo-Json -InputObject $effectiveApiManagementIngressSourceAddressPrefixes -Compress
     HUB_INTEGRATION_HUB_VNET_RESOURCE_ID    = $HubVnetResourceId
     HUB_INTEGRATION_EGRESS_NEXT_HOP_IP      = $EgressNextHopIp
+    HUB_INTEGRATION_EXISTING_ROUTE_TABLE_RESOURCE_ID = ''
     EXISTING_LOG_ANALYTICS_WORKSPACE_RESOURCE_ID = $ExistingLogAnalyticsWorkspaceResourceId
     EXISTING_APPLICATION_INSIGHTS_RESOURCE_ID     = $ExistingApplicationInsightsResourceId
     EXISTING_APPLICATION_INSIGHTS_CONNECTION_STRING = $ExistingApplicationInsightsConnectionString
@@ -396,6 +414,34 @@ $settings = [ordered]@{
 
 foreach ($name in $AdditionalEnvironmentVariables.Keys) {
     $settings[$name] = [string]$AdditionalEnvironmentVariables[$name]
+}
+
+$settings['DEPLOYMENT_MODE'] = 'ailz-integrated'
+$settings['NETWORK_ISOLATION'] = 'true'
+$settings['DEPLOY_AZURE_FIREWALL'] = 'false'
+$settings['USE_EXISTING_VNET'] = 'false'
+$settings['DEPLOY_NSGS'] = 'true'
+
+if ([string]$settings.DEPLOY_API_MANAGEMENT -ieq 'true') {
+    if ([string]::IsNullOrWhiteSpace([string]$settings.API_MANAGEMENT_PUBLISHER_EMAIL) -or
+        [string]$settings.API_MANAGEMENT_PUBLISHER_EMAIL -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+        throw 'ApiManagementPublisherEmail must be a valid email address when DeployApiManagement is enabled.'
+    }
+
+    try {
+        $ingressPrefixes = @([string]$settings.API_MANAGEMENT_INGRESS_SOURCE_ADDRESS_PREFIXES | ConvertFrom-Json)
+    }
+    catch {
+        throw 'API_MANAGEMENT_INGRESS_SOURCE_ADDRESS_PREFIXES must be a JSON array of hub firewall source CIDRs.'
+    }
+
+    if ($ingressPrefixes.Count -eq 0) {
+        throw 'At least one hub firewall source CIDR is required when DeployApiManagement is enabled.'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace([string]$settings.HUB_INTEGRATION_EXISTING_ROUTE_TABLE_RESOURCE_ID)) {
+        throw 'API Management is supported only with the new spoke route table managed by this deployment. Remove HUB_INTEGRATION_EXISTING_ROUTE_TABLE_RESOURCE_ID.'
+    }
 }
 
 Push-Location $PSScriptRoot
@@ -419,7 +465,8 @@ try {
     }
 
     foreach ($setting in $settings.GetEnumerator()) {
-        if (-not [string]::IsNullOrWhiteSpace([string]$setting.Value)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$setting.Value) -or
+            [string]$setting.Key -eq 'HUB_INTEGRATION_EXISTING_ROUTE_TABLE_RESOURCE_ID') {
             Invoke-Azd -Arguments @('env', 'set', [string]$setting.Key, [string]$setting.Value)
         }
     }

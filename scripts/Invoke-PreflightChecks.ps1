@@ -316,6 +316,7 @@ function Test-BooleanParameterValues {
         deployContainerApps        = 'DEPLOY_CONTAINER_APPS'
         deployContainerRegistry    = 'DEPLOY_CONTAINER_REGISTRY'
         deployContainerEnv         = 'DEPLOY_CONTAINER_ENV'
+        deployApiManagement        = 'DEPLOY_API_MANAGEMENT'
         deployNsgs                 = 'DEPLOY_NSGS'
         aiFoundryDisableLocalAuth  = 'AI_FOUNDRY_DISABLE_LOCAL_AUTH'
     }
@@ -365,6 +366,8 @@ function Test-Topology {
     $deployNsgs = Resolve-DeployFlag -P $P -Key 'deployNsgs' -Default $true
     $useContainerAppApiKey = Resolve-DeployFlag -P $P -Key 'useCAppAPIKey' -Default $false
     $runtimeConfigMode = (Get-StringValue $P['appRuntimeConfigurationMode']).Trim()
+
+    $deployApiManagement = Resolve-DeployFlag -P $P -Key 'deployApiManagement' -Default $false
 
     if ($deployContainerApps -and -not $deployContainerEnv) {
         Add-Finding -Severity FAIL -Code 'ACA_APPS_REQUIRE_ENV' `
@@ -450,6 +453,50 @@ function Test-Topology {
     $netIso = ConvertTo-Bool $P['networkIsolation']
     $useExistingVNet = ConvertTo-Bool $P['useExistingVNet']
     $deploySubnets = Resolve-DeployFlag -P $P -Key 'deploySubnets' -Default $true
+
+    if ($deployApiManagement) {
+        $publisherEmail = (Get-StringValue $P['apiManagementPublisherEmail']).Trim()
+        $hubVnetResourceId = (Get-StringValue $P['hubIntegrationHubVnetResourceId']).Trim()
+        $ingressPrefixesJson = (Get-StringValue $P['apiManagementIngressSourceAddressPrefixesJson']).Trim()
+
+        if ($publisherEmail -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+            Add-Finding -Severity FAIL -Code 'APIM_PUBLISHER_EMAIL_INVALID' `
+                -Message 'deployApiManagement=true requires a valid apiManagementPublisherEmail.' `
+                -Hint 'Set API_MANAGEMENT_PUBLISHER_EMAIL to the operational owner of the API Management instance.'
+        }
+
+        if (-not $netIso -or $mode -ne 'ailz-integrated' -or $useExistingVNet -or $deployFw -or -not $deployNsgs -or
+            [string]::IsNullOrWhiteSpace($hubVnetResourceId) -or [string]::IsNullOrWhiteSpace($egressIp) -or
+            -not [string]::IsNullOrWhiteSpace($existingRt)) {
+            Add-Finding -Severity FAIL -Code 'APIM_TOPOLOGY_UNSUPPORTED' `
+                -Message 'API Management requires networkIsolation=true, deploymentMode=ailz-integrated, a new spoke VNet with managed NSGs and route table, a hub VNet resource ID, and a hub firewall next-hop IP.' `
+                -Hint 'Use Deploy-AilzIntegrated.ps1 with a new spoke; existing VNets and platform-owned route tables are not supported for API Management.'
+        }
+
+        try {
+            $ingressPrefixes = $ingressPrefixesJson | ConvertFrom-Json -NoEnumerate
+            if ($null -eq $ingressPrefixes -or $ingressPrefixes -isnot [array] -or $ingressPrefixes.Count -eq 0) {
+                throw 'At least one CIDR is required.'
+            }
+
+            foreach ($entry in $ingressPrefixes) {
+                $cidr = (Get-StringValue $entry).Trim()
+                if ($cidr -notmatch '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$') {
+                    throw "'$cidr' is not an IPv4 CIDR."
+                }
+                Get-CidrRange -Cidr $cidr | Out-Null
+                if ($cidr -eq '0.0.0.0/0') {
+                    throw '0.0.0.0/0 cannot enforce hub-firewall-only ingress.'
+                }
+            }
+        }
+        catch {
+            Add-Finding -Severity FAIL -Code 'APIM_INGRESS_PREFIXES_INVALID' `
+                -Message "apiManagementIngressSourceAddressPrefixesJson must be a non-empty JSON array of restricted IPv4 CIDRs: $_" `
+                -Hint 'For Azure Firewall DNAT, set API_MANAGEMENT_INGRESS_SOURCE_ADDRESS_PREFIXES to the firewall private IPs as /32 CIDRs.'
+        }
+    }
+
     if ($netIso -and $useExistingVNet -and $deploySubnets -and -not $deployNsgs) {
         Add-Finding -Severity FAIL -Code 'BYO_SUBNET_NSG_DETACH' `
             -Message 'A network-isolated deployment cannot update subnets in an existing VNet while deployNsgs=false because existing NSG associations would be removed.' `
@@ -639,6 +686,7 @@ function Test-LocalCidrSanity {
     # Collect declared subnet prefixes
     $subnetKeys = @(
         'agentSubnetPrefix',
+        'apiManagementSubnetPrefix',
         'peSubnetPrefix',
         'acaEnvironmentSubnetPrefix',
         'azureBastionSubnetPrefix',
@@ -691,6 +739,7 @@ function Test-LocalCidrSanity {
     $minPrefix = @{
         'azureBastionSubnetPrefix'      = 26   # Azure Bastion requires /26 or larger
         'azureFirewallSubnetPrefix'     = 26   # Azure Firewall requires /26 or larger
+        'apiManagementSubnetPrefix'     = 27   # API Management requires /27 or larger
         'peSubnetPrefix'                = 28   # AVM PE requirement; we recommend /27
         'jumpboxSubnetPrefix'           = 29   # one NIC needs only a few addresses
         'devopsBuildAgentsSubnetPrefix' = 28   # build agents typically a handful of VMs
@@ -1088,6 +1137,7 @@ function Get-RequiredResourceProviders {
         'Microsoft.Search'               = 'Azure AI Search'
         'Microsoft.DocumentDB'           = 'Cosmos DB workload account + AI Foundry-bundled Cosmos'
         'Microsoft.Bing'                 = 'Bing grounding'
+        'Microsoft.ApiManagement'        = 'Azure API Management'
     }
 
     # Always-required providers used implicitly at deploy time (LA workspace
@@ -1146,6 +1196,7 @@ function Get-RequiredResourceProviders {
     $deployContainerEnv      = Resolve-DeployFlag -P $P -Key 'deployContainerEnv'      -Default $true
     $deployContainerRegistry = Resolve-DeployFlag -P $P -Key 'deployContainerRegistry' -Default $true
     $deployLogAnalytics      = Resolve-DeployFlag -P $P -Key 'deployLogAnalytics'      -Default $true
+    $deployApiManagement     = Resolve-DeployFlag -P $P -Key 'deployApiManagement'     -Default $false
     $deployJump              = Resolve-DeployJumpbox $P
 
     $selectionByNamespace = @{
@@ -1167,6 +1218,7 @@ function Get-RequiredResourceProviders {
         'Microsoft.Search'               = $deploySearch
         'Microsoft.DocumentDB'           = ($deployCosmos -or $deployAiFoundry)
         'Microsoft.Bing'                 = $deployBing
+        'Microsoft.ApiManagement'        = $deployApiManagement
     }
 
     $canonical | Sort-Object | ForEach-Object {

@@ -191,6 +191,7 @@ param azureAppGatewaySubnetName string = 'AppGatewaySubnet'
 param jumpboxSubnetName string = 'jumpbox-subnet'
 param acaEnvironmentSubnetName string = 'aca-environment-subnet'
 param devopsBuildAgentsSubnetName string = 'devops-build-agents-subnet'
+param apiManagementSubnetName string = 'api-management-subnet'
 
 @description('Address prefixes for the virtual network.')
 param vnetAddressPrefixes array = [
@@ -232,6 +233,9 @@ param jumpboxSubnetPrefix string = '192.168.3.64/27' // 192.168.3.64–192.168.3
 @description('DevOps Build Agents subnet — /27 (32 IPs)')
 param devopsBuildAgentsSubnetPrefix string = '192.168.3.96/27' // 192.168.3.96–192.168.3.127
 
+@description('API Management subnet — /27 (32 IPs), dedicated to the VNet-injected service')
+param apiManagementSubnetPrefix string = '192.168.3.128/27' // 192.168.3.128–192.168.3.159
+
 // ----------------------------------------------------------------------
 // Feature-flagging Params (as booleans with a default of true)
 // ----------------------------------------------------------------------
@@ -250,6 +254,18 @@ param deployAiFoundrySubnet bool = true
 
 @description('Deploy Azure App Configuration for centralized feature-flag and configuration management.')
 param deployAppConfig bool = true
+
+@description('Deploy a Developer-tier Azure API Management service with internal VNet injection into a dedicated spoke subnet. Requires network isolation and is disabled by default.')
+param deployApiManagement bool = false
+
+@description('Publisher email for Azure API Management. Required when deployApiManagement is true.')
+param apiManagementPublisherEmail string = ''
+
+@description('Publisher name for Azure API Management.')
+param apiManagementPublisherName string = 'AI Landing Zone'
+
+@description('JSON array of hub firewall private IPs as /32 CIDRs allowed to reach the internal API Management gateway on TCP 443. Required when deployApiManagement is true because Azure Firewall source-NATs DNAT traffic to a firewall instance private IP.')
+param apiManagementIngressSourceAddressPrefixesJson string = '[]'
 
 @description('How the landing zone should provide runtime configuration to the external Container Apps. ``appConfig`` (default) preserves the existing behavior: an Azure App Configuration store is populated with deployment outputs and each Container App receives an ``APP_CONFIG_ENDPOINT`` env var plus the ``App Configuration Data Reader`` RBAC. ``containerEnv`` skips the App Configuration population and instead injects a small set of bootstrap env vars (tenant, subscription, resource group, location, resource token, network/identity flags, plus the names of the deployed resources) directly on every Container App so consumers can resolve endpoints via SDK without going through App Configuration. ``none`` deploys the Container App shells with only the identity bootstrap env vars (``AZURE_TENANT_ID`` and ``AZURE_CLIENT_ID`` when applicable); callers are expected to supply runtime configuration through their own mechanism. Secrets are always sourced from secure parameters or Key Vault references regardless of mode. Set ``deployAppConfig=false`` to skip the store entirely when the mode is ``containerEnv`` or ``none``.')
 @allowed([
@@ -773,6 +789,9 @@ param bingSearchName string = '${const.abbrs.ai.bing}${resourceToken}'
 @description('Name of the Azure App Configuration store for centralized settings.')
 param appConfigName string = '${const.abbrs.configuration.appConfiguration}${resourceToken}'
 
+@description('Optional override for the globally unique Azure API Management service name.')
+param apiManagementName string = '${const.abbrs.integration.apiManagement}${resourceToken}'
+
 @description('Name of the Application Insights instance for monitoring.')
 param appInsightsName string = '${const.abbrs.managementGovernance.applicationInsights}${resourceToken}'
 
@@ -876,6 +895,7 @@ var _legacyResourceNames = {
   aiFoundryCosmosDbName: '${const.abbrs.databases.cosmosDBDatabase}${const.abbrs.ai.aiFoundry}${resourceToken}'
   bingSearchName: '${const.abbrs.ai.bing}${resourceToken}'
   appConfigName: '${const.abbrs.configuration.appConfiguration}${resourceToken}'
+  apiManagementName: '${const.abbrs.integration.apiManagement}${resourceToken}'
   appInsightsName: '${const.abbrs.managementGovernance.applicationInsights}${resourceToken}'
   containerEnvName: '${const.abbrs.containers.containerAppsEnvironment}${resourceToken}'
   containerRegistryName: '${const.abbrs.containers.containerRegistry}${resourceToken}'
@@ -897,6 +917,7 @@ var _cafResourceNames = {
   aiFoundryCosmosDbName: cafTrim('cosmos-aif-${_cafNameStem}', 44)
   bingSearchName: cafTrim('bing-${_cafNameStem}', 64)
   appConfigName: cafTrim('appcs-${_cafNameStem}', 50)
+  apiManagementName: cafTrim('apim-${_cafNameStem}', 50)
   appInsightsName: cafTrim('appi-${_cafNameStem}', 64)
   containerEnvName: cafTrim('cae-${_cafNameStem}', 32)
   containerRegistryName: cafTrim('cr${_cafCompactStem}', 50)
@@ -918,6 +939,7 @@ var resourceNames = {
   aiFoundryCosmosDbName: !empty(aiFoundryCosmosDbName) && !(resourceNamingMode == 'caf' && aiFoundryCosmosDbName == _legacyResourceNames.aiFoundryCosmosDbName) ? aiFoundryCosmosDbName : (resourceNamingMode == 'caf' ? _cafResourceNames.aiFoundryCosmosDbName : _legacyResourceNames.aiFoundryCosmosDbName)
   bingSearchName: !empty(bingSearchName) && !(resourceNamingMode == 'caf' && bingSearchName == _legacyResourceNames.bingSearchName) ? bingSearchName : (resourceNamingMode == 'caf' ? _cafResourceNames.bingSearchName : _legacyResourceNames.bingSearchName)
   appConfigName: !empty(appConfigName) && !(resourceNamingMode == 'caf' && appConfigName == _legacyResourceNames.appConfigName) ? appConfigName : (resourceNamingMode == 'caf' ? _cafResourceNames.appConfigName : _legacyResourceNames.appConfigName)
+  apiManagementName: !empty(apiManagementName) && !(resourceNamingMode == 'caf' && apiManagementName == _legacyResourceNames.apiManagementName) ? apiManagementName : (resourceNamingMode == 'caf' ? _cafResourceNames.apiManagementName : _legacyResourceNames.apiManagementName)
   appInsightsName: !empty(appInsightsName) && !(resourceNamingMode == 'caf' && appInsightsName == _legacyResourceNames.appInsightsName) ? appInsightsName : (resourceNamingMode == 'caf' ? _cafResourceNames.appInsightsName : _legacyResourceNames.appInsightsName)
   containerEnvName: !empty(containerEnvName) && !(resourceNamingMode == 'caf' && containerEnvName == _legacyResourceNames.containerEnvName) ? containerEnvName : (resourceNamingMode == 'caf' ? _cafResourceNames.containerEnvName : _legacyResourceNames.containerEnvName)
   containerRegistryName: !empty(containerRegistryName) && !(resourceNamingMode == 'caf' && containerRegistryName == _legacyResourceNames.containerRegistryName) ? containerRegistryName : (resourceNamingMode == 'caf' ? _cafResourceNames.containerRegistryName : _legacyResourceNames.containerRegistryName)
@@ -1210,6 +1232,9 @@ var _useExistingAiFoundryStorage = !empty(aiFoundryStorageAccountResourceId)
 var _useExistingAiFoundryCosmos = !empty(aiFoundryCosmosDBAccountResourceId)
 var _deployAiFoundrySearch = _deployAiFoundryAgentService && !_useExistingAiFoundrySearch
 var _deployAiFoundryStorage = _deployAiFoundryAgentService && !_useExistingAiFoundryStorage
+var _apiManagementTopologySupported = _networkIsolation && deploymentMode == 'ailz-integrated' && !useExistingVNet && !deployAzureFirewall && _hasHubVnet && _hasExternalEgress && !_hasExistingRouteTable
+var _deployApiManagement = deployApiManagement && _apiManagementTopologySupported
+var _apiManagementIngressSourceAddressPrefixes = json(apiManagementIngressSourceAddressPrefixesJson)
 
 
 // ----------------------------------------------------------------------
@@ -1245,6 +1270,8 @@ var _caEnvSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${
 var _jumpbxSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${jumpboxSubnetName}' : ''
 #disable-next-line BCP318
 var _agentSubnetId = _networkIsolation ? '${virtualNetworkResourceId}/subnets/${agentSubnetName}' : ''
+#disable-next-line BCP318
+var _apiManagementSubnetId = _deployApiManagement ? '${virtualNetworkResourceId}/subnets/${apiManagementSubnetName}' : ''
 
 var _peLocation = !empty(privateEndpointLocation) ? privateEndpointLocation : location
 var _defaultPeResourceGroupName = useExistingVNet && !sideBySideDeploy ? varExistingVnetResourceGroupName : resourceGroup().name
@@ -1343,6 +1370,16 @@ module appGwNsg 'modules/networking/appgw-nsg.bicep' = if (_publicIngressEnabled
   }
 }
 
+module apiManagementNsg 'modules/networking/api-management-nsg.bicep' = if (_deployApiManagement) {
+  name: 'apiManagementNsgDeployment'
+  params: {
+    name: cafTrim('nsg-${resourceNames.vnetName}-${apiManagementSubnetName}', 80)
+    location: location
+    ingressSourceAddressPrefixes: _apiManagementIngressSourceAddressPrefixes
+    tags: _tags
+  }
+}
+
 var _deployAcrTaskAgentPool = deployContainerRegistry && _networkIsolation && deployAcrTaskAgentPool
 
 // Public Ingress (#49) — only effective in network-isolated mode with Container
@@ -1363,6 +1400,20 @@ resource routeTable 'Microsoft.Network/routeTables@2024-07-01' = if (_createRout
     disableBgpRoutePropagation: true
   }
 }
+
+resource apiManagementRouteTable 'Microsoft.Network/routeTables@2024-07-01' = if (_deployApiManagement && _createRouteTable) {
+  name: '${const.abbrs.networking.routeTable}${resourceToken}-apim'
+  location: location
+  tags: _tags
+  properties: {
+    disableBgpRoutePropagation: true
+  }
+}
+
+#disable-next-line BCP318
+var _apiManagementRouteTableId = _hasExistingRouteTable
+  ? hubIntegrationExistingRouteTableResourceId!
+  : (_deployApiManagement && _createRouteTable ? apiManagementRouteTable.id : '')
 
 // Base subnets that are always included
 var baseSubnets = [
@@ -1447,7 +1498,18 @@ var baseSubnets = [
       }
 ]
 
-var subnets = baseSubnets
+var apiManagementSubnets = _deployApiManagement ? [
+  {
+    name: apiManagementSubnetName
+    addressPrefix: apiManagementSubnetPrefix
+    networkSecurityGroupResourceId: apiManagementNsg!.outputs.resourceId
+    routeTableResourceId: _apiManagementRouteTableId
+    delegation: ''
+    serviceEndpoints: []
+  }
+] : []
+
+var subnets = concat(baseSubnets, apiManagementSubnets)
 
 module virtualNetworkSubnets 'modules/networking/subnets.bicep' = if (_networkIsolation && useExistingVNet && deploySubnets && deployNsgs) {
   name: 'virtualNetworkSubnetsDeployment'
@@ -1563,8 +1625,6 @@ resource testVmBastionHost 'Microsoft.Network/bastionHosts@2024-07-01' = if (_de
   dependsOn: [
     #disable-next-line BCP321
     !useExistingVNet ? virtualNetwork : null
-    #disable-next-line BCP321
-    useExistingVNet ? virtualNetworkSubnets : null
   ]
 }
 
@@ -1612,6 +1672,25 @@ resource defaultRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = if (_c
     addressPrefix: '0.0.0.0/0'
     nextHopType: 'VirtualAppliance'
     nextHopIpAddress: _defaultRouteNextHopIp
+  }
+}
+
+resource apiManagementDefaultRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = if (_deployApiManagement && _createDefaultRoute) {
+  parent: apiManagementRouteTable
+  name: 'default-to-egress'
+  properties: {
+    addressPrefix: '0.0.0.0/0'
+    nextHopType: 'VirtualAppliance'
+    nextHopIpAddress: hubIntegrationEgressNextHopIp!
+  }
+}
+
+resource apiManagementControlPlaneRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = if (_deployApiManagement && _createRouteTable) {
+  parent: apiManagementRouteTable
+  name: 'api-management-control-plane'
+  properties: {
+    addressPrefix: 'ApiManagement'
+    nextHopType: 'Internet'
   }
 }
 
@@ -2187,6 +2266,25 @@ module privateEndpoints 'modules/networking/private-endpoints.bicep' = if (_netw
     containerEnv!
     containerRegistry!
     speechService!
+  ]
+}
+
+module apiManagement 'modules/api-management/main.bicep' = if (_deployApiManagement) {
+  name: 'apiManagementDeployment'
+  params: {
+    name: resourceNames.apiManagementName
+    location: location
+    publisherEmail: apiManagementPublisherEmail
+    publisherName: apiManagementPublisherName
+    subnetResourceId: _apiManagementSubnetId
+    logAnalyticsWorkspaceResourceId: _lawResourceId
+    tags: _tags
+  }
+  dependsOn: [
+    #disable-next-line BCP321
+    !useExistingVNet ? virtualNetwork : null
+    apiManagementDefaultRoute
+    apiManagementControlPlaneRoute
   ]
 }
 
