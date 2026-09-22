@@ -264,8 +264,8 @@ param apiManagementPublisherEmail string = ''
 @description('Publisher name for Azure API Management.')
 param apiManagementPublisherName string = 'AI Landing Zone'
 
-@description('JSON array of hub firewall private IPs as /32 CIDRs allowed to reach the internal API Management gateway on TCP 443. Required when deployApiManagement is true because Azure Firewall source-NATs DNAT traffic to a firewall instance private IP.')
-param apiManagementIngressSourceAddressPrefixesJson string = '[]'
+@description('Hub firewall private IPs as /32 CIDRs allowed to reach the internal API Management gateway on TCP 443. Required when deployApiManagement is true because Azure Firewall source-NATs DNAT traffic to a firewall instance private IP.')
+param apiManagementIngressSourceAddressPrefixes array = []
 
 @description('How the landing zone should provide runtime configuration to the external Container Apps. ``appConfig`` (default) preserves the existing behavior: an Azure App Configuration store is populated with deployment outputs and each Container App receives an ``APP_CONFIG_ENDPOINT`` env var plus the ``App Configuration Data Reader`` RBAC. ``containerEnv`` skips the App Configuration population and instead injects a small set of bootstrap env vars (tenant, subscription, resource group, location, resource token, network/identity flags, plus the names of the deployed resources) directly on every Container App so consumers can resolve endpoints via SDK without going through App Configuration. ``none`` deploys the Container App shells with only the identity bootstrap env vars (``AZURE_TENANT_ID`` and ``AZURE_CLIENT_ID`` when applicable); callers are expected to supply runtime configuration through their own mechanism. Secrets are always sourced from secure parameters or Key Vault references regardless of mode. Set ``deployAppConfig=false`` to skip the store entirely when the mode is ``containerEnv`` or ``none``.')
 @allowed([
@@ -1234,7 +1234,7 @@ var _deployAiFoundrySearch = _deployAiFoundryAgentService && !_useExistingAiFoun
 var _deployAiFoundryStorage = _deployAiFoundryAgentService && !_useExistingAiFoundryStorage
 var _apiManagementTopologySupported = _networkIsolation && deploymentMode == 'ailz-integrated' && !useExistingVNet && !deployAzureFirewall && _hasHubVnet && _hasExternalEgress && !_hasExistingRouteTable
 var _deployApiManagement = deployApiManagement && _apiManagementTopologySupported
-var _apiManagementIngressSourceAddressPrefixes = json(apiManagementIngressSourceAddressPrefixesJson)
+var _apiManagementIngressSourceAddressPrefixes = apiManagementIngressSourceAddressPrefixes
 
 
 // ----------------------------------------------------------------------

@@ -50,7 +50,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Invoke-Azd {
-    param([Parameter(Mandatory)][string[]] $Arguments)
+    param([Parameter(Mandatory)][AllowEmptyString()][string[]] $Arguments)
 
     & azd @Arguments
     if ($LASTEXITCODE -ne 0) {
@@ -327,6 +327,9 @@ function Invoke-CompletePreview {
         elseif ($primitiveType -eq 'int' -and $parameterValue -match '^-?\d+$') {
             $property.Value.value = [int64]::Parse($parameterValue, [Globalization.CultureInfo]::InvariantCulture)
         }
+        elseif ($primitiveType -eq 'array' -and $parameterValue.TrimStart().StartsWith('[')) {
+            $property.Value.value = @($parameterValue | ConvertFrom-Json)
+        }
     }
     $temporaryParametersFile = New-TemporaryFile
 
@@ -388,12 +391,14 @@ if ([bool]$ExistingApplicationInsightsResourceId -ne [bool]$ExistingApplicationI
     throw 'ExistingApplicationInsightsResourceId and ExistingApplicationInsightsConnectionString must be supplied together.'
 }
 
-$effectiveApiManagementIngressSourceAddressPrefixes = if ($ApiManagementIngressSourceAddressPrefixes.Count -gt 0) {
-    @($ApiManagementIngressSourceAddressPrefixes)
-}
-else {
-    @("$EgressNextHopIp/32")
-}
+$effectiveApiManagementIngressSourceAddressPrefixes = @(
+    if ($ApiManagementIngressSourceAddressPrefixes.Count -gt 0) {
+        $ApiManagementIngressSourceAddressPrefixes
+    }
+    else {
+        "$EgressNextHopIp/32"
+    }
+)
 
 $settings = [ordered]@{
     AZURE_LOCATION                           = $Location

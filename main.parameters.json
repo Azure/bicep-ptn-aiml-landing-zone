@@ -59,7 +59,7 @@
     "deployApiManagement":                  { "value": "${DEPLOY_API_MANAGEMENT=false}" },
     "apiManagementPublisherEmail":          { "value": "${API_MANAGEMENT_PUBLISHER_EMAIL=}" },
     "apiManagementPublisherName":           { "value": "${API_MANAGEMENT_PUBLISHER_NAME=AI Landing Zone}" },
-    "apiManagementIngressSourceAddressPrefixesJson": { "value": "${API_MANAGEMENT_INGRESS_SOURCE_ADDRESS_PREFIXES=[]}" },
+    "apiManagementIngressSourceAddressPrefixes":     { "value": "${API_MANAGEMENT_INGRESS_SOURCE_ADDRESS_PREFIXES=[]}" },
     "appRuntimeConfigurationMode":          { "value": "${APP_RUNTIME_CONFIGURATION_MODE=appConfig}" },
     "deployAppInsights":                    { "value": "true" },
     "deployCosmosDb":                       { "value": "${DEPLOY_COSMOS_DB=true}" },

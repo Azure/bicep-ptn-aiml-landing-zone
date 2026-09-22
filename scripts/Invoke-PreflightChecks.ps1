@@ -169,8 +169,17 @@ function Get-AzdEnvValues {
         if ($LASTEXITCODE -ne 0) { return @{} }
         $h = @{}
         foreach ($line in $raw) {
-            if ($line -match '^\s*([A-Z0-9_]+)\s*=\s*"?(.*?)"?\s*$') {
-                $h[$matches[1]] = $matches[2]
+            if ($line -notmatch '^\s*([A-Z0-9_]+)\s*=\s*(.*)$') {
+                continue
+            }
+
+            $name = $matches[1]
+            $serializedValue = $matches[2].Trim()
+            if ($serializedValue.StartsWith('"') -and $serializedValue.EndsWith('"')) {
+                $h[$name] = [string]($serializedValue | ConvertFrom-Json)
+            }
+            else {
+                $h[$name] = $serializedValue
             }
         }
         return $h
@@ -457,7 +466,7 @@ function Test-Topology {
     if ($deployApiManagement) {
         $publisherEmail = (Get-StringValue $P['apiManagementPublisherEmail']).Trim()
         $hubVnetResourceId = (Get-StringValue $P['hubIntegrationHubVnetResourceId']).Trim()
-        $ingressPrefixesJson = (Get-StringValue $P['apiManagementIngressSourceAddressPrefixesJson']).Trim()
+        $ingressPrefixes = Get-ArrayValue $P['apiManagementIngressSourceAddressPrefixes']
 
         if ($publisherEmail -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
             Add-Finding -Severity FAIL -Code 'APIM_PUBLISHER_EMAIL_INVALID' `
@@ -474,8 +483,7 @@ function Test-Topology {
         }
 
         try {
-            $ingressPrefixes = $ingressPrefixesJson | ConvertFrom-Json -NoEnumerate
-            if ($null -eq $ingressPrefixes -or $ingressPrefixes -isnot [array] -or $ingressPrefixes.Count -eq 0) {
+            if ($ingressPrefixes.Count -eq 0) {
                 throw 'At least one CIDR is required.'
             }
 
@@ -492,7 +500,7 @@ function Test-Topology {
         }
         catch {
             Add-Finding -Severity FAIL -Code 'APIM_INGRESS_PREFIXES_INVALID' `
-                -Message "apiManagementIngressSourceAddressPrefixesJson must be a non-empty JSON array of restricted IPv4 CIDRs: $_" `
+                -Message "apiManagementIngressSourceAddressPrefixes must be a non-empty array of restricted IPv4 CIDRs: $_" `
                 -Hint 'For Azure Firewall DNAT, set API_MANAGEMENT_INGRESS_SOURCE_ADDRESS_PREFIXES to the firewall private IPs as /32 CIDRs.'
         }
     }
