@@ -5,6 +5,11 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.7.3] - 2026-09-26
+
+### Fixed
+- Cosmos DB account updates failing with `Continuous backup mode cannot be disabled for an existing database account`. The AVM database-account module omitted locations, consistency, network rules and failover settings when no database was passed in the same call, which the v2.7.x split into `modules/cosmos-db/sql-database.bicep` triggered. The account is now declared in `modules/cosmos-db/database-account.bicep` with the full property set.
+
 ## [v2.7.2] - 2026-09-25
 
 ### Fixed

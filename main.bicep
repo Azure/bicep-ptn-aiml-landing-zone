@@ -2925,41 +2925,24 @@ resource cosmosUAI 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31'
   location: location
 }
 
-module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' = if (deployCosmosDb) {
+// Declared locally so every deployment sends the full account property set.
+// See modules/cosmos-db/database-account.bicep for details.
+module cosmosDBAccount 'modules/cosmos-db/database-account.bicep' = if (deployCosmosDb) {
   name: 'CosmosDBAccount'
   params: {
     name: resourceNames.dbAccountName
     location: cosmosLocation
-    managedIdentities: {
-      systemAssigned: _useUAI ? false : true
-      #disable-next-line BCP318
-      userAssignedResourceIds: _useUAI ? [cosmosUAI.id] : []
-    }
-    failoverLocations: [
-      {
-        locationName: cosmosLocation
-        failoverPriority: 0
-        isZoneRedundant: useZoneRedundancy
-      }
-    ]
+    systemAssignedIdentity: !_useUAI
+    #disable-next-line BCP318
+    userAssignedResourceIds: _useUAI ? [cosmosUAI.id] : []
+    isZoneRedundant: useZoneRedundancy
     defaultConsistencyLevel: 'Session'
-    capabilitiesToAdd: ['EnableServerless']
+    capabilities: ['EnableServerless']
     enableAnalyticalStorage: enableCosmosAnalyticalStorage
     enableFreeTier: false
-    networkRestrictions: {
-      publicNetworkAccess: _publicNetworkAccess
-      ipRules: _cosmosIpRules
-      virtualNetworkRules: _networkIsolation ? [
-        {
-          subnetResourceId: _peSubnetId
-          ignoreMissingVnetServiceEndpoint: true
-        }
-        {
-          subnetResourceId: _caEnvSubnetId
-          ignoreMissingVnetServiceEndpoint: true
-        }
-      ] : []
-    }
+    publicNetworkAccess: _publicNetworkAccess
+    ipRules: _cosmosIpRules
+    virtualNetworkSubnetIds: _networkIsolation ? [_peSubnetId, _caEnvSubnetId] : []
     tags: _tags
   }
   dependsOn: [
@@ -2970,7 +2953,7 @@ module cosmosDBAccount 'br/public:avm/res/document-db/database-account:0.15.1' =
 
 // The Cosmos DB AVM composes its SQL database deployment name from the full
 // database resource name. CAF environment names can therefore push that nested
-// deployment beyond ARM's 64-character limit. Keep the account in AVM, but
+// deployment beyond ARM's 64-character limit. The account is declared locally and
 // deploy its database and containers through a fixed-name local module so
 // resource names remain unchanged and deployment-name length is constant.
 module cosmosSqlDatabase 'modules/cosmos-db/sql-database.bicep' = if (deployCosmosDb) {
