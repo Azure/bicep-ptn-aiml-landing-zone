@@ -5,6 +5,12 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.7.2] - 2026-09-25
+
+### Fixed
+
+- **Container Apps keep their image on re-provision (Azure/GPT-RAG#708).** `containerAppsList[].image` is now honored (with the ACR registry pull identity); the placeholder image is used only when it is empty.
+
 ## [v2.7.1] - 2026-09-20
 
 ### Fixed
