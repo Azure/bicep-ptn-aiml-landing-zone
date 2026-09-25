@@ -5,6 +5,10 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+## [v2.5.1.1] - 2026-09-24
+### Fixed
+- Container Apps keep the image passed in `containerAppsList[].image` (and its ACR registry binding) instead of resetting to the placeholder image on re-provision (Azure/GPT-RAG#708). Hotfix on top of v2.5.1 for GPT-RAG v3.8.x.
+
 ## [v2.5.1] - 2026-08-11
 
 ### Fixed
