@@ -952,7 +952,7 @@ param modelDeploymentList array
 // Container Apps params
 // ----------------------------------------------------------------------
 
-@description('List of container apps to create. Dapr is opt-in per app through `dapr.enabled=true`; apps without a `dapr` object deploy with Dapr disabled.')
+@description('List of container apps to create. Dapr is opt-in per app through `dapr.enabled=true`; apps without a `dapr` object deploy with Dapr disabled. Optional `image` keeps an already deployed image on reprovision; when empty the placeholder image is used.')
 param containerAppsList array
 
 @description('Workload profiles.')
@@ -2851,6 +2851,15 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
         userAssignedResourceIds: (_useUAI) ? [containerAppsUAI[index].id] : []
       }
 
+      // A preserved ACR image needs its registry pull identity, otherwise the PUT drops it.
+      registries: endsWith(split(app.?image ?? '', '/')[0], '.azurecr.io') ? [
+        {
+          server: split(app.image, '/')[0]
+          #disable-next-line BCP318
+          identity: _useUAI ? containerAppsUAI[index].id : 'system'
+        }
+      ] : []
+
       scaleSettings: {
         minReplicas: app.min_replicas
         maxReplicas: app.max_replicas
@@ -2859,7 +2868,8 @@ module containerApps 'br/public:avm/res/app/container-app:0.18.1' = [
       containers: [
         {
           name: app.service_name
-          image: _containerDummyImageName
+          // Reprovisioning keeps the deployed image when the caller passes it as `app.image`.
+          image: !empty(app.?image ?? '') ? app.image : _containerDummyImageName
           resources: {
             cpu: app.?cpu ?? '0.5'
             memory: app.?memory ?? '1.0Gi'
