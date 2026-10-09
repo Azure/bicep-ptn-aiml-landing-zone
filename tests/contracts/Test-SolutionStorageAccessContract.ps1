@@ -212,9 +212,21 @@ virtualNetworkSubnets df346eb5b939add3fea49a9177b2a0a116b0e931a62e5d3ca7354a1f62
     Assert-Equal 'resources.virtualNetworkSubnets: only the exact #168 reserved Bastion NSG exclusion is permitted.' `
         $subnets.properties.template.variables.invalidNsgSubnets $acceptedNsgExclusions
     $subnets.properties.template.variables.invalidNsgSubnets = $originalNsgExclusions
+    $aiFoundry = $Template.resources.aiFoundry | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable -Depth 100
+    $foundryPrivateNetworking = $aiFoundry.properties.template.resources[0].properties.template.resources.foundryAccount.properties.template.variables.privateNetworkingEnabled
+    $expectedFoundryPrivateNetworking = "[not(empty(parameters('privateEndpointSubnetResourceId')))]"
+    Assert-Equal 'resources.aiFoundry: policy-managed DNS isolation must derive private networking from the private endpoint subnet.' `
+        $foundryPrivateNetworking $expectedFoundryPrivateNetworking
+    $aiFoundry.properties.template.resources[0].properties.template.resources.foundryAccount.properties.template.variables.privateNetworkingEnabled = `
+        "[and(not(empty(variables('privateDnsZoneResourceIdValues'))), not(empty(parameters('privateEndpointSubnetResourceId'))))]"
+    $aiFoundry.properties.template.resources[0].properties.template.resources.foundryAccount.properties.template.parameters.privateEndpointSubnetResourceId.metadata.description = `
+        "Optional. Resource Id of an existing subnet to use for private connectivity. This is required along with 'privateDnsZoneResourceIds' to establish private endpoints."
+    $aiFoundry.properties.template.resources[0].properties.template.resources.foundryAccount.properties.template.outputs.privateNetworkingEnabled.metadata.description = `
+        'Whether private networking is enabled (PE must be created externally and gated on a cog-svc child resource).'
     $changed = [System.Collections.Generic.List[string]]::new()
     foreach ($name in $resourceHashes.Keys) {
         $resource = if ($name -ceq 'storageAccount') { $OriginalSolution }
+        elseif ($name -ceq 'aiFoundry') { $aiFoundry }
         elseif ($name -ceq 'acrTaskAgentPool') { $acr }
         elseif ($name -ceq 'virtualNetworkSubnets') { $subnets }
         else { $Template.resources[$name] }

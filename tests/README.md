@@ -30,6 +30,7 @@ tests/
 │   ├── Test-AcrTaskAgentPoolSubnetContract.ps1
 │   ├── Test-SolutionStorageAccessContract.ps1
 │   ├── Test-FoundrySharedPrivateLinkNameContract.ps1
+│   ├── Test-FoundryPolicyManagedDnsIsolationContract.ps1
 │   ├── Test-MaintenanceConfigurationWrapperContract.ps1
 │   ├── Test-ComponentDeploymentFlagsContract.ps1
 │   ├── Test-CosmosDeploymentNameContract.ps1
@@ -59,6 +60,7 @@ pwsh tests/contracts/Test-SolutionStorageAccessContract.ps1
 pwsh tests/contracts/Test-ReleaseMetadataContract.ps1
 pwsh tests/parity/Test-BaselineContract.Tests.ps1
 pwsh tests/contracts/Test-FoundrySharedPrivateLinkNameContract.ps1
+pwsh tests/contracts/Test-FoundryPolicyManagedDnsIsolationContract.ps1
 pwsh tests/contracts/Test-MaintenanceConfigurationWrapperContract.ps1
 pwsh tests/contracts/Test-ComponentDeploymentFlagsContract.ps1
 pwsh tests/contracts/Test-CosmosDeploymentNameContract.ps1
@@ -83,8 +85,11 @@ gated, ordered, and scoped to the devops build agents subnet — independent of
 the opaque hash check above. The Foundry shared private-link naming contract
 proves valid legacy child IDs remain unchanged, both long suffix variants stay
 within 60 characters, output is deterministic, and distinct tested long inputs
-do not collide. The Maintenance Configuration wrapper contract compiles default
-and InGuestPatch calls and proves every typed property is forwarded to AVM
+do not collide. The Foundry policy-managed DNS isolation contract proves a
+private endpoint subnet disables Foundry public access and preserves agent
+subnet injection even when central policy owns Private DNS. The Maintenance
+Configuration wrapper contract compiles default and InGuestPatch calls and
+proves every typed property is forwarded to AVM
 0.3.1, with schedules and reboot settings retaining their required nesting and
 omitted values retaining AVM defaults. The deterministic preflight tests cover
 disabled, prepare-only, valid immutable deployment, mutable/missing image

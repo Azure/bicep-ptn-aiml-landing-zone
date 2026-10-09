@@ -521,6 +521,12 @@ Use `DEPLOY_AAF_AGENT_SVC=false` when an external app only needs hosted model in
 
 `aiFoundryDisableLocalAuth` / `AI_FOUNDRY_DISABLE_LOCAL_AUTH` controls whether the AI Foundry account accepts API-key authentication. It defaults to `true` (local auth disabled, Azure AD-only), matching the account's prior inert default. Set `AI_FOUNDRY_DISABLE_LOCAL_AUTH=false` only if API-key auth is explicitly required.
 
+For network-isolated deployments, the private endpoint subnet controls Foundry
+public network access. `policyManagedPrivateDns=true` changes DNS ownership
+only: the Foundry account remains private, the private endpoint is created
+without a local DNS zone group, and the platform policy or central networking
+team must supply the required records and VNet links.
+
 ### Hosted-agent preparation and deployment
 
 Hosted-agent infrastructure uses two additive, accelerator-neutral phases:
