@@ -217,8 +217,15 @@ virtualNetworkSubnets df346eb5b939add3fea49a9177b2a0a116b0e931a62e5d3ca7354a1f62
     $expectedFoundryPrivateNetworking = "[not(empty(parameters('privateEndpointSubnetResourceId')))]"
     Assert-Equal 'resources.aiFoundry: policy-managed DNS isolation must derive private networking from the private endpoint subnet.' `
         $foundryPrivateNetworking $expectedFoundryPrivateNetworking
+    $foundryModuleResources = $aiFoundry.properties.template.resources[0].properties.template.resources
+    $foundryNoDnsPrivateEndpointCondition = $foundryModuleResources.foundryAccountPrivateEndpointWithoutDns.condition
+    $expectedFoundryNoDnsPrivateEndpointCondition = "[and(not(empty(parameters('privateEndpointSubnetResourceId'))), not(variables('hasAllFoundryPrivateDnsZoneIds')))]"
+    Assert-Equal 'resources.aiFoundry: the no-DNS private endpoint must support subnet-only callers.' `
+        $foundryNoDnsPrivateEndpointCondition $expectedFoundryNoDnsPrivateEndpointCondition
     $aiFoundry.properties.template.resources[0].properties.template.resources.foundryAccount.properties.template.variables.privateNetworkingEnabled = `
         "[and(not(empty(variables('privateDnsZoneResourceIdValues'))), not(empty(parameters('privateEndpointSubnetResourceId'))))]"
+    $foundryModuleResources.foundryAccountPrivateEndpointWithoutDns.condition = `
+        "[and(and(not(empty(parameters('privateEndpointSubnetResourceId'))), not(empty(tryGet(parameters('aiFoundryConfiguration'), 'networking')))), not(variables('hasAllFoundryPrivateDnsZoneIds')))]"
     $aiFoundry.properties.template.resources[0].properties.template.resources.foundryAccount.properties.template.parameters.privateEndpointSubnetResourceId.metadata.description = `
         "Optional. Resource Id of an existing subnet to use for private connectivity. This is required along with 'privateDnsZoneResourceIds' to establish private endpoints."
     $aiFoundry.properties.template.resources[0].properties.template.resources.foundryAccount.properties.template.outputs.privateNetworkingEnabled.metadata.description = `

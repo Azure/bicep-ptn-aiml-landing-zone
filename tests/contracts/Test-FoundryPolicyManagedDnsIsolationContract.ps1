@@ -69,10 +69,18 @@ Assert-Contract `
     'Agent subnet injection remains enabled for the private endpoint topology.'
 
 $parentModule = Join-Path (Split-Path -Parent $AccountModule) '..\main.bicep'
-$parentSource = Get-Content -LiteralPath $parentModule -Raw
+$parentCompiledJson = & az bicep build --file $parentModule --stdout 2>$null
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to compile '$parentModule'."
+}
+
+$parentTemplate = ($parentCompiledJson -join [Environment]::NewLine) | ConvertFrom-Json -Depth 100
+$noDnsEndpointCondition = [string]$parentTemplate.resources.foundryAccountPrivateEndpointWithoutDns.condition
+$expectedNoDnsEndpointCondition = "[and(not(empty(parameters('privateEndpointSubnetResourceId'))), not(variables('hasAllFoundryPrivateDnsZoneIds')))]"
+
 Assert-Contract `
-    ($parentSource -match 'foundryAccountPrivateEndpointWithoutDns' -and $parentSource -match '!hasAllFoundryPrivateDnsZoneIds') `
-    'The parent module retains the private-endpoint path without a local DNS zone group.'
+    ($noDnsEndpointCondition -ceq $expectedNoDnsEndpointCondition) `
+    'The no-DNS private endpoint requires only a subnet and missing DNS zone IDs, including when networking configuration is omitted.'
 
 if ($failures.Count -gt 0) {
     Write-Host ''
