@@ -71,7 +71,7 @@ param sku string = 'S0'
 @description('Required. Whether to allow project management in AI Foundry. This is required to enable the AI Foundry UI and project management features.')
 param allowProjectManagement bool
 
-@description('Optional. Resource Id of an existing subnet to use for private connectivity. This is required along with \'privateDnsZoneResourceIds\' to establish private endpoints.')
+@description('Optional. Resource ID of an existing subnet to use for private connectivity. When supplied, the parent module creates the private endpoint and disables public network access. Private DNS zone IDs are optional when DNS is managed by policy or a central platform team.')
 param privateEndpointSubnetResourceId string?
 
 @description('Optional. Resource Id of an existing subnet to use for agent connectivity. This is required when using agents with private endpoints.')
@@ -106,7 +106,7 @@ var privateDnsZoneResourceIdValues = [
     privateDnsZoneResourceId: id
   }
 ]
-var privateNetworkingEnabled = !empty(privateDnsZoneResourceIdValues) && !empty(privateEndpointSubnetResourceId)
+var privateNetworkingEnabled = !empty(privateEndpointSubnetResourceId)
 
 // -----------------------------------------------------------------------------
 // Cognitive Services account (no inline PE — see header for #29 fix)
@@ -166,7 +166,7 @@ output location string = location
 @description('System assigned managed identity principal ID of the AI Foundry resource.')
 output systemAssignedMIPrincipalId string = foundryAccount!.outputs.systemAssignedMIPrincipalId!
 
-@description('Whether private networking is enabled (PE must be created externally and gated on a cog-svc child resource).')
+@description('Whether private networking is enabled. This is driven by the private endpoint subnet and is independent of which deployment owns Private DNS.')
 output privateNetworkingEnabled bool = privateNetworkingEnabled
 
 @description('Private DNS zone configs for the externally-created PE.')

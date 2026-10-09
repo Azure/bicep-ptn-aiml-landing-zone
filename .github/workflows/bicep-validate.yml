@@ -122,6 +122,10 @@ jobs:
         shell: pwsh
         run: pwsh ./tests/contracts/Test-SolutionStorageAccessContract.ps1
 
+      - name: Validate Foundry policy-managed DNS isolation
+        shell: pwsh
+        run: pwsh ./tests/contracts/Test-FoundryPolicyManagedDnsIsolationContract.ps1
+
       - name: Validate firewall Agent365 observability contract
         shell: pwsh
         run: pwsh ./tests/contracts/Test-FirewallAgent365ObservabilityContract.ps1

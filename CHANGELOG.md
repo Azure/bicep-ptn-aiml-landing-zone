@@ -5,6 +5,16 @@ This format follows [Keep a Changelog](https://keepachangelog.com/) and adheres 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Policy-managed Private DNS no longer leaves Microsoft Foundry public.**
+  Network-isolated deployments now derive Foundry private networking from the
+  private endpoint subnet rather than requiring locally managed Private DNS
+  zone IDs. The account keeps public network access disabled and retains agent
+  subnet injection while the parent module creates the endpoint without a
+  local DNS zone group. No parameter, output, naming, or DNS ownership contract
+  changes.
+
 ## [v2.7.1] - 2026-09-20
 
 ### Fixed
