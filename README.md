@@ -1,3 +1,7 @@
+> [!WARNING]
+> **This repository is transitioning to [Azure/agent-landing-zone](https://github.com/Azure/agent-landing-zone).**
+> New agent-focused development is moving to the new repository. This repository remains available as a Bicep reference during the transition. Please see the new repository for the latest solution and future migration guidance.
+
 # Azure AI Landing Zone
 
 ## Overview
